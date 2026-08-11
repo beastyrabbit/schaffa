@@ -3,7 +3,7 @@
 Set these client variables without placing the token on the command line:
 
 ```sh
-export MUMPITZ_API_URL="https://mumpitz-api.heerlab.com"
+export MUMPITZ_URL="https://mumpitz.heerlab.com"
 export MUMPITZ_TOKEN="mpt_…"
 ```
 
@@ -17,7 +17,7 @@ Create a page with a random, non-semantic slug:
 curl --fail-with-body --silent --show-error \
   -H "Authorization: Bearer $MUMPITZ_TOKEN" \
   -F "html=@plan.html;type=text/html" \
-  "$MUMPITZ_API_URL/api/pages"
+  "$MUMPITZ_URL/api/pages"
 ```
 
 Update an existing page by reusing its slug:
@@ -27,7 +27,7 @@ curl --fail-with-body --silent --show-error \
   -X PUT \
   -H "Authorization: Bearer $MUMPITZ_TOKEN" \
   -F "html=@plan.html;type=text/html" \
-  "$MUMPITZ_API_URL/api/pages/$SLUG"
+  "$MUMPITZ_URL/api/pages/$SLUG"
 ```
 
 Each update creates the next immutable version:
@@ -49,7 +49,7 @@ Upload one file in the multipart field `file`:
 curl --fail-with-body --silent --show-error \
   -H "Authorization: Bearer $MUMPITZ_TOKEN" \
   -F "file=@diagram.png" \
-  "$MUMPITZ_API_URL/api/files"
+  "$MUMPITZ_URL/api/files"
 ```
 
 The response contains an immutable URL shaped like `/f/<22-character-id>.<extension>`. The original filename is not stored. IDs contain 128 random bits and are difficult to guess, but the URL is not access control.
@@ -67,7 +67,7 @@ curl --fail-with-body --silent --show-error \
   -H "Authorization: Bearer $MUMPITZ_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name":"desktop-codex","scopes":["upload"]}' \
-  "$MUMPITZ_API_URL/api/tokens"
+  "$MUMPITZ_URL/api/tokens"
 ```
 
 The plaintext token is returned only once. Store it immediately in the approved credential store.

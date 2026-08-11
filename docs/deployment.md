@@ -1,6 +1,6 @@
 # Deployment
 
-Mumpitz runs as one container with one persistent `/data` volume. Pangolin exposes three origins to keep the private admin surface separate from public publishing and delivery.
+Mumpitz runs as one container with one persistent `/data` volume. Pangolin exposes the complete application through the single origin `https://mumpitz.heerlab.com`.
 
 ## Container image
 
@@ -12,34 +12,36 @@ docker pull git.heerlab.com/beasty/mumpitz:latest
 
 Use the immutable `sha-<commit>` tag when a deployment must remain pinned. `latest` tracks the current `main` branch.
 
-## Recommended Pangolin resources
+## Recommended Pangolin resource
 
-Point every resource at the same private backend, for example `http://127.0.0.1:3000`.
+Create one public Pangolin resource for `mumpitz.heerlab.com` and point it at the Mumpitz container on port `3000`.
 
-| Public origin | Application setting | Pangolin policy | Routes |
-| --- | --- | --- | --- |
-| `https://mumpitz.heerlab.com` | `MUMPITZ_APP_BASE_URL` | Login required | `/`, `/admin`, `/admin/*` |
-| `https://mumpitz-api.heerlab.com` | `MUMPITZ_API_BASE_URL` | No login | `/api`, `/api/*` |
-| `https://mumpitz-cdn.heerlab.com` | `MUMPITZ_PUBLIC_BASE_URL` | No login | `/p/*`, `/f/*` |
+Set `MUMPITZ_BASE_URL=https://mumpitz.heerlab.com`. Keep Pangolin authentication enabled on the resource, then add high-priority **Bypass Auth** path rules for:
+
+- `api`
+- `api/*`
+- `api/*/*`
+- `p/*`
+- `p/*/*`
+- `p/*/*/*`
+- `f/*`
+
+Pangolin matches each path segment separately, so the additional patterns cover page versions, `/raw`, and API operations containing an ID or slug. Requests to `/admin` therefore continue to Pangolin authentication. API clients, public pages, and files remain directly reachable on the same hostname. Pangolin evaluates rules by priority; do not add a broader bypass rule that also matches `/admin`.
 
 The health check should normally stay on the private backend at `/healthz`; it does not need a public Pangolin route.
 
-The admin origin has two deliberate gates:
+The `/admin` path has two deliberate gates:
 
 1. Pangolin authenticates the user before the admin page is reachable.
 2. Mumpitz requires an admin token before it displays data or permits token management.
 
-Do not enable Pangolin login on the API or CDN origins. Agents and `curl` need direct API access, while browsers and uploaded pages need direct file access. Mumpitz bearer tokens still protect all writes and management operations. Public page and file URLs are readable by anyone who has the URL.
-
-Mumpitz rejects admin, API, page, and file requests arriving on the wrong configured hostname. Pangolin separation and application-level host checks therefore reinforce each other.
+Mumpitz bearer tokens protect all writes and management operations even on bypassed API paths. Public page and file URLs are readable by anyone who has the URL. Mumpitz also rejects application requests arriving on a hostname other than `MUMPITZ_BASE_URL`.
 
 ## Required configuration
 
 | Variable | Purpose |
 | --- | --- |
-| `MUMPITZ_APP_BASE_URL` | Pangolin-protected admin origin |
-| `MUMPITZ_API_BASE_URL` | Public API origin |
-| `MUMPITZ_PUBLIC_BASE_URL` | Public page and file origin |
+| `MUMPITZ_BASE_URL` | Canonical origin for admin, API, pages, and files |
 | `MUMPITZ_TOKEN_PEPPER` | High-entropy HMAC key used to hash stored tokens |
 | `MUMPITZ_BOOTSTRAP_TOKEN` | Initial high-entropy admin token |
 | `MUMPITZ_DATA_DIR` | Persistent data directory; `/data` in the image |

@@ -17,15 +17,15 @@ Mumpitz is a small self-hosted publisher for standalone HTML pages and public fi
 
 ## Pangolin access model
 
-All three origins point to the same container on port `3000`:
+Everything is served from one origin and one container on port `3000`:
 
-| Origin | Pangolin login | Purpose |
-| --- | --- | --- |
-| `mumpitz.heerlab.com` | Required | Admin surface. After Pangolin login, a Mumpitz admin token is still required. |
-| `mumpitz-api.heerlab.com` | Disabled | Publicly reachable API origin. Uploads and management operations require bearer tokens. |
-| `mumpitz-cdn.heerlab.com` | Disabled | Public HTML and file delivery through `/p/*` and `/f/*`. |
+| URL | Access |
+| --- | --- |
+| `https://mumpitz.heerlab.com/admin` | Pangolin login, then a Mumpitz admin token |
+| `https://mumpitz.heerlab.com/api/*` | Direct access; writes and management require bearer tokens |
+| `https://mumpitz.heerlab.com/p/*` and `/f/*` | Direct public access |
 
-The admin interface therefore lives behind Pangolin. API and CDN deliberately remain free of Pangolin login so agents, `curl`, browsers, and embedded assets can reach them directly. Mumpitz also enforces the configured hostnames itself.
+Configure Pangolin path rules to bypass its login for the supported `/api/*`, `/p/*`, and `/f/*` routes. All paths use the same hostname; Mumpitz rejects application traffic sent with a different host.
 
 See [Deployment](docs/deployment.md) for the complete routing and runtime configuration.
 
@@ -43,7 +43,7 @@ pnpm dev
 In a second terminal, use that printed URL and token:
 
 ```sh
-export MUMPITZ_API_URL="<Portless URL printed by pnpm dev>"
+export MUMPITZ_URL="<Portless URL printed by pnpm dev>"
 export MUMPITZ_TOKEN="mpt_…"
 
 skills/mumpitz-publish/scripts/publish.sh page examples/hello.html

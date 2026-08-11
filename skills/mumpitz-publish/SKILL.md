@@ -1,6 +1,6 @@
 ---
 name: mumpitz-publish
-description: Publish static HTML pages and arbitrary files to a self-hosted Mumpitz instance and return stable public URLs. Use when Codex needs to upload or update an HTML plan under a chosen slug, publish an image/video/document for public access, or inspect Mumpitz upload failures. Requires MUMPITZ_API_URL and MUMPITZ_TOKEN in the environment.
+description: Publish static HTML pages and arbitrary files to a self-hosted Mumpitz instance and return stable public URLs. Use when Codex needs to upload or update an HTML plan under a chosen slug, publish an image/video/document for public access, or inspect Mumpitz upload failures. Requires MUMPITZ_URL and MUMPITZ_TOKEN in the environment.
 ---
 
 # Mumpitz Publish

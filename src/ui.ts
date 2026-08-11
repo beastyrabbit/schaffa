@@ -45,7 +45,7 @@ export function renderAdmin(input: {
   const pageRows = input.pages
     .map(
       (page) => `<tr>
-        <td><a href="${config.publicBaseUrl}/p/${encodeURIComponent(page.slug)}" target="_blank" rel="noopener noreferrer">${escapeHtml(page.slug)}</a>${page.title ? `<span class="sub">${escapeHtml(page.title)}</span>` : ""}</td>
+        <td><a href="${config.baseUrl}/p/${encodeURIComponent(page.slug)}" target="_blank" rel="noopener noreferrer">${escapeHtml(page.slug)}</a>${page.title ? `<span class="sub">${escapeHtml(page.title)}</span>` : ""}</td>
         <td>v${page.current_version}</td>
         <td>${page.version_count}</td>
         <td>${formatBytes(page.latest_bytes)}</td>
@@ -83,7 +83,7 @@ export function renderAdmin(input: {
       <div class="identity"><span>${escapeHtml(input.actorName)}</span><form method="post" action="/admin/logout"><button class="quiet" type="submit">Abmelden</button></form></div>
     </header>
     <main class="workspace">
-      <div class="page-heading"><div><h1>Publikationen</h1><p>Öffentliche Seiten und Dateien dieses Servers.</p></div><a class="docs-link" href="${config.apiBaseUrl}/api" target="_blank" rel="noopener noreferrer">API ansehen</a></div>
+      <div class="page-heading"><div><h1>Publikationen</h1><p>Öffentliche Seiten und Dateien dieses Servers.</p></div><a class="docs-link" href="${config.baseUrl}/api" target="_blank" rel="noopener noreferrer">API ansehen</a></div>
       <nav class="tabs" aria-label="Bereiche"><a href="#pages">Seiten <span>${input.pages.length}</span></a><a href="#files">Dateien <span>${input.files.length}</span></a><a href="#tokens">Tokens <span>${input.tokens.length}</span></a></nav>
       <section id="pages"><div class="section-heading"><h2>Seiten</h2><p>Ein erneuter Upload unter demselben Slug erzeugt die nächste Version.</p></div><div class="table-wrap"><table><thead><tr><th>Slug</th><th>Aktuell</th><th>Versionen</th><th>Größe</th><th>Geändert</th></tr></thead><tbody>${pageRows || emptyRow(5, "Noch keine Seiten veröffentlicht.")}</tbody></table></div></section>
       <section id="files"><div class="section-heading"><h2>Dateien</h2><p>Unveränderliche URLs mit zufälliger 128-Bit-ID.</p></div><div class="table-wrap"><table><thead><tr><th>Datei</th><th>Typ</th><th>Größe</th><th>Hochgeladen</th></tr></thead><tbody>${fileRows || emptyRow(4, "Noch keine Dateien hochgeladen.")}</tbody></table></div></section>

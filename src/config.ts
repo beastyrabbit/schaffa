@@ -18,7 +18,7 @@ function boundedInteger(name: string, fallback: number, minimum: number, maximum
   return value;
 }
 
-function baseUrl(name: string, fallback: string): string {
+function readBaseUrl(name: string, fallback: string): string {
   const value = process.env[name] || fallback;
   const parsed = new URL(value);
   if (!["http:", "https:"].includes(parsed.protocol)) {
@@ -27,23 +27,17 @@ function baseUrl(name: string, fallback: string): string {
   return parsed.toString().replace(/\/$/, "");
 }
 
-const appBaseUrl = baseUrl(
-  "MUMPITZ_APP_BASE_URL",
+const baseUrl = readBaseUrl(
+  "MUMPITZ_BASE_URL",
   process.env.PORTLESS_URL || "http://localhost:3000",
 );
-const apiBaseUrl = baseUrl("MUMPITZ_API_BASE_URL", appBaseUrl);
-const publicBaseUrl = baseUrl("MUMPITZ_PUBLIC_BASE_URL", appBaseUrl);
 
 export const config = {
   host: process.env.HOST || "0.0.0.0",
   port: positiveInteger("PORT", 3000),
   dataDir: path.resolve(process.env.MUMPITZ_DATA_DIR || "./data"),
-  appBaseUrl,
-  apiBaseUrl,
-  publicBaseUrl,
-  appHost: new URL(appBaseUrl).hostname,
-  apiHost: new URL(apiBaseUrl).hostname,
-  publicHost: new URL(publicBaseUrl).hostname,
+  baseUrl,
+  baseHost: new URL(baseUrl).hostname,
   tokenPepper: process.env.MUMPITZ_TOKEN_PEPPER || "",
   bootstrapToken: process.env.MUMPITZ_BOOTSTRAP_TOKEN || "",
   maxPageBytes: positiveInteger("MAX_PAGE_BYTES", 2 * 1024 * 1024),
@@ -53,7 +47,7 @@ export const config = {
   imageWebpQuality: boundedInteger("IMAGE_WEBP_QUALITY", 82, 40, 100),
   maxPublishedImageBytes: positiveInteger("MAX_PUBLISHED_IMAGE_BYTES", 8 * 1024 * 1024),
   logLevel: process.env.LOG_LEVEL || "info",
-  cookieSecure: new URL(appBaseUrl).protocol === "https:",
+  cookieSecure: new URL(baseUrl).protocol === "https:",
 };
 
 export type Config = typeof config;

@@ -133,10 +133,10 @@ async function publishPageLocked(input: {
     version,
     bytes: input.html.length,
     sha256: digest,
-    publicUrl: `${config.publicBaseUrl}/p/${slug}`,
-    rawUrl: `${config.publicBaseUrl}/p/${slug}/raw`,
-    versionUrl: `${config.publicBaseUrl}/p/${slug}/${version}`,
-    versionRawUrl: `${config.publicBaseUrl}/p/${slug}/${version}/raw`,
+    publicUrl: `${config.baseUrl}/p/${slug}`,
+    rawUrl: `${config.baseUrl}/p/${slug}/raw`,
+    versionUrl: `${config.baseUrl}/p/${slug}/${version}`,
+    versionRawUrl: `${config.baseUrl}/p/${slug}/${version}/raw`,
   };
 }
 
@@ -256,7 +256,7 @@ export function getFile(filename: string): FileRow | null {
 }
 
 export function filePublicUrl(filename: string): string {
-  return `${config.publicBaseUrl}/f/${filename}`;
+  return `${config.baseUrl}/f/${filename}`;
 }
 
 function neutralExtension(filename: string, mediaType: string): string {

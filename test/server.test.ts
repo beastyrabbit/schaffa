@@ -10,9 +10,7 @@ const bootstrapToken = `mpt_${"a".repeat(43)}`;
 process.env.MUMPITZ_DATA_DIR = dataDir;
 process.env.MUMPITZ_TOKEN_PEPPER = "test-only-pepper-with-enough-entropy";
 process.env.MUMPITZ_BOOTSTRAP_TOKEN = bootstrapToken;
-process.env.MUMPITZ_APP_BASE_URL = "https://admin.test";
-process.env.MUMPITZ_API_BASE_URL = "https://api.test";
-process.env.MUMPITZ_PUBLIC_BASE_URL = "https://public.test";
+process.env.MUMPITZ_BASE_URL = "https://mumpitz.test";
 process.env.LOG_LEVEL = "silent";
 
 const { buildServer } = await import("../src/server.js");
@@ -23,12 +21,12 @@ test.after(async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test("rejects unauthenticated writes and isolates hosts", async () => {
+test("rejects unauthenticated writes and unexpected hosts", async () => {
   const body = multipart("html", "page.html", "text/html", "<h1>Hello</h1>");
   const unauthorized = await app.inject({
     method: "PUT",
     url: "/api/pages/hello",
-    headers: { host: "api.test", "content-type": body.contentType },
+    headers: { host: "mumpitz.test", "content-type": body.contentType },
     payload: body.payload,
   });
   assert.equal(unauthorized.statusCode, 401);
@@ -36,21 +34,21 @@ test("rejects unauthenticated writes and isolates hosts", async () => {
   const wrongHost = await app.inject({
     method: "GET",
     url: "/admin",
-    headers: { host: "public.test" },
+    headers: { host: "unexpected.test" },
   });
   assert.equal(wrongHost.statusCode, 404);
 
   const spoofedForwardedHost = await app.inject({
     method: "GET",
     url: "/admin",
-    headers: { host: "public.test", "x-forwarded-host": "admin.test" },
+    headers: { host: "unexpected.test", "x-forwarded-host": "mumpitz.test" },
   });
   assert.equal(spoofedForwardedHost.statusCode, 404);
 
   const missingPage = await app.inject({
     method: "GET",
     url: "/p/missing",
-    headers: { host: "public.test" },
+    headers: { host: "mumpitz.test" },
   });
   assert.equal(missingPage.statusCode, 404);
   assert.match(missingPage.headers["content-type"] || "", /^text\/html/);
@@ -63,8 +61,8 @@ test("publishes immutable page versions under a stable slug", async () => {
   const first = await publishHtml("hello", firstHtml);
   assert.equal(first.statusCode, 201);
   assert.equal(first.json().version, 1);
-  assert.equal(first.json().publicUrl, "https://public.test/p/hello");
-  assert.equal(first.json().rawUrl, "https://public.test/p/hello/raw");
+  assert.equal(first.json().publicUrl, "https://mumpitz.test/p/hello");
+  assert.equal(first.json().rawUrl, "https://mumpitz.test/p/hello/raw");
 
   const second = await publishHtml("hello", secondHtml);
   assert.equal(second.statusCode, 200);
@@ -73,7 +71,7 @@ test("publishes immutable page versions under a stable slug", async () => {
   const latest = await app.inject({
     method: "GET",
     url: "/p/hello",
-    headers: { host: "public.test" },
+    headers: { host: "mumpitz.test" },
   });
   assert.equal(latest.statusCode, 200);
   assert.equal(latest.body, secondHtml);
@@ -84,7 +82,7 @@ test("publishes immutable page versions under a stable slug", async () => {
   const v1 = await app.inject({
     method: "GET",
     url: "/p/hello/1",
-    headers: { host: "public.test" },
+    headers: { host: "mumpitz.test" },
   });
   assert.equal(v1.body, firstHtml);
   assert.match(String(v1.headers["cache-control"]), /immutable/);
@@ -92,7 +90,7 @@ test("publishes immutable page versions under a stable slug", async () => {
   const raw = await app.inject({
     method: "GET",
     url: "/p/hello/1/raw",
-    headers: { host: "public.test", "user-agent": "curl/8" },
+    headers: { host: "mumpitz.test", "user-agent": "curl/8" },
   });
   assert.equal(raw.statusCode, 200);
   assert.equal(raw.body, firstHtml);
@@ -101,7 +99,7 @@ test("publishes immutable page versions under a stable slug", async () => {
   const listed = await app.inject({
     method: "GET",
     url: "/api/pages",
-    headers: { host: "api.test", authorization: `Bearer ${bootstrapToken}` },
+    headers: { host: "mumpitz.test", authorization: `Bearer ${bootstrapToken}` },
   });
   const hello = listed.json().pages.find((page: { slug: string }) => page.slug === "hello");
   assert.equal(hello.latest_bytes, Buffer.byteLength(secondHtml));
@@ -113,7 +111,7 @@ test("creates pages with non-semantic random slugs", async () => {
     method: "POST",
     url: "/api/pages",
     headers: {
-      host: "api.test",
+      host: "mumpitz.test",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -122,7 +120,7 @@ test("creates pages with non-semantic random slugs", async () => {
   assert.equal(created.statusCode, 201);
   assert.match(created.json().slug, /^[a-z2-7]{12}$/);
   assert.doesNotMatch(created.json().slug, /named|plan/);
-  assert.equal(created.json().rawUrl, `https://public.test/p/${created.json().slug}/raw`);
+  assert.equal(created.json().rawUrl, `https://mumpitz.test/p/${created.json().slug}/raw`);
 });
 
 test("rejects active HTML content", async () => {
@@ -137,7 +135,7 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "api.test",
+      host: "mumpitz.test",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -151,7 +149,7 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
   const ranged = await app.inject({
     method: "GET",
     url: publicUrl.pathname,
-    headers: { host: "public.test", range: "bytes=1-3" },
+    headers: { host: "mumpitz.test", range: "bytes=1-3" },
   });
   assert.equal(ranged.statusCode, 206);
   assert.equal(ranged.body, "bcd");
@@ -176,7 +174,7 @@ test("downscales images, preserves alpha, and strips identifying metadata", asyn
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "api.test",
+      host: "mumpitz.test",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -192,7 +190,7 @@ test("downscales images, preserves alpha, and strips identifying metadata", asyn
   const download = await app.inject({
     method: "GET",
     url: publicPath,
-    headers: { host: "public.test" },
+    headers: { host: "mumpitz.test" },
   });
   assert.equal(download.statusCode, 200);
   assert.equal(download.headers["content-type"], "image/webp");
@@ -215,7 +213,7 @@ test("downscales images, preserves alpha, and strips identifying metadata", asyn
   const original = await app.inject({
     method: "GET",
     url: `${publicPath}/original`,
-    headers: { host: "public.test" },
+    headers: { host: "mumpitz.test" },
   });
   assert.equal(original.statusCode, 404);
 });
@@ -226,7 +224,7 @@ async function publishHtml(slug: string, html: string) {
     method: "PUT",
     url: `/api/pages/${slug}`,
     headers: {
-      host: "api.test",
+      host: "mumpitz.test",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },

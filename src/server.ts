@@ -72,16 +72,7 @@ export function buildServer() {
 
   app.addHook("onRequest", async (request) => {
     const hostname = rawRequestHostname(request.headers.host);
-    if (request.url.startsWith("/admin") && hostname !== config.appHost) {
-      throw new AppError("Route not found.", 404, "not_found");
-    }
-    if (request.url.startsWith("/api") && hostname !== config.apiHost) {
-      throw new AppError("Route not found.", 404, "not_found");
-    }
-    if (
-      (request.url.startsWith("/p/") || request.url.startsWith("/f/")) &&
-      hostname !== config.publicHost
-    ) {
+    if (request.url !== "/healthz" && hostname !== config.baseHost) {
       throw new AppError("Route not found.", 404, "not_found");
     }
   });
@@ -99,8 +90,8 @@ export function buildServer() {
   app.get("/", async () => ({
     name: "Mumpitz",
     status: "ok",
-    publicBaseUrl: config.publicBaseUrl,
-    api: `${config.apiBaseUrl}/api`,
+    baseUrl: config.baseUrl,
+    api: `${config.baseUrl}/api`,
   }));
   app.get("/api", async () => ({
     name: "Mumpitz API",
