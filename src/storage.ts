@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -90,6 +90,12 @@ export async function removeUpload(id: string): Promise<void> {
 export async function removePage(slugValue: string): Promise<void> {
   const slug = validateSlug(slugValue);
   await rm(path.join(config.dataDir, "pages", slug), { recursive: true, force: true });
+}
+
+export async function removeStoredFile(relativePath: string): Promise<void> {
+  await unlink(absoluteStoragePath(relativePath)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
 }
 
 export function sha256(buffer: Buffer): string {

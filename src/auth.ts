@@ -25,6 +25,7 @@ export function generateToken(): string {
 export function createToken(
   name: string,
   scopes: TokenScope[] = ["upload"],
+  userId?: string,
 ): { id: string; token: string } {
   const cleanName = name.trim();
   if (cleanName.length < 1 || cleanName.length > 80) {
@@ -37,24 +38,64 @@ export function createToken(
   const id = randomUUID();
   const token = generateToken();
   db()
-    .prepare("INSERT INTO tokens (id, name, token_hash, scopes) VALUES (?, ?, ?, ?)")
-    .run(id, cleanName, hashToken(token), [...new Set(scopes)].join(","));
+    .prepare("INSERT INTO tokens (id, name, token_hash, scopes, user_id) VALUES (?, ?, ?, ?, ?)")
+    .run(id, cleanName, hashToken(token), [...new Set(scopes)].join(","), userId || null);
   return { id, token };
 }
 
-export function seedBootstrapToken(): void {
-  if (!config.bootstrapToken) return;
-  if (!config.bootstrapToken.startsWith("sfa_") || config.bootstrapToken.length < 40) {
+export function seedBootstrapToken(): { active: boolean; created: boolean } {
+  if (!config.bootstrapToken) {
+    db()
+      .prepare(
+        `UPDATE tokens SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP)
+         WHERE id = 'bootstrap'`,
+      )
+      .run();
+    return { active: false, created: false };
+  }
+  if (!isHighEntropyToken(config.bootstrapToken)) {
     throw new Error("SCHAFFA_BOOTSTRAP_TOKEN must be a high-entropy sfa_ token.");
   }
   const tokenHash = hashToken(config.bootstrapToken);
-  db()
+  const conflicting = db()
+    .prepare("SELECT id FROM tokens WHERE token_hash = ?")
+    .get(tokenHash) as unknown as { id: string } | undefined;
+  if (conflicting && conflicting.id !== "bootstrap") {
+    throw new Error("SCHAFFA_BOOTSTRAP_TOKEN matches a different existing token.");
+  }
+  const result = db()
     .prepare(
       `INSERT INTO tokens (id, name, token_hash, scopes)
        VALUES ('bootstrap', 'Bootstrap admin', ?, 'admin')
-       ON CONFLICT(id) DO UPDATE SET token_hash = excluded.token_hash, revoked_at = NULL`,
+       ON CONFLICT(id) DO NOTHING`,
     )
     .run(tokenHash);
+  if (result.changes === 0) {
+    // Explicit rotation: a new configured value replaces the stored hash and
+    // re-activates the token. Re-running with the same revoked value never does.
+    db()
+      .prepare(
+        `UPDATE tokens SET token_hash = ?, revoked_at = NULL
+         WHERE id = 'bootstrap' AND token_hash != ?`,
+      )
+      .run(tokenHash, tokenHash);
+  }
+  const active = Boolean(
+    db().prepare("SELECT 1 FROM tokens WHERE id = 'bootstrap' AND revoked_at IS NULL").get(),
+  );
+  return { active, created: result.changes > 0 };
+}
+
+export function canRevokeBootstrap(): boolean {
+  const row = db()
+    .prepare(
+      `SELECT COUNT(*) AS count FROM tokens
+       WHERE id NOT IN ('bootstrap', 'anonymous')
+         AND revoked_at IS NULL
+         AND (',' || scopes || ',') LIKE '%,admin,%'`,
+    )
+    .get() as unknown as { count: number };
+  return row.count > 0;
 }
 
 export function seedAnonymousActor(): void {
@@ -94,4 +135,13 @@ export function requireScope(auth: AuthToken | null, scope: TokenScope): AuthTok
     throw new AppError("This token does not have the required scope.", 403, "forbidden");
   }
   return auth;
+}
+
+function isHighEntropyToken(token: string): boolean {
+  if (!/^sfa_[A-Za-z0-9_-]+$/.test(token)) return false;
+  try {
+    return Buffer.from(token.slice(4), "base64url").length >= 32;
+  } catch {
+    return false;
+  }
 }

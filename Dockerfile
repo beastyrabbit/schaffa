@@ -1,4 +1,4 @@
-FROM node:24-alpine AS build
+FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS build
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -8,7 +8,7 @@ COPY tsconfig.json tsconfig.build.json biome.json ./
 COPY src ./src
 RUN pnpm build:server && CI=true pnpm prune --prod
 
-FROM node:24-alpine AS runtime
+FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS runtime
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \

@@ -23,11 +23,23 @@ export interface CleanImage {
   mediaType: "image/webp";
 }
 
+let activeCleaners = 0;
+const cleanerWaiters: Array<() => void> = [];
+
 export function isLikelyImage(filename: string, mediaType: string): boolean {
   return (
     mediaType.toLowerCase().startsWith("image/") ||
     imageExtensions.has(path.extname(filename).toLowerCase())
   );
+}
+
+export async function withImageProcessingPermit<T>(operation: () => Promise<T>): Promise<T> {
+  await acquireCleaner();
+  try {
+    return await operation();
+  } finally {
+    releaseCleaner();
+  }
 }
 
 export async function cleanImage(input: Buffer): Promise<CleanImage> {
@@ -68,10 +80,20 @@ export async function cleanImage(input: Buffer): Promise<CleanImage> {
     );
   } catch (error) {
     if (error instanceof AppError) throw error;
-    throw new AppError(
-      `Image could not be decoded and cleaned: ${error instanceof Error ? error.message : "unknown error"}`,
-      422,
-      "invalid_image",
-    );
+    throw new AppError("Image could not be decoded and cleaned.", 422, "invalid_image");
   }
+}
+
+async function acquireCleaner(): Promise<void> {
+  if (activeCleaners < config.imageCleanConcurrency) {
+    activeCleaners += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => cleanerWaiters.push(resolve));
+  activeCleaners += 1;
+}
+
+function releaseCleaner(): void {
+  activeCleaners -= 1;
+  cleanerWaiters.shift()?.();
 }

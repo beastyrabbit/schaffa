@@ -1,13 +1,24 @@
+import { once } from "node:events";
 import net from "node:net";
+import type { Readable } from "node:stream";
 import { config } from "./config.js";
 import { AppError } from "./errors.js";
+import { openStoredFile } from "./storage.js";
 
 const chunkBytes = 64 * 1024;
 
-export async function scanAnonymousHtml(data: Buffer): Promise<void> {
+export async function scanUpload(data: Buffer): Promise<void> {
+  await scan(data);
+}
+
+export async function scanStoredUpload(storagePath: string): Promise<void> {
+  await scan(openStoredFile(storagePath));
+}
+
+async function scan(data: Buffer | Readable): Promise<void> {
   if (!config.clamavHost) {
     throw new AppError(
-      "Anonymous uploads are unavailable because the virus scanner is not configured.",
+      "Uploads are unavailable because the virus scanner is not configured.",
       503,
       "scanner_unavailable",
     );
@@ -15,28 +26,24 @@ export async function scanAnonymousHtml(data: Buffer): Promise<void> {
 
   const response = await sendInstream(data).catch(() => {
     throw new AppError(
-      "Anonymous uploads are temporarily unavailable because the virus scanner could not be reached.",
+      "Uploads are temporarily unavailable because the virus scanner could not be reached.",
       503,
       "scanner_unavailable",
     );
   });
   if (/\bFOUND\b/.test(response)) {
-    throw new AppError(
-      "The anonymous upload was rejected by the virus scanner.",
-      422,
-      "malware_detected",
-    );
+    throw new AppError("The upload was rejected by the virus scanner.", 422, "malware_detected");
   }
   if (!/\bOK\b/.test(response)) {
     throw new AppError(
-      "Anonymous uploads are temporarily unavailable because the virus scanner returned an invalid response.",
+      "Uploads are temporarily unavailable because the virus scanner returned an invalid response.",
       503,
       "scanner_unavailable",
     );
   }
 }
 
-function sendInstream(data: Buffer): Promise<string> {
+function sendInstream(data: Buffer | Readable): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host: config.clamavHost, port: config.clamavPort });
     const response: Buffer[] = [];
@@ -55,15 +62,33 @@ function sendInstream(data: Buffer): Promise<string> {
     socket.on("data", (chunk: Buffer) => response.push(chunk));
     socket.on("end", () => finish());
     socket.on("connect", () => {
-      socket.write("zINSTREAM\0");
-      for (let offset = 0; offset < data.length; offset += chunkBytes) {
-        const chunk = data.subarray(offset, Math.min(offset + chunkBytes, data.length));
-        const length = Buffer.allocUnsafe(4);
-        length.writeUInt32BE(chunk.length);
-        socket.write(length);
-        socket.write(chunk);
-      }
-      socket.end(Buffer.alloc(4));
+      void writeInstream(socket, data).catch((error: unknown) =>
+        finish(error instanceof Error ? error : new Error("Virus scanner stream failed.")),
+      );
     });
   });
+}
+
+async function writeInstream(socket: net.Socket, data: Buffer | Readable): Promise<void> {
+  await writeChunk(socket, Buffer.from("zINSTREAM\0"));
+  const source: AsyncIterable<Buffer> = Buffer.isBuffer(data)
+    ? (async function* () {
+        yield data;
+      })()
+    : data;
+  for await (const inputChunk of source) {
+    const buffer = Buffer.isBuffer(inputChunk) ? inputChunk : Buffer.from(inputChunk);
+    for (let offset = 0; offset < buffer.length; offset += chunkBytes) {
+      const chunk = buffer.subarray(offset, Math.min(offset + chunkBytes, buffer.length));
+      const length = Buffer.allocUnsafe(4);
+      length.writeUInt32BE(chunk.length);
+      await writeChunk(socket, length);
+      await writeChunk(socket, chunk);
+    }
+  }
+  socket.end(Buffer.alloc(4));
+}
+
+async function writeChunk(socket: net.Socket, chunk: Buffer): Promise<void> {
+  if (!socket.write(chunk)) await once(socket, "drain");
 }

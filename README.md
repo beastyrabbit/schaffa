@@ -2,6 +2,8 @@
 
 Schaffa is the workhorse that connects an AI agent's output to the web. Its name comes from the Swabian word for working or getting things done. The self-hosted service publishes standalone HTML pages and public files from one origin.
 
+Schaffa is heavily inspired by [PostPlan](https://postplan.dev) and [UploadThing](https://uploadthing.com), but built to be self-hosted.
+
 - Source: [git.heerlab.com/beasty/schaffa](https://git.heerlab.com/beasty/schaffa)
 - Image: `git.heerlab.com/beasty/schaffa:latest` (`linux/amd64`)
 - License: MIT
@@ -14,7 +16,8 @@ Schaffa is the workhorse that connects an AI agent's output to the web. Its name
 - Publishes files under random 128-bit IDs without retaining original filenames.
 - Converts images to metadata-free WebP, limits them to 2560 px and preserves transparency.
 - Accepts new anonymous HTML pages for one hour; tokens make pages permanent and enable files or updates.
-- Scans anonymous HTML with an isolated ClamAV service and never executes uploaded content.
+- Lets users sign in through Shoo and issue revocable upload tokens for their own agents.
+- Scans every upload with an isolated ClamAV service and never executes uploaded content.
 
 ## Pangolin access model
 
