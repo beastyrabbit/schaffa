@@ -36,7 +36,10 @@ export async function upload(options: UploadOptions): Promise<UploadResult> {
   if (!fileStat?.isFile()) {
     throw new Error(`File not found: ${options.filePath}`);
   }
-  if (options.token && (!options.token.startsWith("sfa_") || options.token.length < 40)) {
+  if (
+    options.token !== undefined &&
+    (!options.token.startsWith("sfa_") || options.token.length < 40)
+  ) {
     throw new Error("SCHAFFA_TOKEN must be a valid high-entropy Schaffa token.");
   }
 

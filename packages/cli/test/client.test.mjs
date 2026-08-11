@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { parseCliArgs } from "../dist/cli.js";
 import { upload } from "../dist/client.js";
 
 const token = `sfa_${"a".repeat(43)}`;
@@ -57,6 +58,17 @@ test("requires a token for files and page updates", async () => {
     upload({ filePath: htmlPath, slug: "abc234def567" }),
     /SCHAFFA_TOKEN is required to update/,
   );
+});
+
+test("accepts a command-line token and gives it precedence over the environment", () => {
+  const commandToken = `sfa_${"b".repeat(43)}`;
+  const options = parseCliArgs(
+    ["upload", "plan.html", "--token", commandToken, "--slug", "abc234def567"],
+    { SCHAFFA_TOKEN: token },
+  );
+  assert.equal("help" in options, false);
+  assert.equal(options.token, commandToken);
+  assert.equal(options.slug, "abc234def567");
 });
 
 test("updates an HTML page when a slug is supplied", async () => {

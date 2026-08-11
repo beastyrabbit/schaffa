@@ -17,11 +17,13 @@ export SCHAFFA_TOKEN="sfa_…"
 npx schaffa upload ./plan.html
 ```
 
-The default server is `https://schaffa.dev`. Override it for another deployment or local development:
+You can also provide the token directly:
 
 ```sh
-export SCHAFFA_URL="http://schaffa.localhost:1355"
+npx schaffa upload ./plan.html --token "sfa_…"
 ```
+
+Command-line arguments may be retained in shell history. Use `SCHAFFA_TOKEN` when that is a concern. The CLI always connects to `https://schaffa.dev` unless `SCHAFFA_URL` is set.
 
 HTML files create a page with a random slug. With a token, reuse a slug to publish the next immutable version:
 
