@@ -6,7 +6,7 @@ COPY packages/cli/package.json ./packages/cli/package.json
 RUN pnpm install --frozen-lockfile
 COPY tsconfig.json tsconfig.build.json biome.json ./
 COPY src ./src
-RUN pnpm build:server && pnpm prune --prod
+RUN pnpm build:server && CI=true pnpm prune --prod
 
 FROM node:24-alpine AS runtime
 ENV NODE_ENV=production \
