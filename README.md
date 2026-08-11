@@ -1,9 +1,9 @@
-# Mumpitz
+# Schaffa
 
-Mumpitz is a small self-hosted publisher for standalone HTML pages and public files. It keeps metadata in SQLite and content on one local persistent volume.
+Schaffa is the workhorse that connects an AI agent's output to the web. Its name comes from the Swabian word for working or getting things done. The self-hosted service publishes standalone HTML pages and public files from one origin.
 
-- Source: [git.heerlab.com/beasty/mumpitz](https://git.heerlab.com/beasty/mumpitz)
-- Image: `git.heerlab.com/beasty/mumpitz:latest` (`linux/amd64`)
+- Source: [git.heerlab.com/beasty/schaffa](https://git.heerlab.com/beasty/schaffa)
+- Image: `git.heerlab.com/beasty/schaffa:latest` (`linux/amd64`)
 - License: MIT
 
 ## What it does
@@ -13,7 +13,8 @@ Mumpitz is a small self-hosted publisher for standalone HTML pages and public fi
 - Returns byte-identical HTML from normal and `/raw` URLs.
 - Publishes files under random 128-bit IDs without retaining original filenames.
 - Converts images to metadata-free WebP, limits them to 2560 px and preserves transparency.
-- Protects every write and the admin UI with scoped Mumpitz tokens.
+- Accepts new anonymous HTML pages for one hour; tokens make pages permanent and enable files or updates.
+- Scans anonymous HTML with an isolated ClamAV service and never executes uploaded content.
 
 ## Pangolin access model
 
@@ -21,11 +22,11 @@ Everything is served from one origin and one container on port `3000`:
 
 | URL | Access |
 | --- | --- |
-| `https://mumpitz.heerlab.com/admin` | Pangolin login, then a Mumpitz admin token |
-| `https://mumpitz.heerlab.com/api/*` | Direct access; writes and management require bearer tokens |
-| `https://mumpitz.heerlab.com/p/*` and `/f/*` | Direct public access |
+| `https://schaffa.dev/admin` | Pangolin login, then a Schaffa admin token |
+| `https://schaffa.dev/api/*` | Direct access; writes and management require bearer tokens |
+| `https://schaffa.dev/p/*` and `/f/*` | Direct public access |
 
-Configure Pangolin path rules to bypass its login for the supported `/api/*`, `/p/*`, and `/f/*` routes. All paths use the same hostname; Mumpitz rejects application traffic sent with a different host.
+Configure Pangolin path rules to bypass its login for the supported `/api/*`, `/p/*`, and `/f/*` routes. All paths use the same hostname; Schaffa rejects application traffic sent with a different host.
 
 See [Deployment](docs/deployment.md) for the complete routing and runtime configuration.
 
@@ -38,30 +39,40 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-`pnpm dev` is the only normal local entry point. It starts all configured services through Portless and prints their stable `.localhost` URLs. Open `/admin` on the printed Mumpitz URL and sign in with the temporary token.
+`pnpm dev` is the only normal local entry point. It starts all configured services through Portless and prints their stable `.localhost` URLs. Open `/admin` on the printed Schaffa URL and sign in with the temporary token.
 
 In a second terminal, use that printed URL and token:
 
 ```sh
-export MUMPITZ_URL="<Portless URL printed by pnpm dev>"
-export MUMPITZ_TOKEN="mpt_…"
+export SCHAFFA_URL="<Portless URL printed by pnpm dev>"
+export SCHAFFA_TOKEN="sfa_…"
 
-skills/mumpitz-publish/scripts/publish.sh page examples/hello.html
-skills/mumpitz-publish/scripts/publish.sh file examples/test-asset.png
+skills/schaffa-publish/scripts/publish.sh page examples/hello.html
+skills/schaffa-publish/scripts/publish.sh file examples/test-asset.png
 ```
+
+## CLI
+
+The separately publishable npm package lives in `packages/cli`:
+
+```sh
+npx schaffa upload ./plan.html
+```
+
+The CLI defaults to `https://schaffa.dev`. New HTML pages work without a token and disappear after one hour. Set `SCHAFFA_TOKEN` for permanent pages, files, and `--slug <slug>` updates.
 
 ## Container
 
 Every push to `main` publishes `latest`, `main`, and a commit-SHA tag:
 
 ```sh
-docker pull git.heerlab.com/beasty/mumpitz:latest
+docker pull git.heerlab.com/beasty/schaffa:latest
 ```
 
 ## Documentation
 
 - [Deployment and Pangolin](docs/deployment.md)
 - [HTTP API and URL model](docs/api.md)
-- [Codex publishing skill](skills/mumpitz-publish/SKILL.md)
+- [Codex publishing skill](skills/schaffa-publish/SKILL.md)
 
 Run all project checks with `pnpm check`.

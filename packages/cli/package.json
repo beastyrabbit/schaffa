@@ -1,0 +1,47 @@
+{
+  "name": "schaffa",
+  "version": "0.1.0",
+  "description": "The workhorse that connects an AI agent's HTML pages and files to the web.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "schaffa": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
+    "prepublishOnly": "pnpm test",
+    "test": "pnpm build && node --test test/**/*.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://git.heerlab.com/beasty/schaffa.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://schaffa.dev",
+  "bugs": {
+    "url": "https://git.heerlab.com/beasty/schaffa/issues"
+  },
+  "keywords": [
+    "upload",
+    "html",
+    "static-pages",
+    "file-sharing",
+    "self-hosted"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2"
+  }
+}

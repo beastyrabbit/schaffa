@@ -1,0 +1,4 @@
+interface:
+  display_name: "Schaffa Publish"
+  short_description: "Publish pages and files to Schaffa"
+  default_prompt: "Use $schaffa-publish to publish this HTML page or file and return its public URL."

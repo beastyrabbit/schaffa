@@ -5,10 +5,12 @@ import formbody from "@fastify/formbody";
 import multipart from "@fastify/multipart";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import {
+  anonymousActorId,
   authenticateToken,
   bearerToken,
   createToken,
   requireScope,
+  seedAnonymousActor,
   seedBootstrapToken,
 } from "./auth.js";
 import { config } from "./config.js";
@@ -24,11 +26,13 @@ import {
   newPageSlug,
   publishFile,
   publishPage,
+  purgeRetainedAnonymousPages,
 } from "./service.js";
 import { openStoredFile } from "./storage.js";
-import { renderAdmin, renderAdminLogin, renderPublicNotFound } from "./ui.js";
+import { type AdminFilters, renderAdmin, renderAdminLogin, renderPublicNotFound } from "./ui.js";
+import { scanAnonymousHtml } from "./virus-scanner.js";
 
-const adminCookie = config.cookieSecure ? "__Secure-mumpitz_admin" : "mumpitz_admin";
+const adminCookie = config.cookieSecure ? "__Secure-schaffa_admin" : "schaffa_admin";
 const pageCsp = [
   "default-src 'none'",
   "img-src 'self' data:",
@@ -46,10 +50,12 @@ const pageCsp = [
 
 export function buildServer() {
   if (!config.tokenPepper) {
-    throw new Error("MUMPITZ_TOKEN_PEPPER is required.");
+    throw new Error("SCHAFFA_TOKEN_PEPPER is required.");
   }
   db();
+  seedAnonymousActor();
   seedBootstrapToken();
+  const anonymousUploads = new Map<string, number[]>();
 
   const app = Fastify({
     trustProxy: true,
@@ -70,6 +76,18 @@ export function buildServer() {
     limits: { files: 1, fields: 0, parts: 1 },
   });
 
+  const cleanupTimer = setInterval(
+    () =>
+      void purgeRetainedAnonymousPages().catch((error: unknown) => {
+        app.log.error({ err: error }, "anonymous page retention cleanup failed");
+      }),
+    60 * 60 * 1000,
+  );
+  cleanupTimer.unref();
+  void purgeRetainedAnonymousPages().catch((error: unknown) => {
+    app.log.error({ err: error }, "initial anonymous page retention cleanup failed");
+  });
+
   app.addHook("onRequest", async (request) => {
     const hostname = rawRequestHostname(request.headers.host);
     if (request.url !== "/healthz" && hostname !== config.baseHost) {
@@ -88,14 +106,15 @@ export function buildServer() {
 
   app.get("/healthz", async () => ({ ok: true }));
   app.get("/", async () => ({
-    name: "Mumpitz",
+    name: "Schaffa",
     status: "ok",
     baseUrl: config.baseUrl,
     api: `${config.baseUrl}/api`,
   }));
   app.get("/api", async () => ({
-    name: "Mumpitz API",
-    authentication: "Authorization: Bearer mpt_…",
+    name: "Schaffa API",
+    authentication:
+      "Bearer tokens are required except for new anonymous HTML pages, which expire after one hour.",
     endpoints: {
       createPage: "POST /api/pages (multipart field: html; random slug)",
       updatePage: "PUT /api/pages/:slug (multipart field: html)",
@@ -126,17 +145,20 @@ export function buildServer() {
   );
 
   app.post<{ Querystring: { title?: string } }>("/api/pages", async (request, reply) => {
-    const auth = requireApiAuth(request, "upload");
+    const auth = optionalUploadAuth(request);
+    if (!auth) enforceAnonymousRateLimit(anonymousUploads, request.ip);
     const part = await request.file({ limits: { fileSize: config.maxPageBytes, files: 1 } });
     if (part?.fieldname !== "html") {
       throw new AppError("Expected one multipart file field named html.", 422);
     }
     const html = await part.toBuffer();
+    if (!auth) await scanAnonymousHtml(html);
     const result = await publishPage({
       slug: newPageSlug(),
       ...(request.query.title === undefined ? {} : { title: request.query.title }),
       html,
-      tokenId: auth.id,
+      tokenId: auth?.id || anonymousActorId,
+      anonymous: !auth,
     });
     return reply.code(201).send(result);
   });
@@ -186,7 +208,11 @@ export function buildServer() {
   );
   app.delete<{ Params: { id: string } }>("/api/tokens/:id", async (request, reply) => {
     const auth = requireApiAuth(request, "admin");
-    if (request.params.id === "bootstrap" || request.params.id === auth.id) {
+    if (
+      request.params.id === "bootstrap" ||
+      request.params.id === anonymousActorId ||
+      request.params.id === auth.id
+    ) {
       throw new AppError("The bootstrap or current token cannot revoke itself.", 409, "conflict");
     }
     const result = db()
@@ -220,7 +246,7 @@ export function buildServer() {
     sendFile(request, reply),
   );
 
-  app.get("/admin", async (request, reply) => {
+  app.get<{ Querystring: AdminQuery }>("/admin", async (request, reply) => {
     const auth = adminAuth(request);
     adminHeaders(reply);
     if (!auth?.scopes.has("admin")) return reply.type("text/html").send(renderAdminLogin());
@@ -230,6 +256,7 @@ export function buildServer() {
         files: listFiles(),
         tokens: listTokens(),
         actorName: auth.name,
+        filters: adminFilters(request.query),
       }),
     );
   });
@@ -276,7 +303,10 @@ export function buildServer() {
     request.log.error({ err: error }, "request failed");
     return reply.code(500).send({ error: "internal_error", message: "Internal server error." });
   });
-  app.addHook("onClose", async () => closeDb());
+  app.addHook("onClose", async () => {
+    clearInterval(cleanupTimer);
+    closeDb();
+  });
 
   return app;
 }
@@ -296,9 +326,13 @@ async function sendPage(reply: FastifyReply, slug: string, version?: number) {
     "Content-Security-Policy": pageCsp,
     "Cross-Origin-Opener-Policy": "same-origin",
     "X-Frame-Options": "DENY",
-    "X-Mumpitz-Page": result.page.slug,
-    "X-Mumpitz-Version": String(result.version.version),
-    "Cache-Control": version ? "public, max-age=31536000, immutable" : "no-cache",
+    "X-Schaffa-Page": result.page.slug,
+    "X-Schaffa-Version": String(result.version.version),
+    "Cache-Control": result.page.expires_at
+      ? "no-store"
+      : version
+        ? "public, max-age=31536000, immutable"
+        : "no-cache",
   });
   return reply.type("text/html; charset=utf-8").send(result.html);
 }
@@ -357,6 +391,65 @@ function safeInlineType(mediaType: string): boolean {
 function requireApiAuth(request: FastifyRequest, scope: TokenScope) {
   const token = bearerToken(request.headers.authorization);
   return requireScope(authenticateToken(token), scope);
+}
+
+function optionalUploadAuth(request: FastifyRequest) {
+  if (request.headers.authorization === undefined) return null;
+  const token = bearerToken(request.headers.authorization);
+  return requireScope(authenticateToken(token), "upload");
+}
+
+function enforceAnonymousRateLimit(entries: Map<string, number[]>, address: string): void {
+  const now = Date.now();
+  const cutoff = now - 60 * 60 * 1000;
+  if (!entries.has(address) && entries.size >= 10_000) {
+    for (const [key, timestamps] of entries) {
+      const active = timestamps.filter((timestamp) => timestamp > cutoff);
+      if (active.length === 0) entries.delete(key);
+      else entries.set(key, active);
+    }
+    if (entries.size >= 10_000) {
+      throw new AppError(
+        "Anonymous upload capacity is temporarily exhausted. Try again later.",
+        429,
+        "rate_limited",
+      );
+    }
+  }
+  const recent = (entries.get(address) || []).filter((timestamp) => timestamp > cutoff);
+  if (recent.length >= config.anonymousUploadsPerHour) {
+    throw new AppError(
+      "Anonymous upload rate limit exceeded. Try again later.",
+      429,
+      "rate_limited",
+    );
+  }
+  recent.push(now);
+  entries.set(address, recent);
+}
+
+interface AdminQuery {
+  q?: string;
+  uploader?: string;
+  kind?: string;
+  lifetime?: string;
+}
+
+function adminFilters(query: AdminQuery): AdminFilters {
+  const kinds = new Set<AdminFilters["kind"]>(["all", "pages", "files"]);
+  const lifetimes = new Set<AdminFilters["lifetime"]>(["all", "permanent", "anonymous-active"]);
+  const kind = kinds.has(query.kind as AdminFilters["kind"])
+    ? (query.kind as AdminFilters["kind"])
+    : "all";
+  const lifetime = lifetimes.has(query.lifetime as AdminFilters["lifetime"])
+    ? (query.lifetime as AdminFilters["lifetime"])
+    : "all";
+  return {
+    q: (query.q || "").trim().slice(0, 100),
+    uploader: (query.uploader || "").trim().slice(0, 80),
+    kind,
+    lifetime,
+  };
 }
 
 function adminAuth(request: FastifyRequest) {

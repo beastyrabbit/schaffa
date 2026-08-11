@@ -11,6 +11,7 @@ import { isFileId, randomFileId, randomPageSlug } from "./ids.js";
 import { cleanImage, isLikelyImage } from "./image-cleaner.js";
 import {
   readStoredFile,
+  removePage,
   removeUpload,
   sha256,
   storePage,
@@ -21,6 +22,13 @@ import {
 export interface PageSummary extends PageRow {
   version_count: number;
   latest_bytes: number;
+  uploader_id: string;
+  uploader_name: string;
+}
+
+export interface FileSummary extends FileRow {
+  uploader_id: string;
+  uploader_name: string;
 }
 
 export interface PublishedPage {
@@ -33,6 +41,8 @@ export interface PublishedPage {
   rawUrl: string;
   versionUrl: string;
   versionRawUrl: string;
+  expiresAt: string | null;
+  purgeAt: string | null;
 }
 
 export interface PublishedFile {
@@ -51,6 +61,7 @@ export async function publishPage(input: {
   title?: string;
   html: Buffer;
   tokenId: string;
+  anonymous?: boolean;
 }): Promise<PublishedPage> {
   const operation = pageWriteQueue.then(() => publishPageLocked(input));
   pageWriteQueue = operation.then(
@@ -74,6 +85,7 @@ async function publishPageLocked(input: {
   title?: string;
   html: Buffer;
   tokenId: string;
+  anonymous?: boolean;
 }): Promise<PublishedPage> {
   const slug = validateSlug(input.slug);
   if (input.html.length === 0) throw new AppError("HTML file is empty.", 422, "empty_file");
@@ -98,6 +110,13 @@ async function publishPageLocked(input: {
   const storagePath = await storePage(slug, version, input.html);
   const digest = sha256(input.html);
   const versionId = randomUUID();
+  const now = Date.now();
+  const expiresAt = input.anonymous
+    ? sqliteTimestamp(now + config.anonymousPageTtlSeconds * 1000)
+    : null;
+  const purgeAt = input.anonymous
+    ? sqliteTimestamp(now + config.anonymousPageRetentionDays * 24 * 60 * 60 * 1000)
+    : null;
 
   db().exec("BEGIN IMMEDIATE");
   try {
@@ -105,14 +124,18 @@ async function publishPageLocked(input: {
       db()
         .prepare(
           `UPDATE pages
-           SET title = COALESCE(?, title), current_version = ?, updated_at = CURRENT_TIMESTAMP
+           SET title = COALESCE(?, title), current_version = ?, updated_at = CURRENT_TIMESTAMP,
+               expires_at = ?, purge_at = ?
            WHERE id = ?`,
         )
-        .run(title, version, pageId);
+        .run(title, version, expiresAt, purgeAt, pageId);
     } else {
       db()
-        .prepare("INSERT INTO pages (id, slug, title, current_version) VALUES (?, ?, ?, ?)")
-        .run(pageId, slug, title, version);
+        .prepare(
+          `INSERT INTO pages (id, slug, title, current_version, expires_at, purge_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(pageId, slug, title, version, expiresAt, purgeAt);
     }
     db()
       .prepare(
@@ -137,6 +160,8 @@ async function publishPageLocked(input: {
     rawUrl: `${config.baseUrl}/p/${slug}/raw`,
     versionUrl: `${config.baseUrl}/p/${slug}/${version}`,
     versionRawUrl: `${config.baseUrl}/p/${slug}/${version}/raw`,
+    expiresAt,
+    purgeAt,
   };
 }
 
@@ -203,24 +228,35 @@ export function listPages(): PageSummary[] {
                 (SELECT pv.bytes FROM page_versions pv
                  WHERE pv.page_id = p.id ORDER BY pv.version DESC LIMIT 1),
                 0
-              ) AS latest_bytes
+              ) AS latest_bytes,
+              pv.created_by_token_id AS uploader_id,
+              COALESCE(t.name, 'Unknown uploader') AS uploader_name
        FROM pages p
+       JOIN page_versions pv ON pv.page_id = p.id AND pv.version = p.current_version
+       LEFT JOIN tokens t ON t.id = pv.created_by_token_id
+       WHERE p.expires_at IS NULL OR datetime(p.expires_at) > CURRENT_TIMESTAMP
        ORDER BY p.updated_at DESC`,
     )
     .all() as unknown as PageSummary[];
 }
 
-export function listFiles(): FileRow[] {
+export function listFiles(): FileSummary[] {
   return db()
-    .prepare("SELECT * FROM files ORDER BY created_at DESC LIMIT 500")
-    .all() as unknown as FileRow[];
+    .prepare(
+      `SELECT f.*, f.created_by_token_id AS uploader_id,
+              COALESCE(t.name, 'Unknown uploader') AS uploader_name
+       FROM files f
+       LEFT JOIN tokens t ON t.id = f.created_by_token_id
+       ORDER BY f.created_at DESC`,
+    )
+    .all() as unknown as FileSummary[];
 }
 
 export function listTokens(): TokenRow[] {
   return db()
     .prepare(
       `SELECT id, name, '' AS token_hash, scopes, created_at, last_used_at, revoked_at
-       FROM tokens ORDER BY created_at DESC`,
+       FROM tokens WHERE id != 'anonymous' ORDER BY created_at DESC`,
     )
     .all() as unknown as TokenRow[];
 }
@@ -230,9 +266,12 @@ export async function getPageVersion(
   version?: number,
 ): Promise<{ page: PageRow; version: PageVersionRow; html: Buffer } | null> {
   const slug = validateSlug(slugValue);
-  const page = db().prepare("SELECT * FROM pages WHERE slug = ?").get(slug) as unknown as
-    | PageRow
-    | undefined;
+  const page = db()
+    .prepare(
+      `SELECT * FROM pages
+       WHERE slug = ? AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP)`,
+    )
+    .get(slug) as unknown as PageRow | undefined;
   if (!page) return null;
 
   const selectedVersion = version ?? page.current_version;
@@ -259,9 +298,34 @@ export function filePublicUrl(filename: string): string {
   return `${config.baseUrl}/f/${filename}`;
 }
 
+export async function purgeRetainedAnonymousPages(): Promise<number> {
+  const expired = db()
+    .prepare(
+      `SELECT slug FROM pages
+       WHERE purge_at IS NOT NULL AND datetime(purge_at) <= CURRENT_TIMESTAMP`,
+    )
+    .all() as unknown as Array<{ slug: string }>;
+  if (expired.length === 0) return 0;
+
+  const remove = db().prepare("DELETE FROM pages WHERE slug = ?");
+  let removed = 0;
+  for (const page of expired) {
+    await removePage(page.slug);
+    removed += Number(remove.run(page.slug).changes > 0);
+  }
+  return removed;
+}
+
 function neutralExtension(filename: string, mediaType: string): string {
   const supplied = path.extname(filename).slice(1).toLowerCase();
   if (/^[a-z0-9]{1,10}$/.test(supplied)) return supplied;
   const inferred = extensionForMediaType(mediaType);
   return inferred && /^[a-z0-9]{1,10}$/.test(inferred) ? inferred : "bin";
+}
+
+function sqliteTimestamp(timestamp: number): string {
+  return new Date(timestamp)
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d{3}Z$/, "");
 }

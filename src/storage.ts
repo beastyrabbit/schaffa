@@ -87,6 +87,11 @@ export async function removeUpload(id: string): Promise<void> {
   await rm(path.join(config.dataDir, "files", id), { recursive: true, force: true });
 }
 
+export async function removePage(slugValue: string): Promise<void> {
+  const slug = validateSlug(slugValue);
+  await rm(path.join(config.dataDir, "pages", slug), { recursive: true, force: true });
+}
+
 export function sha256(buffer: Buffer): string {
   return createHash("sha256").update(buffer).digest("hex");
 }

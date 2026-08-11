@@ -22,6 +22,8 @@ export interface PageRow {
   current_version: number;
   created_at: string;
   updated_at: string;
+  expires_at: string | null;
+  purge_at: string | null;
 }
 
 export interface PageVersionRow {
@@ -52,7 +54,7 @@ export function db(): DatabaseSync {
   if (database) return database;
 
   fs.mkdirSync(config.dataDir, { recursive: true, mode: 0o750 });
-  database = new DatabaseSync(path.join(config.dataDir, "mumpitz.sqlite"));
+  database = new DatabaseSync(path.join(config.dataDir, "schaffa.sqlite"));
   database.exec("PRAGMA journal_mode = WAL");
   database.exec("PRAGMA foreign_keys = ON");
   database.exec("PRAGMA busy_timeout = 5000");
@@ -73,7 +75,9 @@ export function db(): DatabaseSync {
       title TEXT,
       current_version INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at TEXT,
+      purge_at TEXT
     ) STRICT;
 
     CREATE TABLE IF NOT EXISTS page_versions (
@@ -102,6 +106,16 @@ export function db(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS page_versions_page_idx ON page_versions(page_id, version DESC);
     CREATE INDEX IF NOT EXISTS files_created_idx ON files(created_at DESC);
   `);
+
+  const pageColumns = database.prepare("PRAGMA table_info(pages)").all() as unknown as Array<{
+    name: string;
+  }>;
+  if (!pageColumns.some((column) => column.name === "expires_at")) {
+    database.exec("ALTER TABLE pages ADD COLUMN expires_at TEXT");
+  }
+  if (!pageColumns.some((column) => column.name === "purge_at")) {
+    database.exec("ALTER TABLE pages ADD COLUMN purge_at TEXT");
+  }
 
   return database;
 }

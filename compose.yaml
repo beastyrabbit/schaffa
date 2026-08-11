@@ -1,15 +1,21 @@
 services:
-  mumpitz:
-    image: git.heerlab.com/beasty/mumpitz:latest
+  schaffa:
+    image: git.heerlab.com/beasty/schaffa:latest
     build: .
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"
     environment:
-      MUMPITZ_BASE_URL: ${MUMPITZ_BASE_URL:?set MUMPITZ_BASE_URL}
-      MUMPITZ_TOKEN_PEPPER: ${MUMPITZ_TOKEN_PEPPER:?load from secret manager}
-      MUMPITZ_BOOTSTRAP_TOKEN: ${MUMPITZ_BOOTSTRAP_TOKEN:?load from secret manager}
-      MUMPITZ_DATA_DIR: /data
+      SCHAFFA_BASE_URL: ${SCHAFFA_BASE_URL:?set SCHAFFA_BASE_URL}
+      SCHAFFA_TOKEN_PEPPER: ${SCHAFFA_TOKEN_PEPPER:?load from secret manager}
+      SCHAFFA_BOOTSTRAP_TOKEN: ${SCHAFFA_BOOTSTRAP_TOKEN:?load from secret manager}
+      SCHAFFA_DATA_DIR: /data
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      CLAMAV_TIMEOUT_MS: ${CLAMAV_TIMEOUT_MS:-15000}
+      ANONYMOUS_PAGE_TTL_SECONDS: ${ANONYMOUS_PAGE_TTL_SECONDS:-3600}
+      ANONYMOUS_PAGE_RETENTION_DAYS: ${ANONYMOUS_PAGE_RETENTION_DAYS:-30}
+      ANONYMOUS_UPLOADS_PER_HOUR: ${ANONYMOUS_UPLOADS_PER_HOUR:-20}
       MAX_PAGE_BYTES: ${MAX_PAGE_BYTES:-2097152}
       MAX_FILE_BYTES: ${MAX_FILE_BYTES:-268435456}
       IMAGE_MAX_INPUT_PIXELS: ${IMAGE_MAX_INPUT_PIXELS:-40000000}
@@ -18,7 +24,10 @@ services:
       MAX_PUBLISHED_IMAGE_BYTES: ${MAX_PUBLISHED_IMAGE_BYTES:-8388608}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
-      - mumpitz-data:/data
+      - schaffa-data:/data
+    depends_on:
+      clamav:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/healthz"]
       interval: 30s
@@ -30,5 +39,17 @@ services:
     cap_drop:
       - ALL
 
+  clamav:
+    image: clamav/clamav:1.5.4
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CLAMAV_DEV_PORT:-3310}:3310"
+    volumes:
+      - clamav-signatures:/var/lib/clamav
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
-  mumpitz-data:
+  schaffa-data:
+  clamav-signatures:

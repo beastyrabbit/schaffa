@@ -19,7 +19,7 @@ if (!values.name) {
     const created = createToken(values.name, scopes);
     console.log(`Token ID: ${created.id}`);
     console.log(`Token: ${created.token}`);
-    console.log("Store this value now; Mumpitz does not persist the plaintext token.");
+    console.log("Store this value now; Schaffa does not persist the plaintext token.");
   } finally {
     closeDb();
   }

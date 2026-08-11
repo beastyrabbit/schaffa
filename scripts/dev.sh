@@ -9,14 +9,46 @@ command -v portless >/dev/null 2>&1 || {
   echo "portless must be installed globally." >&2
   exit 1
 }
+command -v docker >/dev/null 2>&1 || {
+  echo "Docker is required to run the local virus scanner." >&2
+  exit 1
+}
+command -v node >/dev/null 2>&1 || {
+  echo "Node.js is required for local development." >&2
+  exit 1
+}
 
-export MUMPITZ_DATA_DIR="${MUMPITZ_DATA_DIR:-./data/local}"
-export MUMPITZ_TOKEN_PEPPER="${MUMPITZ_TOKEN_PEPPER:-$(openssl rand -hex 32)}"
-export MUMPITZ_BOOTSTRAP_TOKEN="${MUMPITZ_BOOTSTRAP_TOKEN:-mpt_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')}"
+export SCHAFFA_DATA_DIR="${SCHAFFA_DATA_DIR:-./data/local}"
+export SCHAFFA_BASE_URL="${SCHAFFA_BASE_URL:-http://schaffa.localhost:1355}"
+export SCHAFFA_TOKEN_PEPPER="${SCHAFFA_TOKEN_PEPPER:-$(openssl rand -hex 32)}"
+export SCHAFFA_BOOTSTRAP_TOKEN="${SCHAFFA_BOOTSTRAP_TOKEN:-sfa_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')}"
+export CLAMAV_HOST="${CLAMAV_HOST:-127.0.0.1}"
+if [ -z "${CLAMAV_DEV_PORT:-}" ]; then
+  CLAMAV_DEV_PORT="$(node -e "const net=require('node:net');const server=net.createServer();server.listen(0,'127.0.0.1',()=>{console.log(server.address().port);server.close()})")"
+  export CLAMAV_DEV_PORT
+fi
+export CLAMAV_PORT="${CLAMAV_PORT:-$CLAMAV_DEV_PORT}"
 
-echo "Local Mumpitz admin token (valid for this run):"
-echo "$MUMPITZ_BOOTSTRAP_TOKEN"
+cleanup() {
+  docker compose -p schaffa-dev stop clamav >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+docker compose -p schaffa-dev up -d clamav
+scanner_id="$(docker compose -p schaffa-dev ps -q clamav)"
+attempt=0
+while [ "$(docker inspect --format '{{.State.Health.Status}}' "$scanner_id" 2>/dev/null || true)" != "healthy" ]; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 180 ]; then
+    echo "ClamAV did not become healthy within three minutes." >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+echo "Local Schaffa admin token (valid for this run):"
+echo "$SCHAFFA_BOOTSTRAP_TOKEN"
 echo
-echo "Open the /admin path at the Portless URL printed below."
+echo "Open http://schaffa.localhost:1355/admin and sign in with this token."
 
-exec portless
+portless

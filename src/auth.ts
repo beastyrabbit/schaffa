@@ -9,15 +9,17 @@ export interface AuthToken {
   scopes: Set<TokenScope>;
 }
 
+export const anonymousActorId = "anonymous";
+
 export function hashToken(token: string): string {
   if (!config.tokenPepper) {
-    throw new Error("MUMPITZ_TOKEN_PEPPER is required for token operations.");
+    throw new Error("SCHAFFA_TOKEN_PEPPER is required for token operations.");
   }
   return createHmac("sha256", config.tokenPepper).update(token).digest("hex");
 }
 
 export function generateToken(): string {
-  return `mpt_${randomBytes(32).toString("base64url")}`;
+  return `sfa_${randomBytes(32).toString("base64url")}`;
 }
 
 export function createToken(
@@ -42,8 +44,8 @@ export function createToken(
 
 export function seedBootstrapToken(): void {
   if (!config.bootstrapToken) return;
-  if (!config.bootstrapToken.startsWith("mpt_") || config.bootstrapToken.length < 40) {
-    throw new Error("MUMPITZ_BOOTSTRAP_TOKEN must be a high-entropy mpt_ token.");
+  if (!config.bootstrapToken.startsWith("sfa_") || config.bootstrapToken.length < 40) {
+    throw new Error("SCHAFFA_BOOTSTRAP_TOKEN must be a high-entropy sfa_ token.");
   }
   const tokenHash = hashToken(config.bootstrapToken);
   db()
@@ -55,8 +57,18 @@ export function seedBootstrapToken(): void {
     .run(tokenHash);
 }
 
+export function seedAnonymousActor(): void {
+  db()
+    .prepare(
+      `INSERT INTO tokens (id, name, token_hash, scopes)
+       VALUES (?, 'Anonymous upload', 'system:anonymous', 'upload')
+       ON CONFLICT(id) DO NOTHING`,
+    )
+    .run(anonymousActorId);
+}
+
 export function authenticateToken(token: string | undefined): AuthToken | null {
-  if (!token?.startsWith("mpt_")) return null;
+  if (!token?.startsWith("sfa_")) return null;
   const row = db()
     .prepare("SELECT * FROM tokens WHERE token_hash = ? AND revoked_at IS NULL LIMIT 1")
     .get(hashToken(token)) as unknown as TokenRow | undefined;
