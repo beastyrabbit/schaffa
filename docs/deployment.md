@@ -8,7 +8,7 @@ Version tags publish a Linux AMD64 image and record its immutable digest in the
 matching Forgejo release:
 
 ```sh
-docker pull git.heerlab.com/beasty/schaffa:0.1.0
+docker pull git.heerlab.com/beasty/schaffa:0.1.1
 ```
 
 Production deployments should use the release's manifest digest. Release tags

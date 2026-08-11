@@ -17,7 +17,11 @@ WORKDIR /app
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-RUN mkdir /data && chown node:node /data
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    && rm -f /usr/local/bin/corepack /usr/local/bin/npm /usr/local/bin/npx \
+      /usr/local/bin/yarn /usr/local/bin/yarnpkg \
+    && mkdir /data \
+    && chown node:node /data
 USER node
 EXPOSE 3000
 VOLUME ["/data"]

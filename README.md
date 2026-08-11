@@ -59,7 +59,7 @@ skills/schaffa-publish/scripts/publish.sh file examples/test-asset.png
 The separately publishable npm package lives in `packages/cli`:
 
 ```sh
-npx --registry=https://git.heerlab.com/api/packages/beasty/npm/ schaffa@0.1.0 upload ./plan.html
+npx --registry=https://git.heerlab.com/api/packages/beasty/npm/ schaffa@0.1.1 upload ./plan.html
 ```
 
 The CLI defaults to `https://schaffa.dev`. New HTML pages work without a token and disappear after one hour. For permanent pages, files, and `--slug <slug>` updates, set `SCHAFFA_TOKEN` or pass `--token <token>` directly.
@@ -67,11 +67,11 @@ The CLI defaults to `https://schaffa.dev`. New HTML pages work without a token a
 ## Releases
 
 Pushes and pull requests run CI without publishing. A semantic version tag such
-as `v0.1.0` publishes the matching CLI package and immutable container image,
+as `v0.1.1` publishes the matching CLI package and immutable container image,
 then creates a Forgejo release with checksums and the image digest:
 
 ```sh
-docker pull git.heerlab.com/beasty/schaffa:0.1.0
+docker pull git.heerlab.com/beasty/schaffa:0.1.1
 ```
 
 Production deployments should pin the digest recorded in the Forgejo release.

@@ -1,6 +1,6 @@
 {
   "name": "schaffa",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The workhorse that connects an AI agent's HTML pages and files to the web.",
   "license": "MIT",
   "type": "module",
