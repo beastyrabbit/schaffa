@@ -1,0 +1,46 @@
+{
+  "name": "mumpitz",
+  "version": "0.1.0",
+  "description": "Self-hosted public page and file publishing for agents.",
+  "private": true,
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm security",
+    "dev": "scripts/dev.sh",
+    "dev:server": "tsx watch src/server.ts",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "security": "gitleaks dir . --redact --no-banner",
+    "start": "node dist/server.js",
+    "test": "tsx --test test/**/*.test.ts",
+    "token": "tsx scripts/token.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "self-hosted",
+    "static-pages",
+    "file-upload"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/formbody": "^9.0.0",
+    "@fastify/multipart": "^10.1.0",
+    "fastify": "^5.11.3",
+    "mime-types": "^3.0.2",
+    "parse5": "^8.0.1",
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.7",
+    "@types/mime-types": "^3.0.1",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  },
+  "packageManager": "pnpm@11.21.0+sha512.521705bce689924eac72f5a3587122f362689ef6571e55ba80076fd637c11132ecffada26fad4ea79c485bfddbfd3d5a2a5b05805a77e893de71ec8a6cca3bb1"
+}

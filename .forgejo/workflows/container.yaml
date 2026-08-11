@@ -1,0 +1,55 @@
+name: Build container image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+enable-openid-connect: true
+
+permissions:
+  contents: read
+
+jobs:
+  container:
+    runs-on: personal
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Docker CLI
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates docker.io
+          docker --version
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver: remote
+          endpoint: tcp://buildkitd.forgejo-runners.svc.cluster.local:1234
+
+      - name: Log in to Forgejo Container Registry
+        uses: https://git.heerlab.com/beasty/forgejo-ci/actions/registry-login@main
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: git.heerlab.com/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=sha
+
+      - name: Build and publish image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

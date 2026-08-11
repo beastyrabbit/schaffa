@@ -1,0 +1,12 @@
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      run: pnpm biome check {staged_files}
+    gitleaks:
+      run: gitleaks git --pre-commit --staged --redact --no-banner
+
+pre-push:
+  commands:
+    quality:
+      run: pnpm check

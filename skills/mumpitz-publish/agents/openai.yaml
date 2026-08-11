@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mumpitz Publish"
+  short_description: "Publish pages and files to Mumpitz"
+  default_prompt: "Use Mumpitz to publish this HTML page or file and return its public URL."
