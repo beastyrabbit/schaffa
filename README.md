@@ -59,7 +59,7 @@ The separately publishable npm package lives in `packages/cli`:
 npx schaffa upload ./plan.html
 ```
 
-The CLI defaults to `https://schaffa.dev`. New HTML pages work without a token and disappear after one hour. Set `SCHAFFA_TOKEN` for permanent pages, files, and `--slug <slug>` updates.
+The CLI defaults to `https://schaffa.dev`. New HTML pages work without a token and disappear after one hour. For permanent pages, files, and `--slug <slug>` updates, set `SCHAFFA_TOKEN` or pass `--token <token>` directly.
 
 ## Container
 
