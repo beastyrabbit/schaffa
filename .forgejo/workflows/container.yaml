@@ -1,12 +1,10 @@
-name: Build container image
+name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
-
-enable-openid-connect: true
 
 permissions:
   contents: read
@@ -20,6 +18,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -36,61 +36,7 @@ jobs:
         run: pnpm typecheck && pnpm lint && pnpm test
 
       - name: Scan committed content for secrets
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        uses: https://github.com/gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
 
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level high
-
-  container:
-    needs: quality
-    if: github.event_name != 'pull_request'
-    runs-on: personal
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - name: Install Docker CLI
-        run: |
-          set -euo pipefail
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates docker.io
-          docker --version
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
-        with:
-          driver: remote
-          endpoint: tcp://buildkitd.forgejo-runners.svc.cluster.local:1234
-
-      - name: Log in to Forgejo Container Registry
-        uses: https://git.heerlab.com/beasty/forgejo-ci/actions/registry-login@e6e0611428eac502ba6677649c0ef40fbaa79a0c
-
-      - name: Extract image metadata
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
-        with:
-          images: git.heerlab.com/${{ github.repository }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=branch
-            type=sha
-
-      - name: Build and publish image
-        id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-      - name: Scan published image
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
-        with:
-          image-ref: git.heerlab.com/${{ github.repository }}@${{ steps.build.outputs.digest }}
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: 1

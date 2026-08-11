@@ -5,7 +5,7 @@ Schaffa is the workhorse that connects an AI agent's output to the web. Its name
 Schaffa is heavily inspired by [PostPlan](https://postplan.dev) and [UploadThing](https://uploadthing.com), but built to be self-hosted.
 
 - Source: [git.heerlab.com/beasty/schaffa](https://git.heerlab.com/beasty/schaffa)
-- Image: `git.heerlab.com/beasty/schaffa:latest` (`linux/amd64`)
+- Image: `git.heerlab.com/beasty/schaffa:<version>` (`linux/amd64`)
 - License: MIT
 
 ## What it does
@@ -59,18 +59,22 @@ skills/schaffa-publish/scripts/publish.sh file examples/test-asset.png
 The separately publishable npm package lives in `packages/cli`:
 
 ```sh
-npx schaffa upload ./plan.html
+npx --registry=https://git.heerlab.com/api/packages/beasty/npm/ schaffa@0.1.0 upload ./plan.html
 ```
 
 The CLI defaults to `https://schaffa.dev`. New HTML pages work without a token and disappear after one hour. For permanent pages, files, and `--slug <slug>` updates, set `SCHAFFA_TOKEN` or pass `--token <token>` directly.
 
-## Container
+## Releases
 
-Every push to `main` publishes `latest`, `main`, and a commit-SHA tag:
+Pushes and pull requests run CI without publishing. A semantic version tag such
+as `v0.1.0` publishes the matching CLI package and immutable container image,
+then creates a Forgejo release with checksums and the image digest:
 
 ```sh
-docker pull git.heerlab.com/beasty/schaffa:latest
+docker pull git.heerlab.com/beasty/schaffa:0.1.0
 ```
+
+Production deployments should pin the digest recorded in the Forgejo release.
 
 ## Documentation
 

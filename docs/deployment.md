@@ -4,13 +4,16 @@ Schaffa runs as an application container plus an isolated ClamAV container. The 
 
 ## Container image
 
-The public Forgejo workflow publishes a Linux AMD64 image:
+Version tags publish a Linux AMD64 image and record its immutable digest in the
+matching Forgejo release:
 
 ```sh
-docker pull git.heerlab.com/beasty/schaffa:latest
+docker pull git.heerlab.com/beasty/schaffa:0.1.0
 ```
 
-Use the immutable `sha-<commit>` tag when a deployment must remain pinned. `latest` tracks the current `main` branch.
+Production deployments should use the release's manifest digest. Release tags
+also publish a commit-SHA image tag; `latest` tracks the newest stable release,
+not the `main` branch.
 
 ## Recommended Pangolin resource
 
