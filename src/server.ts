@@ -5,6 +5,7 @@ import formbody from "@fastify/formbody";
 import multipart from "@fastify/multipart";
 import scalarApiReference from "@scalar/fastify-api-reference";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import sharp from "sharp";
 import {
   anonymousActorId,
   authenticateToken,
@@ -67,6 +68,8 @@ import { scanUpload } from "./virus-scanner.js";
 const adminCookie = config.cookieSecure ? "__Secure-schaffa_admin" : "schaffa_admin";
 const userCookie = config.cookieSecure ? "__Secure-schaffa_user" : "schaffa_user";
 const scalarNonce = randomBytes(24).toString("base64");
+const faviconPngs = new Map<number, Promise<Buffer>>();
+let faviconIcoPromise: Promise<Buffer> | undefined;
 const pageCsp = [
   "default-src 'none'",
   "img-src 'self' data:",
@@ -198,8 +201,33 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     return reply.type("image/svg+xml; charset=utf-8").send(faviconSvg);
   });
 
+  for (const size of [16, 32, 180, 192, 512]) {
+    app.get(`/assets/favicon-${size}.png`, async (_request, reply) => {
+      reply.header("Cache-Control", "public, max-age=86400");
+      return reply.type("image/png").send(await faviconPng(size));
+    });
+  }
+
   app.get("/favicon.ico", async (_request, reply) => {
-    return reply.redirect("/assets/favicon-c.svg", 302);
+    reply.header("Cache-Control", "public, max-age=86400");
+    return reply.type("image/x-icon").send(await faviconIco());
+  });
+
+  app.get("/site.webmanifest", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=86400");
+    return reply.type("application/manifest+json").send({
+      name: "Schaffa",
+      short_name: "Schaffa",
+      description: "Self-hosted publishing for agents",
+      start_url: "/",
+      display: "standalone",
+      background_color: "#f3f0e8",
+      theme_color: "#20211e",
+      icons: [
+        { src: "/assets/favicon-192.png", sizes: "192x192", type: "image/png" },
+        { src: "/assets/favicon-512.png", sizes: "512x512", type: "image/png" },
+      ],
+    });
   });
 
   app.get("/assets/account.js", async (_request, reply) => {
@@ -653,7 +681,7 @@ function requireAdminCookie(request: FastifyRequest) {
 function adminHeaders(reply: FastifyReply): void {
   reply.headers({
     "Content-Security-Policy":
-      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "default-src 'none'; img-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     "X-Frame-Options": "DENY",
   });
 }
@@ -661,7 +689,7 @@ function adminHeaders(reply: FastifyReply): void {
 function accountHeaders(reply: FastifyReply): void {
   const shooOrigin = new URL(config.shooBaseUrl).origin;
   reply.headers({
-    "Content-Security-Policy": `default-src 'none'; script-src 'self' ${shooOrigin}; connect-src 'self' ${shooOrigin}; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
+    "Content-Security-Policy": `default-src 'none'; script-src 'self' ${shooOrigin}; connect-src 'self' ${shooOrigin}; img-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
     "X-Frame-Options": "DENY",
   });
 }
@@ -669,7 +697,7 @@ function accountHeaders(reply: FastifyReply): void {
 function publicSiteHeaders(reply: FastifyReply): void {
   reply.headers({
     "Content-Security-Policy":
-      "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+      "default-src 'none'; img-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
     "X-Frame-Options": "DENY",
   });
 }
@@ -680,6 +708,40 @@ function scalarHeaders(reply: FastifyReply, done: () => void): void {
     "X-Frame-Options": "DENY",
   });
   done();
+}
+
+function faviconPng(size: number): Promise<Buffer> {
+  const existing = faviconPngs.get(size);
+  if (existing) return existing;
+  const generated = sharp(Buffer.from(faviconSvg)).resize(size, size).png().toBuffer();
+  faviconPngs.set(size, generated);
+  return generated;
+}
+
+function faviconIco(): Promise<Buffer> {
+  if (faviconIcoPromise) return faviconIcoPromise;
+  faviconIcoPromise = Promise.all([faviconPng(16), faviconPng(32)]).then((images) => {
+    const header = Buffer.alloc(6 + images.length * 16);
+    header.writeUInt16LE(0, 0);
+    header.writeUInt16LE(1, 2);
+    header.writeUInt16LE(images.length, 4);
+    let offset = header.length;
+    images.forEach((image, index) => {
+      const size = index === 0 ? 16 : 32;
+      const entry = 6 + index * 16;
+      header.writeUInt8(size, entry);
+      header.writeUInt8(size, entry + 1);
+      header.writeUInt8(0, entry + 2);
+      header.writeUInt8(0, entry + 3);
+      header.writeUInt16LE(1, entry + 4);
+      header.writeUInt16LE(32, entry + 6);
+      header.writeUInt32LE(image.length, entry + 8);
+      header.writeUInt32LE(offset, entry + 12);
+      offset += image.length;
+    });
+    return Buffer.concat([header, ...images]);
+  });
+  return faviconIcoPromise;
 }
 
 function renderUserLogin(signedOut: boolean): string {

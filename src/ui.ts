@@ -254,6 +254,10 @@ function layout(title: string, content: string, scripts = ""): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="/assets/favicon-c.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/assets/favicon-180.png" sizes="180x180">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#20211e">
   <title>${escapeHtml(title)} · Schaffa</title>
   <style>${styles}</style>
 </head>

@@ -155,6 +155,8 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.match(landing.body, /href="\/api">API/);
   assert.match(landing.body, /npx schaffa upload \.\/mypage\.html/);
   assert.match(landing.body, /rel="icon" href="\/assets\/favicon-c\.svg"/);
+  assert.match(landing.body, /rel="apple-touch-icon" href="\/assets\/favicon-180\.png"/);
+  assert.match(landing.body, /rel="manifest" href="\/site\.webmanifest"/);
   assert.match(landing.body, /url\('\/assets\/landing-bg\.svg'\)/);
   assert.match(String(landing.headers["content-security-policy"]), /default-src 'none'/);
   assert.match(String(landing.headers["content-security-policy"]), /img-src 'self'/);
@@ -176,6 +178,38 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   });
   assert.equal(favicon.statusCode, 200);
   assert.match(favicon.headers["content-type"] || "", /^image\/svg\+xml/);
+
+  for (const size of [16, 32, 180, 192, 512]) {
+    const png = await app.inject({
+      method: "GET",
+      url: `/assets/favicon-${size}.png`,
+      headers: { host: "schaffa.test" },
+    });
+    assert.equal(png.statusCode, 200);
+    assert.match(png.headers["content-type"] || "", /^image\/png/);
+    const metadata = await sharp(png.rawPayload).metadata();
+    assert.equal(metadata.width, size);
+    assert.equal(metadata.height, size);
+  }
+
+  const legacyFavicon = await app.inject({
+    method: "GET",
+    url: "/favicon.ico",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(legacyFavicon.statusCode, 200);
+  assert.match(legacyFavicon.headers["content-type"] || "", /^image\/x-icon/);
+  assert.equal(legacyFavicon.rawPayload.readUInt16LE(2), 1);
+  assert.equal(legacyFavicon.rawPayload.readUInt16LE(4), 2);
+
+  const manifest = await app.inject({
+    method: "GET",
+    url: "/site.webmanifest",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(manifest.statusCode, 200);
+  assert.equal(manifest.json().name, "Schaffa");
+  assert.equal(manifest.json().icons.length, 2);
 
   const apiRedirect = await app.inject({
     method: "GET",
