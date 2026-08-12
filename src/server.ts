@@ -180,7 +180,7 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
       defaultHttpClient: { targetKey: "shell", clientKey: "curl" },
       agent: { disabled: true },
       mcp: { disabled: true },
-      favicon: "/assets/favicon.svg",
+      favicon: "/assets/favicon-c.svg",
       customCss:
         ":root{--scalar-color-accent:#a43f24;--scalar-font:ui-sans-serif,system-ui,sans-serif;--scalar-font-code:ui-monospace,SFMono-Regular,Menlo,monospace}",
     },
@@ -193,13 +193,13 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     return reply.type("image/svg+xml; charset=utf-8").send(landingBackgroundSvg);
   });
 
-  app.get("/assets/favicon.svg", async (_request, reply) => {
+  app.get("/assets/favicon-c.svg", async (_request, reply) => {
     reply.header("Cache-Control", "public, max-age=86400");
     return reply.type("image/svg+xml; charset=utf-8").send(faviconSvg);
   });
 
   app.get("/favicon.ico", async (_request, reply) => {
-    return reply.redirect("/assets/favicon.svg", 302);
+    return reply.redirect("/assets/favicon-c.svg", 302);
   });
 
   app.get("/assets/account.js", async (_request, reply) => {

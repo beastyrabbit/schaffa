@@ -31,8 +31,8 @@ export const landingBackgroundSvg = `<svg xmlns="http://www.w3.org/2000/svg" vie
 </svg>`;
 
 export const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="12" fill="#d8b64b"/>
-  <path d="M13 19h38v31H13z" fill="#fbfaf6" stroke="#20211e" stroke-width="4"/>
-  <path d="M13 27h38M20 35h19M20 42h13" fill="none" stroke="#20211e" stroke-width="4"/>
-  <path d="m40 39 6 5-6 5" fill="none" stroke="#a43f24" stroke-linecap="square" stroke-width="4"/>
+  <rect width="64" height="64" rx="13" fill="#20211e"/>
+  <path d="M10 32h33" stroke="#fbfaf6" stroke-linecap="square" stroke-width="7"/>
+  <path d="m34 17 15 15-15 15" fill="none" stroke="#d8b64b" stroke-linecap="square" stroke-linejoin="miter" stroke-width="7"/>
+  <path d="M11 16h13M11 48h13" stroke="#a43f24" stroke-width="5"/>
 </svg>`;

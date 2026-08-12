@@ -154,7 +154,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.doesNotMatch(landing.body, /Publish anonymously|landing-principles|>01<|>02<|>03</);
   assert.match(landing.body, /href="\/api">API/);
   assert.match(landing.body, /npx schaffa upload \.\/mypage\.html/);
-  assert.match(landing.body, /rel="icon" href="\/assets\/favicon\.svg"/);
+  assert.match(landing.body, /rel="icon" href="\/assets\/favicon-c\.svg"/);
   assert.match(landing.body, /url\('\/assets\/landing-bg\.svg'\)/);
   assert.match(String(landing.headers["content-security-policy"]), /default-src 'none'/);
   assert.match(String(landing.headers["content-security-policy"]), /img-src 'self'/);
@@ -171,7 +171,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
 
   const favicon = await app.inject({
     method: "GET",
-    url: "/assets/favicon.svg",
+    url: "/assets/favicon-c.svg",
     headers: { host: "schaffa.test" },
   });
   assert.equal(favicon.statusCode, 200);
@@ -195,7 +195,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.match(api.body, /Schaffa API Reference/);
   assert.match(api.body, /"url": "\/metadata\/openapi\.json"/);
   assert.match(api.body, /src="js\/scalar\.js"/);
-  assert.match(api.body, /"favicon": "\/assets\/favicon\.svg"/);
+  assert.match(api.body, /"favicon": "\/assets\/favicon-c\.svg"/);
   assert.match(api.body, /"showDeveloperTools": "localhost"/);
   assert.doesNotMatch(api.body, /https?:\/\/.*(?:jsdelivr|scalar\.com)/);
   assert.match(String(api.headers["content-security-policy"]), /connect-src 'self'/);

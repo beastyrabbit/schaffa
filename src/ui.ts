@@ -253,7 +253,7 @@ function layout(title: string, content: string, scripts = ""): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/favicon-c.svg" type="image/svg+xml">
   <title>${escapeHtml(title)} · Schaffa</title>
   <style>${styles}</style>
 </head>
