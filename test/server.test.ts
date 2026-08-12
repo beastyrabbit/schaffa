@@ -149,11 +149,24 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.equal(landing.statusCode, 200);
   assert.match(landing.headers["content-type"] || "", /^text\/html/);
   assert.match(landing.body, /Turn finished work into a link/);
-  assert.match(landing.body, /href="\/account">Sign in or create account/);
+  assert.equal(landing.body.match(/href="\/account"/g)?.length, 1);
+  assert.match(landing.body, /href="\/account">Sign in/);
+  assert.doesNotMatch(landing.body, /Publish anonymously|landing-principles|>01<|>02<|>03</);
   assert.match(landing.body, /href="\/metadata\/openapi\.json">API/);
   assert.match(landing.body, /npx schaffa upload \.\/mypage\.html/);
+  assert.match(landing.body, /url\('\/assets\/landing-bg\.svg'\)/);
   assert.match(String(landing.headers["content-security-policy"]), /default-src 'none'/);
+  assert.match(String(landing.headers["content-security-policy"]), /img-src 'self'/);
   assert.match(String(landing.headers["content-security-policy"]), /frame-ancestors 'none'/);
+
+  const background = await app.inject({
+    method: "GET",
+    url: "/assets/landing-bg.svg",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(background.statusCode, 200);
+  assert.match(background.headers["content-type"] || "", /^image\/svg\+xml/);
+  assert.match(background.body, /Abstract stack of published pages/);
 
   const api = await app.inject({
     method: "GET",
@@ -173,7 +186,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.equal(specification.statusCode, 200);
   assert.match(specification.headers["content-type"] || "", /^application\/json/);
   assert.equal(specification.json().openapi, "3.1.0");
-  assert.equal(specification.json().info.version, "0.1.2");
+  assert.equal(specification.json().info.version, "0.2.0");
   assert.equal(specification.json().servers[0].url, "https://schaffa.test");
   assert.ok(specification.json().paths["/api/pages"].post);
   assert.ok(specification.json().paths["/api/pages/{slug}"].put);

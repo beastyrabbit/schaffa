@@ -68,12 +68,12 @@ The CLI defaults to `https://schaffa.dev`. New HTML pages work without a token a
 ## Releases
 
 Pushes and pull requests run CI without publishing. A semantic version tag such
-as `v0.1.2` publishes the matching CLI package to npmjs.org and Forgejo plus an
+as `v0.2.0` publishes the matching CLI package to npmjs.org and Forgejo plus an
 immutable container image,
 then creates a Forgejo release with checksums and the image digest:
 
 ```sh
-docker pull git.heerlab.com/beasty/schaffa:0.1.2
+docker pull git.heerlab.com/beasty/schaffa:0.2.0
 ```
 
 Production deployments should pin the digest recorded in the Forgejo release.

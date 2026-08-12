@@ -17,6 +17,7 @@ import {
 import { config } from "./config.js";
 import { closeDb, db, type TokenScope } from "./db.js";
 import { AppError } from "./errors.js";
+import { landingBackgroundSvg } from "./landing-background.js";
 import { openApiDocument } from "./openapi.js";
 import {
   consumeAnonymousUpload,
@@ -182,6 +183,11 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     },
   }));
   app.get("/metadata/openapi.json", async () => openApiDocument());
+
+  app.get("/assets/landing-bg.svg", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=86400");
+    return reply.type("image/svg+xml; charset=utf-8").send(landingBackgroundSvg);
+  });
 
   app.get("/assets/account.js", async (_request, reply) => {
     reply.header("Cache-Control", "public, max-age=3600");
@@ -709,7 +715,7 @@ function accountHeaders(reply: FastifyReply): void {
 function publicSiteHeaders(reply: FastifyReply): void {
   reply.headers({
     "Content-Security-Policy":
-      "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+      "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
     "X-Frame-Options": "DENY",
   });
 }

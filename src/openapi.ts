@@ -5,7 +5,7 @@ export function openApiDocument() {
     openapi: "3.1.0",
     info: {
       title: "Schaffa API",
-      version: "0.1.2",
+      version: "0.2.0",
       description:
         "Stable HTTP API for publishing standalone HTML pages and files. New HTML pages may be published anonymously for one hour; permanent publishing and management use bearer tokens.",
       license: { name: "MIT", identifier: "MIT" },

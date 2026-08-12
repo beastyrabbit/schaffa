@@ -86,7 +86,7 @@ and rotate only as a planned migration.
 sudo install -d -m 0750 -o "$USER" -g docker /opt/schaffa
 cd /opt/schaffa
 curl --fail --location --output compose.yaml \
-  https://git.heerlab.com/beasty/schaffa/raw/tag/v0.1.2/compose.yaml
+  https://git.heerlab.com/beasty/schaffa/raw/tag/v0.2.0/compose.yaml
 ```
 
 Read the selected release in Forgejo and copy its immutable container digest.
