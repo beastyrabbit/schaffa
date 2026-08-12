@@ -23,7 +23,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://git.heerlab.com/beasty/schaffa.git",
+    "url": "git+https://github.com/beastyrabbit/schaffa.git",
     "directory": "packages/cli"
   },
   "homepage": "https://schaffa.dev",
