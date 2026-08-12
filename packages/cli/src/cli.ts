@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { upload } from "./client.js";
 
@@ -73,7 +74,7 @@ async function main(): Promise<void> {
   process.stdout.write(json ? `${JSON.stringify(result)}\n` : `${result.publicUrl}\n`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : "Unknown error.";
     process.stderr.write(`Error: ${message}\n`);

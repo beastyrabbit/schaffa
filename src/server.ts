@@ -17,6 +17,7 @@ import {
 import { config } from "./config.js";
 import { closeDb, db, type TokenScope } from "./db.js";
 import { AppError } from "./errors.js";
+import { openApiDocument } from "./openapi.js";
 import {
   consumeAnonymousUpload,
   consumeAuthenticatedUpload,
@@ -47,6 +48,7 @@ import {
   renderAccountLogin,
   renderAdmin,
   renderAdminLogin,
+  renderLanding,
   renderPublicNotFound,
 } from "./ui.js";
 import {
@@ -156,15 +158,13 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
   });
 
   app.get("/healthz", async () => ({ ok: true }));
-  app.get("/", async () => ({
-    name: "Schaffa",
-    status: "ok",
-    baseUrl: config.baseUrl,
-    api: `${config.baseUrl}/api`,
-    account: `${config.baseUrl}/account`,
-  }));
+  app.get("/", async (_request, reply) => {
+    publicSiteHeaders(reply);
+    return reply.type("text/html; charset=utf-8").send(renderLanding());
+  });
   app.get("/api", async () => ({
     name: "Schaffa API",
+    openapi: `${config.baseUrl}/metadata/openapi.json`,
     authentication:
       "Bearer tokens are required except for new anonymous HTML pages, which expire after one hour.",
     endpoints: {
@@ -181,6 +181,7 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
       settings: "GET|PUT /api/settings (admin)",
     },
   }));
+  app.get("/metadata/openapi.json", async () => openApiDocument());
 
   app.get("/assets/account.js", async (_request, reply) => {
     reply.header("Cache-Control", "public, max-age=3600");
@@ -701,6 +702,14 @@ function accountHeaders(reply: FastifyReply): void {
   const shooOrigin = new URL(config.shooBaseUrl).origin;
   reply.headers({
     "Content-Security-Policy": `default-src 'none'; script-src 'self' ${shooOrigin}; connect-src 'self' ${shooOrigin}; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
+    "X-Frame-Options": "DENY",
+  });
+}
+
+function publicSiteHeaders(reply: FastifyReply): void {
+  reply.headers({
+    "Content-Security-Policy":
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
     "X-Frame-Options": "DENY",
   });
 }

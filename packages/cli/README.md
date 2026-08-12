@@ -7,7 +7,7 @@ Schaffa is the workhorse that connects an AI agent's output to the web. The name
 New HTML pages can be uploaded anonymously and remain public for one hour:
 
 ```sh
-npx --registry=https://git.heerlab.com/api/packages/beasty/npm/ schaffa@0.1.1 upload ./plan.html
+npx schaffa upload ./plan.html
 ```
 
 Anonymous pages disappear after one hour and are deleted after 30 days. Keep a bearer token in the environment for permanent pages, files, and page updates:

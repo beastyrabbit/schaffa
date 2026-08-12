@@ -135,6 +135,72 @@ jobs:
             pnpm --filter schaffa publish --no-git-checks --registry "$FORGEJO_NPM_REGISTRY"
           fi
 
+      - name: Fetch npmjs.org publish token from Infisical
+        run: |
+          set -euo pipefail
+          if ! command -v infisical >/dev/null 2>&1; then
+            export npm_config_prefix="$RUNNER_TEMP/npm-global"
+            mkdir -p "$npm_config_prefix"
+            npm install --global @infisical/cli@0.43.91
+            echo "$npm_config_prefix/bin" >> "$GITHUB_PATH"
+            export PATH="$npm_config_prefix/bin:$PATH"
+          fi
+
+          : "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:?Missing Forgejo OIDC request token}"
+          : "${ACTIONS_ID_TOKEN_REQUEST_URL:?Missing Forgejo OIDC request URL}"
+          oidc_response="$(curl -fsS \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://git.heerlab.com/beasty")"
+          forgejo_jwt="$(node -e 'const fs = require("fs"); const body = JSON.parse(fs.readFileSync(0, "utf8")); process.stdout.write(body.value || "");' <<< "$oidc_response")"
+          : "${forgejo_jwt:?Forgejo OIDC response did not include a token}"
+
+          infisical_token="$(infisical login \
+            --method oidc-auth \
+            --machine-identity-id 3391cc7a-1d47-45b1-914f-027e98c8b3fb \
+            --jwt "$forgejo_jwt" \
+            --domain http://infisical.auth.svc.cluster.local:8080 \
+            --plain --silent)"
+          : "${infisical_token:?Infisical OIDC login returned an empty token}"
+          echo "::add-mask::$infisical_token"
+
+          npm_token="$(infisical secrets get NPM_TOKEN \
+            --domain http://infisical.auth.svc.cluster.local:8080 \
+            --token "$infisical_token" \
+            --projectId b73713a0-7f0a-48fb-9d0b-360403e18bc2 \
+            --env prod \
+            --path /ci/npm \
+            --plain --silent)"
+          : "${npm_token:?Missing NPM_TOKEN in Schaffa /prod/ci/npm}"
+          echo "::add-mask::$npm_token"
+          {
+            echo "NODE_AUTH_TOKEN<<EOF"
+            printf '%s\n' "$npm_token"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Publish CLI package to npmjs.org
+        run: |
+          set -euo pipefail
+          : "${NODE_AUTH_TOKEN:?npmjs.org token was not loaded from Infisical}"
+          npmrc_path="$RUNNER_TEMP/npmjs-npmrc"
+          umask 077
+          {
+            echo 'registry=https://registry.npmjs.org/'
+            echo '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}'
+          } > "$npmrc_path"
+          export NPM_CONFIG_USERCONFIG="$npmrc_path"
+          published_version="$(npm view "schaffa@${RELEASE_VERSION}" version \
+            --registry https://registry.npmjs.org 2>/dev/null || true)"
+          if [[ -n "$published_version" ]]; then
+            [[ "$published_version" == "$RELEASE_VERSION" ]]
+            echo "schaffa@$RELEASE_VERSION is already published to npmjs.org."
+          else
+            pnpm --filter schaffa publish \
+              --no-git-checks \
+              --access public \
+              --registry https://registry.npmjs.org
+          fi
+
       - name: Create Forgejo release
         env:
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
@@ -146,7 +212,7 @@ jobs:
           printf 'git.heerlab.com/%s@%s\n' "$FORGEJO_REPOSITORY" "$IMAGE_DIGEST" > "$digest_file"
           printf '%s\n\n%s\n\n- CLI package: `schaffa@%s`\n- Container: `git.heerlab.com/%s:%s`\n- Digest: `%s`\n' \
             "# Schaffa $RELEASE_TAG" \
-            "Tagged release with an npm CLI package and an immutable container image." \
+            "Tagged release with a public npm CLI package, Forgejo package, and immutable container image." \
             "$RELEASE_VERSION" "$FORGEJO_REPOSITORY" "$RELEASE_VERSION" "$IMAGE_DIGEST" > "$body_file"
 
           prerelease=false

@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import { parseCliArgs } from "../dist/cli.js";
 import { upload } from "../dist/client.js";
 
 const token = `sfa_${"a".repeat(43)}`;
 const directory = await mkdtemp(path.join(os.tmpdir(), "schaffa-cli-test-"));
+const execFileAsync = promisify(execFile);
 
 test.after(async () => rm(directory, { recursive: true, force: true }));
 
@@ -69,6 +72,14 @@ test("accepts a command-line token and gives it precedence over the environment"
   assert.equal("help" in options, false);
   assert.equal(options.token, commandToken);
   assert.equal(options.slug, "abc234def567");
+});
+
+test("runs when the package binary points to the CLI through a symlink", async () => {
+  const binary = path.join(directory, "schaffa");
+  await symlink(path.resolve("dist/cli.js"), binary);
+  const { stdout, stderr } = await execFileAsync(process.execPath, [binary, "--help"]);
+  assert.match(stdout, /schaffa upload <file>/);
+  assert.equal(stderr, "");
 });
 
 test("updates an HTML page when a slug is supplied", async () => {

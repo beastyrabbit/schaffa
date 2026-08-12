@@ -1,5 +1,8 @@
 # HTTP API and URL model
 
+The stable OpenAPI 3.1 contract is published at
+`https://schaffa.dev/metadata/openapi.json`.
+
 Set the server origin without placing credentials on the command line:
 
 ```sh

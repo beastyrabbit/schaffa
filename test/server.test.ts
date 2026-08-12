@@ -140,6 +140,47 @@ test("rejects unauthenticated writes and unexpected hosts", async () => {
   assert.match(missingPage.body, /Seite nicht gefunden/);
 });
 
+test("serves a minimal public landing page while keeping API discovery machine-readable", async () => {
+  const landing = await app.inject({
+    method: "GET",
+    url: "/",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(landing.statusCode, 200);
+  assert.match(landing.headers["content-type"] || "", /^text\/html/);
+  assert.match(landing.body, /Turn finished work into a link/);
+  assert.match(landing.body, /href="\/account">Sign in or create account/);
+  assert.match(landing.body, /href="\/metadata\/openapi\.json">API/);
+  assert.match(landing.body, /npx schaffa upload \.\/mypage\.html/);
+  assert.match(String(landing.headers["content-security-policy"]), /default-src 'none'/);
+  assert.match(String(landing.headers["content-security-policy"]), /frame-ancestors 'none'/);
+
+  const api = await app.inject({
+    method: "GET",
+    url: "/api",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(api.statusCode, 200);
+  assert.match(api.headers["content-type"] || "", /^application\/json/);
+  assert.equal(api.json().name, "Schaffa API");
+  assert.equal(api.json().openapi, "https://schaffa.test/metadata/openapi.json");
+
+  const specification = await app.inject({
+    method: "GET",
+    url: "/metadata/openapi.json",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(specification.statusCode, 200);
+  assert.match(specification.headers["content-type"] || "", /^application\/json/);
+  assert.equal(specification.json().openapi, "3.1.0");
+  assert.equal(specification.json().info.version, "0.1.2");
+  assert.equal(specification.json().servers[0].url, "https://schaffa.test");
+  assert.ok(specification.json().paths["/api/pages"].post);
+  assert.ok(specification.json().paths["/api/pages/{slug}"].put);
+  assert.ok(specification.json().paths["/api/files"].post);
+  assert.ok(specification.json().paths["/api/settings"].put);
+});
+
 test("publishes immutable page versions under a stable slug", async () => {
   const firstHtml = "<h1>Hello version one is deliberately longer</h1>";
   const secondHtml = "<h1>Hello v2</h1>";
