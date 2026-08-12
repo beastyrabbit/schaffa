@@ -1,11 +1,10 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import cookie from "@fastify/cookie";
 import formbody from "@fastify/formbody";
 import multipart from "@fastify/multipart";
 import scalarApiReference from "@scalar/fastify-api-reference";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
-import sharp from "sharp";
 import {
   anonymousActorId,
   authenticateToken,
@@ -19,7 +18,7 @@ import {
 import { config } from "./config.js";
 import { closeDb, db } from "./db.js";
 import { AppError } from "./errors.js";
-import { faviconSvg, landingBackgroundSvg } from "./landing-background.js";
+import { landingBackgroundSvg } from "./landing-background.js";
 import { openApiDocument } from "./openapi.js";
 import {
   consumeAnonymousUpload,
@@ -68,8 +67,7 @@ import { scanUpload } from "./virus-scanner.js";
 const adminCookie = config.cookieSecure ? "__Secure-schaffa_admin" : "schaffa_admin";
 const userCookie = config.cookieSecure ? "__Secure-schaffa_user" : "schaffa_user";
 const scalarNonce = randomBytes(24).toString("base64");
-const faviconPngs = new Map<number, Promise<Buffer>>();
-let faviconIcoPromise: Promise<Buffer> | undefined;
+const publicFile = (path: string) => new URL(`../public/${path}`, import.meta.url);
 const pageCsp = [
   "default-src 'none'",
   "img-src 'self' data:",
@@ -198,36 +196,26 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
 
   app.get("/assets/favicon-c.svg", async (_request, reply) => {
     reply.header("Cache-Control", "public, max-age=86400");
-    return reply.type("image/svg+xml; charset=utf-8").send(faviconSvg);
+    return reply.type("image/svg+xml; charset=utf-8").send(await readFile(publicFile("icons/favicon.svg")));
   });
 
   for (const size of [16, 32, 180, 192, 512]) {
     app.get(`/assets/favicon-${size}.png`, async (_request, reply) => {
       reply.header("Cache-Control", "public, max-age=86400");
-      return reply.type("image/png").send(await faviconPng(size));
+      return reply.type("image/png").send(await readFile(publicFile(`icons/favicon-${size}.png`)));
     });
   }
 
   app.get("/favicon.ico", async (_request, reply) => {
     reply.header("Cache-Control", "public, max-age=86400");
-    return reply.type("image/x-icon").send(await faviconIco());
+    return reply.type("image/x-icon").send(await readFile(publicFile("favicon.ico")));
   });
 
   app.get("/site.webmanifest", async (_request, reply) => {
     reply.header("Cache-Control", "public, max-age=86400");
-    return reply.type("application/manifest+json").send({
-      name: "Schaffa",
-      short_name: "Schaffa",
-      description: "Self-hosted publishing for agents",
-      start_url: "/",
-      display: "standalone",
-      background_color: "#f3f0e8",
-      theme_color: "#20211e",
-      icons: [
-        { src: "/assets/favicon-192.png", sizes: "192x192", type: "image/png" },
-        { src: "/assets/favicon-512.png", sizes: "512x512", type: "image/png" },
-      ],
-    });
+    return reply
+      .type("application/manifest+json")
+      .send(await readFile(publicFile("site.webmanifest")));
   });
 
   app.get("/assets/account.js", async (_request, reply) => {
@@ -710,39 +698,6 @@ function scalarHeaders(reply: FastifyReply, done: () => void): void {
   done();
 }
 
-function faviconPng(size: number): Promise<Buffer> {
-  const existing = faviconPngs.get(size);
-  if (existing) return existing;
-  const generated = sharp(Buffer.from(faviconSvg)).resize(size, size).png().toBuffer();
-  faviconPngs.set(size, generated);
-  return generated;
-}
-
-function faviconIco(): Promise<Buffer> {
-  if (faviconIcoPromise) return faviconIcoPromise;
-  faviconIcoPromise = Promise.all([faviconPng(16), faviconPng(32)]).then((images) => {
-    const header = Buffer.alloc(6 + images.length * 16);
-    header.writeUInt16LE(0, 0);
-    header.writeUInt16LE(1, 2);
-    header.writeUInt16LE(images.length, 4);
-    let offset = header.length;
-    images.forEach((image, index) => {
-      const size = index === 0 ? 16 : 32;
-      const entry = 6 + index * 16;
-      header.writeUInt8(size, entry);
-      header.writeUInt8(size, entry + 1);
-      header.writeUInt8(0, entry + 2);
-      header.writeUInt8(0, entry + 3);
-      header.writeUInt16LE(1, entry + 4);
-      header.writeUInt16LE(32, entry + 6);
-      header.writeUInt32LE(image.length, entry + 8);
-      header.writeUInt32LE(offset, entry + 12);
-      offset += image.length;
-    });
-    return Buffer.concat([header, ...images]);
-  });
-  return faviconIcoPromise;
-}
 
 function renderUserLogin(signedOut: boolean): string {
   return renderAccountLogin({

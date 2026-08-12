@@ -29,10 +29,3 @@ export const landingBackgroundSvg = `<svg xmlns="http://www.w3.org/2000/svg" vie
   <path d="M75 81c28-33 60-48 98-45M52 121c42-22 81-28 117-17" fill="none" stroke="#20211e" stroke-linecap="square" stroke-width="8"/>
   <path d="m648 598 28-58 28 58 62 9-45 43 11 62-56-29-55 29 10-62-45-43Z" fill="#fbfaf6" stroke="#20211e" stroke-linejoin="bevel" stroke-width="6"/>
 </svg>`;
-
-export const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="13" fill="#20211e"/>
-  <path d="M10 32h33" stroke="#fbfaf6" stroke-linecap="square" stroke-width="7"/>
-  <path d="m34 17 15 15-15 15" fill="none" stroke="#d8b64b" stroke-linecap="square" stroke-linejoin="miter" stroke-width="7"/>
-  <path d="M11 16h13M11 48h13" stroke="#a43f24" stroke-width="5"/>
-</svg>`;

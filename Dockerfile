@@ -6,6 +6,7 @@ COPY packages/cli/package.json ./packages/cli/package.json
 RUN pnpm install --frozen-lockfile
 COPY tsconfig.json tsconfig.build.json biome.json ./
 COPY src ./src
+COPY public ./public
 RUN pnpm build:server && CI=true pnpm prune --prod
 
 FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS runtime
@@ -17,6 +18,7 @@ WORKDIR /app
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/public ./public
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
     && rm -f /usr/local/bin/corepack /usr/local/bin/npm /usr/local/bin/npx \
       /usr/local/bin/yarn /usr/local/bin/yarnpkg \
