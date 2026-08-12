@@ -2,12 +2,8 @@ name: Publish npm package
 
 on:
   push:
-    branches: [main]
-    paths:
-      - ".github/workflows/publish.yml"
-      - "packages/cli/**"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
+    tags:
+      - "v*"
 
 permissions:
   contents: read
@@ -36,6 +32,17 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version="$(node -p 'require("./packages/cli/package.json").version')"
+          root_version="$(node -p 'require("./package.json").version')"
+          if [[ "$GITHUB_REF_NAME" != "v${package_version}" || "$root_version" != "$package_version" ]]; then
+            echo "Tag $GITHUB_REF_NAME must match root and CLI package versions ($root_version, $package_version)." >&2
+            exit 1
+          fi
 
       - name: Check whether this version is already published
         id: version
