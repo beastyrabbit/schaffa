@@ -196,7 +196,9 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
 
   app.get("/assets/favicon-c.svg", async (_request, reply) => {
     reply.header("Cache-Control", "public, max-age=86400");
-    return reply.type("image/svg+xml; charset=utf-8").send(await readFile(publicFile("icons/favicon.svg")));
+    return reply
+      .type("image/svg+xml; charset=utf-8")
+      .send(await readFile(publicFile("icons/favicon.svg")));
   });
 
   for (const size of [16, 32, 180, 192, 512]) {
@@ -697,7 +699,6 @@ function scalarHeaders(reply: FastifyReply, done: () => void): void {
   });
   done();
 }
-
 
 function renderUserLogin(signedOut: boolean): string {
   return renderAccountLogin({
