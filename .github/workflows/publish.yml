@@ -19,6 +19,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Ensure the tagged commit is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
       - name: Set up Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -27,41 +32,44 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
+      - name: Validate release version
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs");
+          const tag = process.env.GITHUB_REF_NAME;
+          const root = require("./package.json");
+          const cli = require("./packages/cli/package.json");
+          if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag || "")) {
+            throw new Error(`Release tag ${tag || "<missing>"} is not a supported semantic version.`);
+          }
+          if (root.version !== cli.version || tag !== `v${cli.version}`) {
+            throw new Error(
+              `Tag ${tag} must match root and CLI package versions (${root.version}, ${cli.version}).`,
+            );
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, `RELEASE_VERSION=${cli.version}\nRELEASE_TAG=${tag}\n`);
+          NODE
+
+      - name: Ensure this version is not already published
+        run: |
+          set -euo pipefail
+          if npm view "schaffa@${RELEASE_VERSION}" version >/dev/null 2>&1; then
+            echo "schaffa@${RELEASE_VERSION} is already published. Bump the version instead of moving the tag." >&2
+            exit 1
+          fi
+
       - name: Enable pnpm
         run: corepack enable
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Validate release version
-        shell: bash
-        run: |
-          set -euo pipefail
-          package_version="$(node -p 'require("./packages/cli/package.json").version')"
-          root_version="$(node -p 'require("./package.json").version')"
-          if [[ "$GITHUB_REF_NAME" != "v${package_version}" || "$root_version" != "$package_version" ]]; then
-            echo "Tag $GITHUB_REF_NAME must match root and CLI package versions ($root_version, $package_version)." >&2
-            exit 1
-          fi
-
-      - name: Check whether this version is already published
-        id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-          package_version="$(node -p 'require("./packages/cli/package.json").version')"
-          published_version="$(npm view "schaffa@${package_version}" version 2>/dev/null || true)"
-          if [[ "$published_version" == "$package_version" ]]; then
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "schaffa@$package_version is already published."
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build and test CLI
-        if: steps.version.outputs.publish == 'true'
-        run: pnpm --filter schaffa test
-
       - name: Publish CLI with npm Trusted Publishing
-        if: steps.version.outputs.publish == 'true'
-        run: pnpm --filter schaffa publish --no-git-checks --access public
+        run: |
+          set -euo pipefail
+          dist_tag=latest
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            dist_tag=next
+          fi
+          pnpm --filter schaffa publish --no-git-checks --access public --tag "$dist_tag"

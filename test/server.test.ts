@@ -252,7 +252,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.equal(specification.statusCode, 200);
   assert.match(specification.headers["content-type"] || "", /^application\/json/);
   assert.equal(specification.json().openapi, "3.1.0");
-  assert.equal(specification.json().info.version, "0.2.0");
+  assert.equal(specification.json().info.version, "0.2.1");
   assert.equal(specification.json().servers[0].url, "https://schaffa.test");
   assert.ok(specification.json().paths["/api/pages"].post);
   assert.ok(specification.json().paths["/api/pages/{slug}"].put);
