@@ -197,27 +197,10 @@ route-appropriate Content Security Policy.
 
 ## 7. Replace the bootstrap administrator
 
-Use the bootstrap token from Infisical once to create a separate administrator
-token. Keep the value out of shell history by loading it into the environment:
-
-```sh
-export SCHAFFA_URL=https://publish.example.com
-export SCHAFFA_TOKEN="$(infisical secrets get SCHAFFA_BOOTSTRAP_TOKEN \
-  --projectId YOUR_SCHAFFA_PROJECT_ID \
-  --env prod \
-  --path /runtime \
-  --plain --silent)"
-
-curl --fail-with-body --silent --show-error \
-  -H "Authorization: Bearer $SCHAFFA_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"production-admin","scopes":["admin","upload"]}' \
-  "$SCHAFFA_URL/api/tokens"
-```
-
-Store the returned administrator token immediately in Infisical as a separate
-secret with a narrow human/operator access policy. Confirm it works, revoke the
-bootstrap token through `/admin` or `DELETE /api/tokens/bootstrap`, then delete
+Open `/admin`, sign in once with the bootstrap token from Infisical, and create
+a separate administrator token in the Tokens section. Store the displayed
+administrator token immediately in Infisical with a narrow human/operator
+access policy. Confirm it works, revoke the bootstrap token through `/admin`, then delete
 `SCHAFFA_BOOTSTRAP_TOKEN` from `prod/runtime` and recreate Schaffa. An absent
 bootstrap value keeps the bootstrap row revoked.
 

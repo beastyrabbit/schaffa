@@ -1,8 +1,9 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import cookie from "@fastify/cookie";
 import formbody from "@fastify/formbody";
 import multipart from "@fastify/multipart";
+import scalarApiReference from "@scalar/fastify-api-reference";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import {
   anonymousActorId,
@@ -15,9 +16,9 @@ import {
   seedBootstrapToken,
 } from "./auth.js";
 import { config } from "./config.js";
-import { closeDb, db, type TokenScope } from "./db.js";
+import { closeDb, db } from "./db.js";
 import { AppError } from "./errors.js";
-import { landingBackgroundSvg } from "./landing-background.js";
+import { faviconSvg, landingBackgroundSvg } from "./landing-background.js";
 import { openApiDocument } from "./openapi.js";
 import {
   consumeAnonymousUpload,
@@ -28,7 +29,6 @@ import {
   deleteFile,
   deletePage,
   deletePageVersion,
-  filePublicUrl,
   getFile,
   getPageVersion,
   listFiles,
@@ -66,6 +66,7 @@ import { scanUpload } from "./virus-scanner.js";
 
 const adminCookie = config.cookieSecure ? "__Secure-schaffa_admin" : "schaffa_admin";
 const userCookie = config.cookieSecure ? "__Secure-schaffa_user" : "schaffa_user";
+const scalarNonce = randomBytes(24).toString("base64");
 const pageCsp = [
   "default-src 'none'",
   "img-src 'self' data:",
@@ -163,30 +164,42 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     publicSiteHeaders(reply);
     return reply.type("text/html; charset=utf-8").send(renderLanding());
   });
-  app.get("/api", async () => ({
-    name: "Schaffa API",
-    openapi: `${config.baseUrl}/metadata/openapi.json`,
-    authentication:
-      "Bearer tokens are required except for new anonymous HTML pages, which expire after one hour.",
-    endpoints: {
-      createPage: "POST /api/pages (multipart field: html; random slug)",
-      updatePage: "PUT /api/pages/:slug (multipart field: html)",
-      uploadFile: "POST /api/files (multipart field: file)",
-      listPages: "GET /api/pages (admin)",
-      listFiles: "GET /api/files (admin)",
-      deletePage: "DELETE /api/pages/:slug (admin)",
-      deletePageVersion: "DELETE /api/pages/:slug/versions/:version (admin)",
-      deleteFile: "DELETE /api/files/:id (admin)",
-      createToken: "POST /api/tokens (admin)",
-      listUsers: "GET /api/users (admin)",
-      settings: "GET|PUT /api/settings (admin)",
+  app.register(scalarApiReference, {
+    routePrefix: "/api",
+    configuration: {
+      url: "/metadata/openapi.json",
+      pageTitle: "Schaffa API Reference",
+      nonce: scalarNonce,
+      theme: "default",
+      layout: "modern",
+      telemetry: false,
+      withDefaultFonts: false,
+      persistAuth: false,
+      hideClientButton: true,
+      showDeveloperTools: "localhost",
+      defaultHttpClient: { targetKey: "shell", clientKey: "curl" },
+      agent: { disabled: true },
+      mcp: { disabled: true },
+      favicon: "/assets/favicon.svg",
+      customCss:
+        ":root{--scalar-color-accent:#a43f24;--scalar-font:ui-sans-serif,system-ui,sans-serif;--scalar-font-code:ui-monospace,SFMono-Regular,Menlo,monospace}",
     },
-  }));
+    hooks: { onRequest: (_request, reply, done) => scalarHeaders(reply, done) },
+  });
   app.get("/metadata/openapi.json", async () => openApiDocument());
 
   app.get("/assets/landing-bg.svg", async (_request, reply) => {
     reply.header("Cache-Control", "public, max-age=86400");
     return reply.type("image/svg+xml; charset=utf-8").send(landingBackgroundSvg);
+  });
+
+  app.get("/assets/favicon.svg", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=86400");
+    return reply.type("image/svg+xml; charset=utf-8").send(faviconSvg);
+  });
+
+  app.get("/favicon.ico", async (_request, reply) => {
+    return reply.redirect("/assets/favicon.svg", 302);
   });
 
   app.get("/assets/account.js", async (_request, reply) => {
@@ -320,94 +333,6 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     return reply.code(201).send(result);
   });
 
-  app.get("/api/pages", async (request) => {
-    requireApiAuth(request, "admin");
-    return { pages: listPages() };
-  });
-  app.get("/api/files", async (request) => {
-    requireApiAuth(request, "admin");
-    return {
-      files: listFiles().map((file) => ({
-        ...file,
-        publicUrl: filePublicUrl(file.filename),
-      })),
-    };
-  });
-  app.get("/api/tokens", async (request) => {
-    requireApiAuth(request, "admin");
-    return { tokens: listTokens().map(({ token_hash: _hash, ...token }) => token) };
-  });
-  app.get("/api/users", async (request) => {
-    requireApiAuth(request, "admin");
-    return { users: listUsers() };
-  });
-  app.get("/api/settings", async (request) => {
-    requireApiAuth(request, "admin");
-    return getInstanceSettings();
-  });
-  app.put<{
-    Body: { writesLocked?: boolean; signupsEnabled?: boolean; loginsEnabled?: boolean };
-  }>("/api/settings", async (request) => {
-    requireApiAuth(request, "admin");
-    const body = request.body || {};
-    const entries = Object.entries(body);
-    if (
-      entries.length === 0 ||
-      entries.some(
-        ([key, value]) =>
-          !["writesLocked", "signupsEnabled", "loginsEnabled"].includes(key) ||
-          typeof value !== "boolean",
-      )
-    ) {
-      throw new AppError("Settings must contain supported boolean values.", 422);
-    }
-    return updateInstanceSettings(body);
-  });
-  app.post<{ Body: { name?: string; scopes?: string[] } }>(
-    "/api/tokens",
-    async (request, reply) => {
-      requireApiAuth(request, "admin");
-      const scopes = request.body?.scopes || ["upload"];
-      if (!scopes.every((scope): scope is TokenScope => ["upload", "admin"].includes(scope))) {
-        throw new AppError("Scopes may only contain upload or admin.", 422);
-      }
-      const created = createToken(request.body?.name || "Unnamed client", scopes);
-      return reply.code(201).send({
-        ...created,
-        scopes,
-        warning: "This token is shown once. Store it in the approved credential store now.",
-      });
-    },
-  );
-  app.delete<{ Params: { id: string } }>("/api/tokens/:id", async (request, reply) => {
-    const auth = requireApiAuth(request, "admin");
-    revokeToken(request.params.id, auth.id);
-    return reply.code(204).send();
-  });
-  app.delete<{ Params: { slug: string } }>("/api/pages/:slug", async (request, reply) => {
-    requireApiAuth(request, "admin");
-    await deletePage(request.params.slug);
-    return reply.code(204).send();
-  });
-  app.delete<{ Params: { slug: string; version: string } }>(
-    "/api/pages/:slug/versions/:version",
-    async (request, reply) => {
-      requireApiAuth(request, "admin");
-      await deletePageVersion(request.params.slug, Number(request.params.version));
-      return reply.code(204).send();
-    },
-  );
-  app.delete<{ Params: { id: string } }>("/api/files/:id", async (request, reply) => {
-    requireApiAuth(request, "admin");
-    await deleteFile(request.params.id);
-    return reply.code(204).send();
-  });
-  app.delete<{ Params: { id: string } }>("/api/users/:id", async (request, reply) => {
-    requireApiAuth(request, "admin");
-    deleteUser(request.params.id);
-    return reply.code(204).send();
-  });
-
   app.get<{ Params: { slug: string } }>("/p/:slug", async (request, reply) => {
     return sendPage(reply, request.params.slug);
   });
@@ -486,6 +411,14 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     await deletePage(request.params.slug);
     return reply.redirect("/admin#pages");
   });
+  app.post<{ Params: { slug: string; version: string } }>(
+    "/admin/pages/:slug/versions/:version/delete",
+    async (request, reply) => {
+      requireAdminCookie(request);
+      await deletePageVersion(request.params.slug, Number(request.params.version));
+      return reply.redirect("/admin#pages");
+    },
+  );
   app.post<{ Params: { id: string } }>("/admin/files/:id/delete", async (request, reply) => {
     requireAdminCookie(request);
     await deleteFile(request.params.id);
@@ -498,6 +431,27 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
       reply.clearCookie(adminCookie, { path: "/admin" });
     }
     return reply.redirect("/admin#tokens");
+  });
+  app.post<{ Body: { name?: string; scope?: string } }>("/admin/tokens", async (request, reply) => {
+    const auth = requireAdminCookie(request);
+    const scope = request.body?.scope;
+    if (scope !== "upload" && scope !== "admin") {
+      throw new AppError("Invalid token scope.", 422);
+    }
+    const created = createToken(request.body?.name || "Unnamed client", [scope]);
+    return reply.type("text/html").send(
+      renderAdmin({
+        pages: listPages(),
+        files: listFiles(),
+        tokens: listTokens(),
+        users: listUsers(),
+        settings: getInstanceSettings(),
+        actorId: auth.id,
+        actorName: auth.name,
+        filters: adminFilters({}),
+        newToken: created.token,
+      }),
+    );
   });
   app.post<{ Params: { id: string } }>("/admin/users/:id/delete", async (request, reply) => {
     requireAdminCookie(request);
@@ -611,7 +565,7 @@ function safeInlineType(mediaType: string): boolean {
   return /^(image\/(?!svg\+xml)|audio\/|video\/|text\/plain$)/i.test(mediaType);
 }
 
-function requireApiAuth(request: FastifyRequest, scope: TokenScope) {
+function requireApiAuth(request: FastifyRequest, scope: "upload") {
   const token = bearerToken(request.headers.authorization);
   return requireScope(authenticateToken(token), scope);
 }
@@ -718,6 +672,14 @@ function publicSiteHeaders(reply: FastifyReply): void {
       "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
     "X-Frame-Options": "DENY",
   });
+}
+
+function scalarHeaders(reply: FastifyReply, done: () => void): void {
+  reply.headers({
+    "Content-Security-Policy": `default-src 'none'; script-src 'self' 'nonce-${scalarNonce}'; style-src 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src blob:; form-action 'none'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'`,
+    "X-Frame-Options": "DENY",
+  });
+  done();
 }
 
 function renderUserLogin(signedOut: boolean): string {

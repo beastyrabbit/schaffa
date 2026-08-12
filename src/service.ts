@@ -24,6 +24,7 @@ import { scanStoredUpload, scanUpload } from "./virus-scanner.js";
 
 export interface PageSummary extends PageRow {
   version_count: number;
+  version_numbers: number[];
   latest_bytes: number;
   uploader_id: string;
   uploader_name: string;
@@ -321,7 +322,7 @@ async function readUploadBuffer(input: Readable, limit: number): Promise<Buffer>
 }
 
 export function listPages(): PageSummary[] {
-  return db()
+  const pages = db()
     .prepare(
       `SELECT p.*,
               (SELECT COUNT(*) FROM page_versions pv WHERE pv.page_id = p.id) AS version_count,
@@ -338,7 +339,16 @@ export function listPages(): PageSummary[] {
        WHERE p.expires_at IS NULL OR datetime(p.expires_at) > CURRENT_TIMESTAMP
        ORDER BY p.updated_at DESC`,
     )
-    .all() as unknown as PageSummary[];
+    .all() as unknown as Array<Omit<PageSummary, "version_numbers">>;
+  const versions = db().prepare(
+    "SELECT version FROM page_versions WHERE page_id = ? ORDER BY version DESC",
+  );
+  return pages.map((page) => ({
+    ...page,
+    version_numbers: (versions.all(page.id) as unknown as Array<{ version: number }>).map(
+      ({ version }) => version,
+    ),
+  }));
 }
 
 export function listFiles(): FileSummary[] {

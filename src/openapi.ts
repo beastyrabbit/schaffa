@@ -7,54 +7,16 @@ export function openApiDocument() {
       title: "Schaffa API",
       version: "0.2.0",
       description:
-        "Stable HTTP API for publishing standalone HTML pages and files. New HTML pages may be published anonymously for one hour; permanent publishing and management use bearer tokens.",
+        "Stable HTTP API for publishing standalone HTML pages and files. New HTML pages may be published anonymously for one hour; permanent publishing, page updates, and files use bearer tokens.",
       license: { name: "MIT", identifier: "MIT" },
     },
     servers: [{ url: config.baseUrl }],
     security: [],
     tags: [
-      { name: "Discovery", description: "Health, capability, and contract metadata." },
       { name: "Pages", description: "Publish and read standalone HTML pages." },
       { name: "Files", description: "Publish and read immutable files." },
-      {
-        name: "Administration",
-        description: "Admin-scoped inventory, access, takedown, and instance controls.",
-      },
     ],
     paths: {
-      "/healthz": {
-        get: {
-          tags: ["Discovery"],
-          summary: "Check process health",
-          operationId: "getHealth",
-          responses: {
-            "200": jsonResponse("Healthy", { $ref: "#/components/schemas/Health" }),
-            "404": errorResponse("Unexpected host"),
-          },
-        },
-      },
-      "/api": {
-        get: {
-          tags: ["Discovery"],
-          summary: "Discover the API",
-          operationId: "getApiDiscovery",
-          responses: {
-            "200": jsonResponse("API discovery metadata"),
-            "404": errorResponse("Unexpected host"),
-          },
-        },
-      },
-      "/metadata/openapi.json": {
-        get: {
-          tags: ["Discovery"],
-          summary: "Download this OpenAPI document",
-          operationId: "getOpenApiDocument",
-          responses: {
-            "200": jsonResponse("OpenAPI 3.1 document"),
-            "404": errorResponse("Unexpected host"),
-          },
-        },
-      },
       "/api/pages": {
         post: {
           tags: ["Pages"],
@@ -68,17 +30,6 @@ export function openApiDocument() {
             "201": jsonResponse("Page published", { $ref: "#/components/schemas/PagePublication" }),
             "422": errorResponse("Rejected HTML or invalid multipart input"),
             "503": errorResponse("Publishing is locked or malware scanning is unavailable"),
-          },
-        },
-        get: {
-          tags: ["Administration"],
-          summary: "List pages",
-          operationId: "listPages",
-          security: [{ bearerAuth: [] }],
-          responses: {
-            "200": jsonResponse("Page inventory"),
-            "401": errorResponse("Missing or invalid admin token"),
-            "403": errorResponse("Admin scope required"),
           },
         },
       },
@@ -99,13 +50,6 @@ export function openApiDocument() {
             "404": errorResponse("Page not found"),
           },
         },
-        delete: adminDelete("Delete a page and all versions", "deletePage", [slugParameter]),
-      },
-      "/api/pages/{slug}/versions/{version}": {
-        delete: adminDelete("Delete a specific page version", "deletePageVersion", [
-          slugParameter,
-          versionParameter,
-        ]),
       },
       "/p/{slug}": pageRead("Read the latest page version", "getLatestPage", [slugParameter]),
       "/p/{slug}/{version}": pageRead("Read a specific page version", "getPageVersion", [
@@ -133,20 +77,6 @@ export function openApiDocument() {
             "422": errorResponse("Invalid multipart input"),
           },
         },
-        get: {
-          tags: ["Administration"],
-          summary: "List files",
-          operationId: "listFiles",
-          security: [{ bearerAuth: [] }],
-          responses: {
-            "200": jsonResponse("File inventory"),
-            "401": errorResponse("Missing or invalid admin token"),
-            "403": errorResponse("Admin scope required"),
-          },
-        },
-      },
-      "/api/files/{id}": {
-        delete: adminDelete("Delete a file", "deleteFile", [idParameter]),
       },
       "/f/{filename}": {
         get: {
@@ -175,53 +105,12 @@ export function openApiDocument() {
           },
         },
       },
-      "/api/tokens": {
-        post: {
-          tags: ["Administration"],
-          summary: "Create an API token",
-          operationId: "createToken",
-          security: [{ bearerAuth: [] }],
-          requestBody: jsonBody({ $ref: "#/components/schemas/CreateTokenInput" }),
-          responses: {
-            "201": jsonResponse("Token created; its plaintext value is returned once"),
-            "403": errorResponse("Admin scope required"),
-          },
-        },
-        get: adminList("List API token metadata", "listTokens"),
-      },
-      "/api/tokens/{id}": {
-        delete: adminDelete("Revoke an API token", "revokeToken", [idParameter]),
-      },
-      "/api/users": { get: adminList("List local Shoo users", "listUsers") },
-      "/api/users/{id}": {
-        delete: adminDelete("Delete a user and revoke their access", "deleteUser", [idParameter]),
-      },
-      "/api/settings": {
-        get: adminList("Read instance settings", "getSettings", {
-          $ref: "#/components/schemas/InstanceSettings",
-        }),
-        put: {
-          tags: ["Administration"],
-          summary: "Update instance settings",
-          operationId: "updateSettings",
-          security: [{ bearerAuth: [] }],
-          requestBody: jsonBody({ $ref: "#/components/schemas/InstanceSettingsUpdate" }),
-          responses: {
-            "200": jsonResponse("Updated settings", {
-              $ref: "#/components/schemas/InstanceSettings",
-            }),
-            "403": errorResponse("Admin scope required"),
-            "422": errorResponse("Unsupported or invalid setting"),
-          },
-        },
-      },
     },
     components: {
       securitySchemes: {
         bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "sfa_ token" },
       },
       schemas: {
-        Health: objectSchema({ ok: { type: "boolean", const: true } }, ["ok"]),
         Error: objectSchema({ error: { type: "string" }, message: { type: "string" } }, [
           "error",
           "message",
@@ -248,35 +137,6 @@ export function openApiDocument() {
           },
           ["id", "filename", "mediaType", "bytes", "publicUrl"],
         ),
-        CreateTokenInput: objectSchema(
-          {
-            name: { type: "string", maxLength: 80 },
-            scopes: {
-              type: "array",
-              items: { type: "string", enum: ["upload", "admin"] },
-              uniqueItems: true,
-            },
-          },
-          [],
-        ),
-        InstanceSettings: objectSchema(
-          {
-            writesLocked: { type: "boolean" },
-            signupsEnabled: { type: "boolean" },
-            loginsEnabled: { type: "boolean" },
-          },
-          ["writesLocked", "signupsEnabled", "loginsEnabled"],
-        ),
-        InstanceSettingsUpdate: {
-          type: "object",
-          additionalProperties: false,
-          minProperties: 1,
-          properties: {
-            writesLocked: { type: "boolean" },
-            signupsEnabled: { type: "boolean" },
-            loginsEnabled: { type: "boolean" },
-          },
-        },
       },
     },
   } as const;
@@ -296,13 +156,6 @@ const versionParameter = {
   schema: { type: "integer", minimum: 1 },
 } as const;
 
-const idParameter = {
-  name: "id",
-  in: "path",
-  required: true,
-  schema: { type: "string" },
-} as const;
-
 function multipartBody(field: string, mediaType: string) {
   return {
     required: true,
@@ -317,10 +170,6 @@ function multipartBody(field: string, mediaType: string) {
   };
 }
 
-function jsonBody(schema: object) {
-  return { required: true, content: { "application/json": { schema } } };
-}
-
 function jsonResponse(description: string, schema: object = { type: "object" }) {
   return { description, content: { "application/json": { schema } } };
 }
@@ -333,35 +182,6 @@ function binaryResponse(description: string) {
   return {
     description,
     content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
-  };
-}
-
-function adminDelete(summary: string, operationId: string, parameters: readonly object[]) {
-  return {
-    tags: ["Administration"],
-    summary,
-    operationId,
-    security: [{ bearerAuth: [] }],
-    parameters,
-    responses: {
-      "204": { description: "Deleted" },
-      "403": errorResponse("Admin scope required"),
-      "404": errorResponse("Resource not found"),
-    },
-  };
-}
-
-function adminList(summary: string, operationId: string, schema: object = { type: "object" }) {
-  return {
-    tags: ["Administration"],
-    summary,
-    operationId,
-    security: [{ bearerAuth: [] }],
-    responses: {
-      "200": jsonResponse("Successful response", schema),
-      "401": errorResponse("Missing or invalid admin token"),
-      "403": errorResponse("Admin scope required"),
-    },
   };
 }
 

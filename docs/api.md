@@ -9,7 +9,7 @@ Set the server origin without placing credentials on the command line:
 export SCHAFFA_URL="https://schaffa.dev"
 ```
 
-New HTML pages may be uploaded anonymously. They remain visible for one hour, then disappear from public reads, the admin UI, and listing APIs. Their stored data is retained for 30 days before automatic deletion. Anonymous files and page updates are rejected.
+New HTML pages may be uploaded anonymously. They remain visible for one hour, then disappear from public reads and the admin UI. Their stored data is retained for 30 days before automatic deletion. Anonymous files and page updates are rejected.
 
 Set `SCHAFFA_TOKEN="sfa_…"` for permanent pages, files, and updates. Public page and file reads do not require authentication.
 
@@ -73,31 +73,9 @@ Recognized images are auto-oriented, resized, stripped of EXIF/XMP/IPTC/ICC meta
 
 File reads support byte ranges. Public file and version responses use a five-minute cache lifetime so an admin takedown is not hidden behind a year-long immutable cache. Potentially active types such as HTML, SVG, XML, JavaScript, and PDF are served as downloads rather than rendered inline; file responses also carry a sandboxed, deny-by-default CSP.
 
-## Admin operations
+## Administration
 
-Admin-scoped bearer tokens can list pages, files, token metadata, and instance settings through `GET /api/pages`, `GET /api/files`, `GET /api/tokens`, and `GET /api/settings`. They can create a client token with:
-
-```sh
-curl --fail-with-body --silent --show-error \
-  -H "Authorization: Bearer $SCHAFFA_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"desktop-codex","scopes":["upload"]}' \
-  "$SCHAFFA_URL/api/tokens"
-```
-
-The plaintext token is returned only once. Store it immediately in the approved credential store.
-
-Emergency takedown and operational endpoints are admin-only:
-
-| Endpoint | Effect |
-| --- | --- |
-| `DELETE /api/pages/:slug` | Delete a page and every stored version |
-| `DELETE /api/pages/:slug/versions/:version` | Delete one version; deleting the only version deletes the page |
-| `DELETE /api/files/:id` | Delete a file |
-| `DELETE /api/tokens/:id` | Revoke a client token |
-| `GET /api/users` | List local Shoo users and token counts |
-| `DELETE /api/users/:id` | Delete a user and revoke all of their sessions and tokens |
-| `PUT /api/settings` | Toggle `writesLocked`, `signupsEnabled`, or `loginsEnabled` |
+Administration is intentionally not part of the public HTTP API or OpenAPI contract. Use the protected `/admin` interface to list and remove pages, individual page versions, and files; create and revoke upload or admin tokens; delete users; and control publishing lockdown, signups, and logins.
 
 Publishing lockdown preserves reads and takedowns. Disabling logins immediately deletes all active user sessions; disabling signups still permits existing users to log in. Revoking the bootstrap token requires another active admin token. Restarting with the same bootstrap environment value never reactivates it, but setting a new, different value replaces the stored hash and reactivates bootstrap; that rotation is the recovery path when every other admin token is lost.
 
