@@ -491,7 +491,8 @@ function assertStorageCapacity(additionalBytes: number): void {
     .prepare(
       `SELECT
          COALESCE((SELECT SUM(bytes) FROM page_versions), 0) +
-         COALESCE((SELECT SUM(bytes) FROM files), 0) AS bytes`,
+         COALESCE((SELECT SUM(bytes) FROM files), 0) +
+         COALESCE((SELECT SUM(bytes) FROM guide_images), 0) AS bytes`,
     )
     .get() as unknown as { bytes: number };
   if (row.bytes + reservedStorageBytes + additionalBytes > config.maxStorageBytes) {

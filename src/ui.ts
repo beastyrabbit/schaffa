@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import type { TokenRow } from "./db.js";
+import type { GuideRow, TokenRow } from "./db.js";
 import type { FileSummary, PageSummary } from "./service.js";
 import { filePublicUrl } from "./service.js";
 import type { InstanceSettings } from "./settings.js";
@@ -157,6 +157,7 @@ export const accountClientScript = `(() => {
 export function renderAdmin(input: {
   pages: PageSummary[];
   files: FileSummary[];
+  guides: Array<GuideRow & { step_count: number; uploader_name: string }>;
   tokens: TokenRow[];
   users: UserSummary[];
   settings: InstanceSettings;
@@ -203,6 +204,18 @@ export function renderAdmin(input: {
     )
     .join("");
 
+  const guideRows = input.guides
+    .map(
+      (guide) => `<tr>
+        <td><a href="${config.baseUrl}/g/${encodeURIComponent(guide.slug)}" target="_blank" rel="noopener noreferrer">${escapeHtml(guide.slug)}</a><span class="sub">${escapeHtml(guide.title)}</span></td>
+        <td><span class="state ${guide.status === "published" ? "" : "temporary"}">${escapeHtml(guide.status)}</span></td>
+        <td>${guide.current_revision}</td><td>${guide.step_count}</td><td>${escapeHtml(guide.uploader_name)}</td>
+        <td><time>${formatDate(guide.updated_at)}</time></td>
+        <td><form method="post" action="/admin/guides/${encodeURIComponent(guide.slug)}/delete"><button class="danger" type="submit">Guide löschen</button></form></td>
+      </tr>`,
+    )
+    .join("");
+
   const tokenRows = input.tokens
     .map(
       (token) => `<tr>
@@ -237,8 +250,9 @@ export function renderAdmin(input: {
         <label>Lebensdauer<select name="lifetime"><option value="all"${selected(input.filters.lifetime, "all")}>Alle</option><option value="permanent"${selected(input.filters.lifetime, "permanent")}>Dauerhaft</option><option value="anonymous-active"${selected(input.filters.lifetime, "anonymous-active")}>Anonym aktiv</option></select></label>
         <button type="submit">Filtern</button><a href="/admin">Zurücksetzen</a>
       </form>
-      <nav class="tabs" aria-label="Bereiche"><a href="#operations">Betrieb</a><a href="#pages">Seiten <span>${pages.length}</span></a><a href="#files">Dateien <span>${files.length}</span></a><a href="#users">Nutzer <span>${input.users.length}</span></a><a href="#tokens">Tokens <span>${input.tokens.length}</span></a></nav>
+      <nav class="tabs" aria-label="Bereiche"><a href="#operations">Betrieb</a><a href="#guides">Guides <span>${input.guides.length}</span></a><a href="#pages">Seiten <span>${pages.length}</span></a><a href="#files">Dateien <span>${files.length}</span></a><a href="#users">Nutzer <span>${input.users.length}</span></a><a href="#tokens">Tokens <span>${input.tokens.length}</span></a></nav>
       <section id="operations"><div class="section-heading"><h2>Betrieb</h2><p>Zugänge und Publishing im Notfall gezielt sperren.</p></div><div class="operation-list"><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="writesLocked" value="${input.settings.writesLocked ? "false" : "true"}"><div><strong>${input.settings.writesLocked ? "Publishing gesperrt" : "Publishing aktiv"}</strong><span class="sub">${input.settings.writesLocked ? "Nur Lesezugriffe und Admin-Wiederherstellung sind möglich." : "Uploads und Seiten-Updates werden angenommen."}</span></div><button class="${input.settings.writesLocked ? "" : "danger"}" type="submit">${input.settings.writesLocked ? "Lockdown aufheben" : "Lockdown aktivieren"}</button></form><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="signupsEnabled" value="${input.settings.signupsEnabled ? "false" : "true"}"><div><strong>Registrierungen ${input.settings.signupsEnabled ? "aktiv" : "gesperrt"}</strong><span class="sub">Steuert, ob eine neue Shoo-Identität ein Konto anlegen darf.</span></div><button class="${input.settings.signupsEnabled ? "danger" : ""}" type="submit">${input.settings.signupsEnabled ? "Registrierungen sperren" : "Registrierungen erlauben"}</button></form><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="loginsEnabled" value="${input.settings.loginsEnabled ? "false" : "true"}"><div><strong>Anmeldungen ${input.settings.loginsEnabled ? "aktiv" : "gesperrt"}</strong><span class="sub">Beim Sperren werden alle aktiven Nutzersitzungen beendet.</span></div><button class="${input.settings.loginsEnabled ? "danger" : ""}" type="submit">${input.settings.loginsEnabled ? "Anmeldungen sperren" : "Anmeldungen erlauben"}</button></form></div></section>
+      <section id="guides"><div class="section-heading"><h2>Guides</h2><p>Aufnahmen, Entwürfe und unveränderliche öffentliche Revisionen.</p></div><div class="table-wrap"><table><thead><tr><th>Guide</th><th>Status</th><th>Revision</th><th>Schritte</th><th>Uploader</th><th>Geändert</th><th>Aktion</th></tr></thead><tbody>${guideRows || emptyRow(7, "Noch keine Guides vorhanden.")}</tbody></table></div></section>
       <section id="pages"><div class="section-heading"><h2>Seiten</h2><p>Anonyme Seiten verschwinden nach einer Stunde; gespeichert bleiben sie 30 Tage.</p></div><div class="table-wrap"><table><thead><tr><th>Slug</th><th>Aktuell</th><th>Versionen</th><th>Uploader</th><th>Status</th><th>Größe</th><th>Geändert</th><th>Aktion</th></tr></thead><tbody>${pageRows || emptyRow(8, "Keine passenden Seiten gefunden.")}</tbody></table></div></section>
       <section id="files"><div class="section-heading"><h2>Dateien</h2><p>Unveränderliche URLs mit zufälliger 128-Bit-ID.</p></div><div class="table-wrap"><table><thead><tr><th>Datei</th><th>Typ</th><th>Uploader</th><th>Größe</th><th>Hochgeladen</th><th>Aktion</th></tr></thead><tbody>${fileRows || emptyRow(6, "Keine passenden Dateien gefunden.")}</tbody></table></div></section>
       <section id="users"><div class="section-heading"><h2>Nutzer</h2><p>Shoo-Identitäten und ihre Agenten-Tokens. Löschen widerruft alle zugehörigen Tokens und Sitzungen.</p></div><div class="table-wrap"><table><thead><tr><th>Nutzer</th><th>E-Mail</th><th>Aktive / alle Tokens</th><th>Letzte Anmeldung</th><th>Aktion</th></tr></thead><tbody>${userRows || emptyRow(5, "Keine Nutzer vorhanden.")}</tbody></table></div></section>

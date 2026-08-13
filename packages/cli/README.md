@@ -10,6 +10,19 @@ Publish a standalone HTML page with one command:
 npx schaffa upload ./plan.html
 ```
 
+## Guides and presentations
+
+```sh
+schaffa guide start --title "Create a project"
+schaffa guide step --title "Open projects" --text "Open the project list."
+schaffa guide finish
+schaffa guide publish
+
+schaffa publish deck.md --kind presentation --export pdf --export pptx
+```
+
+Guide commands persist the active random slug and edit revision under `.schaffa/guide-session.json`. Keep this working file out of source control. The bearer token remains in `SCHAFFA_TOKEN` and is never written to the session file.
+
 The command prints the public URL. New HTML pages can be published without an account; anonymous pages remain public for one hour and are deleted after 30 days.
 
 Other file types are published as files and require a token:

@@ -1,11 +1,37 @@
 ---
 name: schaffa-publish
-description: Publish static HTML pages and arbitrary files to a self-hosted Schaffa instance and return public URLs. Use when Codex needs to connect an agent's HTML output or files to the web, update an HTML plan under a chosen slug, or inspect Schaffa upload failures. Requires SCHAFFA_URL; permanent pages, updates, and files also require SCHAFFA_TOKEN.
+description: Publish static HTML pages, presentations, files, and incrementally recorded guides to Schaffa. Use when an agent should turn output into a public link or proactively document a workflow step by step. Requires SCHAFFA_URL; permanent content and every guide operation require SCHAFFA_TOKEN.
 ---
 
 # Schaffa Publish
 
 Publish through the bundled curl wrapper. Never print, echo, or pass `SCHAFFA_TOKEN` on the command line; let the script read it from the environment when required.
+
+## Record a guide proactively
+
+When a user asks for a guide or wants a workflow documented, start the guide before the first relevant action. Do not wait until the task is finished. Keep `.schaffa/guide-session.json` local and out of source control; it contains the random slug and current edit revision, not the bearer token.
+
+```sh
+npx schaffa guide start --title "Project setup"
+npx schaffa guide step --title "Open projects" --text "Open the project list." --action navigate --target /projects
+npx schaffa guide step --title "Create project" --text "Select New project." --screenshot step-002.png --action click --target "New project" --verification "The creation form is visible."
+npx schaffa guide finish
+npx schaffa guide publish
+```
+
+Record semantic state changes, not every technical click. Terminal, API, and file actions may be text-only. Capture browser or desktop screenshots explicitly only when the visible state helps a reader. Set capture false for passwords, authentication, payments, private data, and secret-manager screens. Before publishing, inspect the returned preflight; possible secrets block publication and missing screenshots remain warnings.
+
+Each write sends the persisted `editRevision` as `If-Match`. A conflict means the guide changed elsewhere: load the current guide, reconcile intentionally, and retry. Step creation uses an idempotency key so retrying a timed-out request cannot duplicate it.
+
+## Publish a presentation
+
+Use Marp Markdown as the canonical source. The CLI renders the `bare` template, removes the Marp runtime, rejects active or external content, publishes the script-free HTML, and can upload PDF/PPTX plus the Markdown source:
+
+```sh
+npx schaffa publish deck.md --kind presentation --export pdf --export pptx --json
+```
+
+Keep images local to the deck and do not reference CDNs or external fonts. The HTML page remains usable through CSS scroll snap with Schaffa's `script-src 'none'` policy.
 
 ## Publish a page
 

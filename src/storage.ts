@@ -8,7 +8,7 @@ import { config } from "./config.js";
 import { AppError } from "./errors.js";
 import { isFileId } from "./ids.js";
 
-export const reservedSlugs = new Set(["admin", "api", "f", "p", "healthz"]);
+export const reservedSlugs = new Set(["admin", "api", "f", "g", "p", "healthz"]);
 
 export function validateSlug(value: string): string {
   const slug = value.toLowerCase();
@@ -30,6 +30,27 @@ export async function storePage(slug: string, version: number, html: Buffer): Pr
   await writeFile(temporary, html, { mode: 0o640, flag: "wx" });
   await rename(temporary, target);
   return path.relative(config.dataDir, target);
+}
+
+export async function storeGuideImage(
+  guideSlug: string,
+  imageId: string,
+  data: Buffer,
+): Promise<string> {
+  const slug = validateSlug(guideSlug);
+  if (!/^[A-Za-z0-9_-]{22}$/.test(imageId)) throw new Error("Invalid guide image id.");
+  const directory = path.join(config.dataDir, "guides", slug, "images");
+  await mkdir(directory, { recursive: true, mode: 0o750 });
+  const target = path.join(directory, `${imageId}.webp`);
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  await writeFile(temporary, data, { mode: 0o640, flag: "wx" });
+  await rename(temporary, target);
+  return path.relative(config.dataDir, target);
+}
+
+export async function removeGuide(slugValue: string): Promise<void> {
+  const slug = validateSlug(slugValue);
+  await rm(path.join(config.dataDir, "guides", slug), { recursive: true, force: true });
 }
 
 export async function readStoredFile(relativePath: string): Promise<Buffer> {

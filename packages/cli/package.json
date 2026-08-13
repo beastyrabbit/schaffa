@@ -1,6 +1,6 @@
 {
   "name": "schaffa",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "The workhorse that connects an AI agent's HTML pages and files to the web.",
   "license": "MIT",
   "type": "module",
@@ -43,5 +43,8 @@
   "devDependencies": {
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@marp-team/marp-cli": "^4.5.0"
   }
 }

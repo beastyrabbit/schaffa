@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { parseCliArgs } from "../dist/cli.js";
-import { upload } from "../dist/client.js";
+import { addGuideStep, finishGuide, publishGuide, startGuide, upload } from "../dist/client.js";
 
 const token = `sfa_${"a".repeat(43)}`;
 const directory = await mkdtemp(path.join(os.tmpdir(), "schaffa-cli-test-"));
@@ -133,6 +133,82 @@ test("reports API errors without exposing the bearer token", async () => {
       return true;
     },
   );
+});
+
+test("drives the incremental guide API with revisions and authorization", async () => {
+  const requests = [];
+  const fakeFetch = async (url, init) => {
+    requests.push({ url: String(url), init });
+    if (String(url).endsWith("/api/guides")) {
+      return jsonResponse(
+        {
+          slug: "abc234def567",
+          status: "recording",
+          revision: 0,
+          editRevision: 1,
+          publicUrl: "https://schaffa.dev/g/abc234def567",
+          apiUrl: "https://schaffa.dev/api/guides/abc234def567",
+          steps: [],
+        },
+        201,
+      );
+    }
+    if (String(url).endsWith("/steps")) {
+      return jsonResponse(
+        {
+          slug: "abc234def567",
+          status: "recording",
+          revision: 0,
+          editRevision: 2,
+          publicUrl: "https://schaffa.dev/g/abc234def567",
+          apiUrl: "https://schaffa.dev/api/guides/abc234def567",
+          steps: [{ id: "step-1", title: "Open" }],
+        },
+        201,
+      );
+    }
+    return jsonResponse(
+      {
+        guide: {
+          slug: "abc234def567",
+          status: String(url).endsWith("/publish") ? "published" : "draft",
+          revision: String(url).endsWith("/publish") ? 1 : 0,
+          editRevision: String(url).endsWith("/publish") ? 4 : 3,
+          publicUrl: "https://schaffa.dev/g/abc234def567",
+          apiUrl: "https://schaffa.dev/api/guides/abc234def567",
+          steps: [],
+        },
+      },
+      200,
+    );
+  };
+  const started = await startGuide({ title: "Guide", token, fetch: fakeFetch });
+  const stepped = await addGuideStep({
+    slug: started.slug,
+    editRevision: started.editRevision,
+    title: "Open",
+    description: "Open it",
+    token,
+    fetch: fakeFetch,
+  });
+  const finished = await finishGuide({
+    slug: stepped.slug,
+    editRevision: stepped.editRevision,
+    token,
+    fetch: fakeFetch,
+  });
+  await publishGuide({
+    slug: finished.guide.slug,
+    editRevision: finished.guide.editRevision,
+    token,
+    fetch: fakeFetch,
+  });
+  assert.equal(requests.length, 4);
+  assert.equal(requests[0].init.headers.get("Authorization"), `Bearer ${token}`);
+  assert.equal(requests[1].init.headers.get("If-Match"), "1");
+  assert.match(requests[1].init.headers.get("Idempotency-Key"), /^cli-/);
+  assert.equal(requests[2].url, "https://schaffa.dev/api/guides/abc234def567/finish");
+  assert.equal(requests[3].url, "https://schaffa.dev/api/guides/abc234def567/publish");
 });
 
 function jsonResponse(body, status) {

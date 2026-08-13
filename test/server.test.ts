@@ -252,18 +252,20 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.equal(specification.statusCode, 200);
   assert.match(specification.headers["content-type"] || "", /^application\/json/);
   assert.equal(specification.json().openapi, "3.1.0");
-  assert.equal(specification.json().info.version, "0.2.1");
+  assert.equal(specification.json().info.version, "0.3.0");
   assert.equal(specification.json().servers[0].url, "https://schaffa.test");
   assert.ok(specification.json().paths["/api/pages"].post);
   assert.ok(specification.json().paths["/api/pages/{slug}"].put);
   assert.ok(specification.json().paths["/api/files"].post);
+  assert.ok(specification.json().paths["/api/guides"].post);
+  assert.ok(specification.json().paths["/api/guides/{slug}/steps"].post);
   assert.equal(
     specification.json().tags.some((tag: { name: string }) => tag.name === "Administration"),
     false,
   );
   assert.deepEqual(
     specification.json().tags.map((tag: { name: string }) => tag.name),
-    ["Pages", "Files"],
+    ["Pages", "Files", "Guides"],
   );
   assert.equal(specification.json().paths["/api/tokens"], undefined);
   assert.equal(specification.json().paths["/api/users"], undefined);
@@ -336,6 +338,309 @@ test("creates pages with non-semantic random slugs", async () => {
   assert.match(created.json().slug, /^[a-z2-7]{12}$/);
   assert.doesNotMatch(created.json().slug, /named|plan/);
   assert.equal(created.json().rawUrl, `https://schaffa.test/p/${created.json().slug}/raw`);
+});
+
+test("records, edits, publishes, and revisions a guide incrementally", async () => {
+  const owner = createToken("guide owner");
+  const other = createToken("guide stranger");
+  const auth = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/guides",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: { title: "Projekt anlegen", description: "Ein belastbarer Beispielguide." },
+  });
+  assert.equal(created.statusCode, 201);
+  assert.match(created.json().slug, /^[a-z2-7]{12}$/);
+  assert.equal(created.json().status, "recording");
+  assert.equal(created.json().editRevision, 1);
+  const slug = created.json().slug as string;
+
+  const privateBeforePublish = await app.inject({
+    method: "GET",
+    url: `/g/${slug}`,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(privateBeforePublish.statusCode, 404);
+
+  const stepOne = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/steps`,
+    headers: {
+      ...auth,
+      "content-type": "application/json",
+      "if-match": '"1"',
+      "idempotency-key": "guide-step-one",
+    },
+    payload: {
+      title: "Projekt öffnen",
+      description: "Die Projektübersicht öffnen.",
+      action: { type: "navigate", target: "/projects" },
+      verification: "Die Projektliste ist sichtbar.",
+      capture: false,
+    },
+  });
+  assert.equal(stepOne.statusCode, 201);
+  assert.equal(stepOne.json().steps.length, 1);
+  assert.equal(stepOne.json().editRevision, 2);
+  const firstStepId = stepOne.json().steps[0].id as string;
+
+  const replay = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/steps`,
+    headers: {
+      ...auth,
+      "content-type": "application/json",
+      "if-match": '"1"',
+      "idempotency-key": "guide-step-one",
+    },
+    payload: { title: "would duplicate", description: "would duplicate" },
+  });
+  assert.equal(replay.statusCode, 201);
+  assert.equal(replay.json().steps.length, 1);
+  assert.equal(replay.json().steps[0].id, firstStepId);
+
+  const screenshot = await sharp({
+    create: { width: 640, height: 360, channels: 4, background: "#a43f24" },
+  })
+    .png()
+    .toBuffer();
+  const secondBody = multipartFields(
+    {
+      step: JSON.stringify({
+        title: "Neu wählen",
+        description: "New project auswählen.",
+        action: { type: "click", target: "New project" },
+        verification: "Das Formular ist sichtbar.",
+      }),
+    },
+    "screenshot",
+    "capture.png",
+    "image/png",
+    screenshot,
+  );
+  const stepTwo = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/steps`,
+    headers: { ...auth, "content-type": secondBody.contentType, "if-match": '"2"' },
+    payload: secondBody.payload,
+  });
+  assert.equal(stepTwo.statusCode, 201);
+  assert.equal(stepTwo.json().steps.length, 2);
+  assert.match(stepTwo.json().steps[1].screenshotUrl, /\/g\/.*\/images\/.*\.webp$/);
+  const secondStepId = stepTwo.json().steps[1].id as string;
+  const imagePath = new URL(stepTwo.json().steps[1].screenshotUrl).pathname;
+
+  const privateImage = await app.inject({
+    method: "GET",
+    url: imagePath,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(privateImage.statusCode, 404);
+  const ownerImage = await app.inject({ method: "GET", url: imagePath, headers: auth });
+  assert.equal(ownerImage.statusCode, 200);
+  assert.equal((await sharp(ownerImage.rawPayload).metadata()).format, "webp");
+
+  const stale = await app.inject({
+    method: "PATCH",
+    url: `/api/guides/${slug}/steps/${firstStepId}`,
+    headers: { ...auth, "content-type": "application/json", "if-match": '"2"' },
+    payload: { title: "Stale" },
+  });
+  assert.equal(stale.statusCode, 409);
+  assert.equal(stale.json().error, "edit_conflict");
+
+  const stranger = await app.inject({
+    method: "GET",
+    url: `/api/guides/${slug}`,
+    headers: { host: "schaffa.test", authorization: `Bearer ${other.token}` },
+  });
+  assert.equal(stranger.statusCode, 403);
+
+  const edited = await app.inject({
+    method: "PATCH",
+    url: `/api/guides/${slug}/steps/${firstStepId}`,
+    headers: { ...auth, "content-type": "application/json", "if-match": '"3"' },
+    payload: {
+      title: "Projektübersicht öffnen",
+      description: "Die aktuelle Projektübersicht öffnen.",
+    },
+  });
+  assert.equal(edited.statusCode, 200);
+  assert.equal(edited.json().editRevision, 4);
+  const reordered = await app.inject({
+    method: "PUT",
+    url: `/api/guides/${slug}/order`,
+    headers: { ...auth, "content-type": "application/json", "if-match": '"4"' },
+    payload: { order: [secondStepId, firstStepId] },
+  });
+  assert.equal(reordered.statusCode, 200);
+  assert.equal(reordered.json().steps[0].id, secondStepId);
+
+  const finished = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/finish`,
+    headers: { ...auth, "if-match": '"5"' },
+  });
+  assert.equal(finished.statusCode, 200);
+  assert.equal(finished.json().guide.status, "draft");
+  assert.equal(finished.json().preflight.ready, true);
+
+  const published = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/publish`,
+    headers: { ...auth, "if-match": '"6"' },
+  });
+  assert.equal(published.statusCode, 201);
+  assert.equal(published.json().guide.revision, 1);
+
+  const publicGuide = await app.inject({
+    method: "GET",
+    url: `/g/${slug}`,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(publicGuide.statusCode, 200);
+  assert.match(publicGuide.body, /Projekt anlegen/);
+  assert.match(publicGuide.body, /Projektübersicht öffnen/);
+  assert.doesNotMatch(publicGuide.body, /<script|<form|onclick=/i);
+  assert.match(String(publicGuide.headers["content-security-policy"]), /script-src 'none'/);
+  const publicImage = await app.inject({
+    method: "GET",
+    url: imagePath,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(publicImage.statusCode, 200);
+
+  const json = await app.inject({
+    method: "GET",
+    url: `/g/${slug}.json`,
+    headers: { host: "schaffa.test" },
+  });
+  const markdown = await app.inject({
+    method: "GET",
+    url: `/g/${slug}.md`,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(json.statusCode, 200);
+  assert.equal(json.json().revision, 1);
+  assert.match(markdown.body, /# Projekt anlegen/);
+
+  const newDraft = await app.inject({
+    method: "PATCH",
+    url: `/api/guides/${slug}/steps/${firstStepId}`,
+    headers: { ...auth, "content-type": "application/json", "if-match": '"7"' },
+    payload: { title: "Revision zwei" },
+  });
+  assert.equal(newDraft.statusCode, 200);
+  assert.equal(newDraft.json().status, "draft");
+  const immutableV1 = await app.inject({
+    method: "GET",
+    url: `/g/${slug}/1`,
+    headers: { host: "schaffa.test" },
+  });
+  assert.doesNotMatch(immutableV1.body, /Revision zwei/);
+});
+
+test("rejects sensitive guide text during publication", async () => {
+  const owner = createToken("sensitive guide owner");
+  const auth = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/guides",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: { title: "Sensitive" },
+  });
+  const slug = created.json().slug;
+  const step = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/steps`,
+    headers: { ...auth, "content-type": "application/json", "if-match": '"1"' },
+    payload: { title: "Login", description: "password=do-not-publish", capture: false },
+  });
+  assert.equal(step.statusCode, 201);
+  const finished = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/finish`,
+    headers: { ...auth, "if-match": '"2"' },
+  });
+  assert.equal(finished.json().preflight.ready, false);
+  const published = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/publish`,
+    headers: { ...auth, "if-match": '"3"' },
+  });
+  assert.equal(published.statusCode, 422);
+  assert.equal(published.json().error, "preflight_failed");
+});
+
+test("keeps hidden-step screenshots private and maps multipart errors to 4xx", async () => {
+  const owner = createToken("hidden screenshot owner");
+  const auth = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/guides",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: { title: "Hidden screenshot" },
+  });
+  const slug = created.json().slug;
+  const invalid = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/steps`,
+    headers: { ...auth, "content-type": "application/x-www-form-urlencoded", "if-match": '"1"' },
+    payload: "title=nope",
+  });
+  assert.ok(invalid.statusCode >= 400 && invalid.statusCode < 500);
+
+  const screenshot = await sharp({
+    create: { width: 80, height: 50, channels: 4, background: "#315a3a" },
+  })
+    .png()
+    .toBuffer();
+  const body = multipartFields(
+    {
+      step: JSON.stringify({
+        title: "Hidden",
+        description: "Not part of publication",
+        visible: false,
+      }),
+    },
+    "screenshot",
+    "hidden.png",
+    "image/png",
+    screenshot,
+  );
+  const step = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/steps`,
+    headers: { ...auth, "content-type": body.contentType, "if-match": '"1"' },
+    payload: body.payload,
+  });
+  assert.equal(step.statusCode, 201);
+  const hiddenPath = new URL(step.json().steps[0].screenshotUrl).pathname;
+  const visible = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/steps`,
+    headers: { ...auth, "content-type": "application/json", "if-match": '"2"' },
+    payload: { title: "Visible", description: "Publishable text step", capture: false },
+  });
+  assert.equal(visible.statusCode, 201);
+  await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/finish`,
+    headers: { ...auth, "if-match": '"3"' },
+  });
+  const published = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/publish`,
+    headers: { ...auth, "if-match": '"4"' },
+  });
+  assert.equal(published.statusCode, 201);
+  const hidden = await app.inject({
+    method: "GET",
+    url: hiddenPath,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(hidden.statusCode, 404);
 });
 
 test("keeps anonymous pages visible for one hour and stored for 30 days", async () => {
@@ -1041,4 +1346,33 @@ function multipart(field: string, filename: string, mediaType: string, content: 
     Buffer.from(`\r\n--${boundary}--\r\n`),
   ]);
   return { contentType: `multipart/form-data; boundary=${boundary}`, payload };
+}
+
+function multipartFields(
+  fields: Record<string, string>,
+  fileField: string,
+  filename: string,
+  mediaType: string,
+  content: Buffer,
+) {
+  const boundary = "----schaffa-guide-test-boundary";
+  const chunks: Buffer[] = [];
+  for (const [name, value] of Object.entries(fields)) {
+    chunks.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+      ),
+    );
+  }
+  chunks.push(
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${fileField}"; filename="${filename}"\r\nContent-Type: ${mediaType}\r\n\r\n`,
+    ),
+    content,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  );
+  return {
+    contentType: `multipart/form-data; boundary=${boundary}`,
+    payload: Buffer.concat(chunks),
+  };
 }
