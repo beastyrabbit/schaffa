@@ -28,7 +28,7 @@ scan() {
 }
 
 if ! scan; then
-  echo "Default Trivy database mirror failed; retrying once through the GHCR registry." >&2
+  echo "Default Trivy database mirror failed; retrying once through AWS Public ECR." >&2
   rm -rf "$trivy_cache_dir/db"
-  scan --db-repository ghcr.io/aquasecurity/trivy-db:2
+  scan --db-repository public.ecr.aws/aquasecurity/trivy-db:2
 fi
