@@ -181,7 +181,15 @@ async function runPresentation(args: string[]): Promise<void> {
   try {
     const html = path.join(output, "presentation.html");
     const marp = require.resolve("@marp-team/marp-cli/marp-cli.js");
-    await execFileAsync(process.execPath, [marp, source, "--template", "bare", "--output", html]);
+    await execFileAsync(process.execPath, [
+      marp,
+      source,
+      "--no-stdin",
+      "--template",
+      "bare",
+      "--output",
+      html,
+    ]);
     const rendered = await readFile(html, "utf8");
     const staticHtml = rendered.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
     if (/<script\b|<form\b|\son[a-z]+\s*=|(?:src|href)\s*=\s*["']https?:\/\//i.test(staticHtml)) {
@@ -201,6 +209,7 @@ async function runPresentation(args: string[]): Promise<void> {
       await execFileAsync(process.execPath, [
         marp,
         source,
+        "--no-stdin",
         `--${kind}`,
         "--allow-local-files",
         "--output",
