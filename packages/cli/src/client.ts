@@ -14,6 +14,31 @@ export interface UploadResult {
   [key: string]: unknown;
 }
 
+export interface GuideResult {
+  slug: string;
+  status: "recording" | "draft" | "published";
+  revision: number;
+  editRevision: number;
+  publicUrl: string;
+  apiUrl: string;
+  steps: Array<{ id: string; title: string }>;
+  [key: string]: unknown;
+}
+
+export interface GuidePreflightResult {
+  ready: boolean;
+  errors: string[];
+  warnings: string[];
+  missingScreenshots: string[];
+  sensitiveFindings: Array<{ stepId: string; kind: string }>;
+}
+
+export interface GuideOperationResult {
+  guide: GuideResult;
+  preflight: GuidePreflightResult;
+  revisionUrl?: string;
+}
+
 const mediaTypes = new Map([
   [".css", "text/css"],
   [".gif", "image/gif"],
@@ -88,6 +113,136 @@ export async function upload(options: UploadOptions): Promise<UploadResult> {
     throw new Error("Schaffa returned a response without a public URL.");
   }
   return result as UploadResult;
+}
+
+export async function startGuide(options: {
+  title: string;
+  description?: string;
+  language?: string;
+  token?: string;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+}): Promise<GuideResult> {
+  return guideRequest(options, "/api/guides", {
+    method: "POST",
+    body: JSON.stringify({
+      title: options.title,
+      ...(options.description ? { description: options.description } : {}),
+      ...(options.language ? { language: options.language } : {}),
+    }),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function addGuideStep(options: {
+  slug: string;
+  editRevision: number;
+  title: string;
+  description: string;
+  actionType?: string;
+  actionTarget?: string;
+  verification?: string;
+  screenshot?: string;
+  capture?: boolean;
+  token?: string;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+  idempotencyKey?: string;
+}): Promise<GuideResult> {
+  const step = {
+    title: options.title,
+    description: options.description,
+    ...(options.actionType
+      ? {
+          action: {
+            type: options.actionType,
+            ...(options.actionTarget ? { target: options.actionTarget } : {}),
+          },
+        }
+      : {}),
+    ...(options.verification ? { verification: options.verification } : {}),
+    capture: options.capture ?? Boolean(options.screenshot),
+  };
+  const headers: Record<string, string> = {
+    "If-Match": String(options.editRevision),
+    "Idempotency-Key":
+      options.idempotencyKey || `cli-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  };
+  let body: BodyInit;
+  if (options.screenshot) {
+    const file = await readFile(options.screenshot);
+    const form = new FormData();
+    form.append("step", JSON.stringify(step));
+    form.append(
+      "screenshot",
+      new Blob([file], {
+        type:
+          mediaTypes.get(path.extname(options.screenshot).toLowerCase()) ||
+          "application/octet-stream",
+      }),
+      path.basename(options.screenshot),
+    );
+    body = form;
+  } else {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(step);
+  }
+  return guideRequest(options, `/api/guides/${encodeURIComponent(options.slug)}/steps`, {
+    method: "POST",
+    headers,
+    body,
+  });
+}
+
+export async function finishGuide(options: GuideMutationOptions): Promise<GuideOperationResult> {
+  return guideRequest<GuideOperationResult>(
+    options,
+    `/api/guides/${encodeURIComponent(options.slug)}/finish`,
+    {
+      method: "POST",
+      headers: { "If-Match": String(options.editRevision) },
+    },
+  );
+}
+
+export async function publishGuide(options: GuideMutationOptions): Promise<GuideOperationResult> {
+  return guideRequest<GuideOperationResult>(
+    options,
+    `/api/guides/${encodeURIComponent(options.slug)}/publish`,
+    {
+      method: "POST",
+      headers: { "If-Match": String(options.editRevision) },
+    },
+  );
+}
+
+export interface GuideMutationOptions {
+  slug: string;
+  editRevision: number;
+  token?: string;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+}
+
+async function guideRequest<T = GuideResult>(
+  options: { token?: string; baseUrl?: string; fetch?: typeof fetch },
+  endpoint: string,
+  init: RequestInit,
+): Promise<T> {
+  if (!options.token) throw new Error("SCHAFFA_TOKEN is required for guide operations.");
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${options.token}`);
+  const response = await (options.fetch || fetch)(
+    new URL(endpoint, canonicalOrigin(options.baseUrl || "https://schaffa.dev")),
+    { ...init, headers },
+  );
+  const body = await response.text();
+  const result = parseResponse(body);
+  if (!response.ok) {
+    const detail = typeof result.message === "string" ? ` ${result.message}` : "";
+    throw new Error(`Schaffa request failed with HTTP ${response.status}.${detail}`);
+  }
+  return result as T;
 }
 
 function canonicalOrigin(value: string): string {

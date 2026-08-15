@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import cookie from "@fastify/cookie";
 import formbody from "@fastify/formbody";
+import type { MultipartFile } from "@fastify/multipart";
 import multipart from "@fastify/multipart";
 import scalarApiReference from "@scalar/fastify-api-reference";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
@@ -18,6 +19,22 @@ import {
 import { config } from "./config.js";
 import { closeDb, db } from "./db.js";
 import { AppError } from "./errors.js";
+import {
+  addGuideStep,
+  createGuide,
+  deleteGuide,
+  deleteGuideStep,
+  finishGuide,
+  getGuideImage,
+  getOwnedGuide,
+  getPublishedGuide,
+  listGuides,
+  publishGuide,
+  reorderGuideSteps,
+  replaceGuideScreenshot,
+  updateGuide,
+  updateGuideStep,
+} from "./guides.js";
 import { landingBackgroundSvg } from "./landing-background.js";
 import { openApiDocument } from "./openapi.js";
 import {
@@ -120,7 +137,7 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
   app.register(cookie);
   app.register(formbody);
   app.register(multipart, {
-    limits: { files: 1, fields: 0, parts: 1 },
+    limits: { files: 1, fields: 1, parts: 2 },
   });
 
   const cleanupTimer = setInterval(
@@ -351,6 +368,207 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     return reply.code(201).send(result);
   });
 
+  app.post<{ Body: { title?: unknown; description?: unknown; language?: unknown } }>(
+    "/api/guides",
+    async (request, reply) => {
+      const auth = requireApiAuth(request, "upload");
+      requireWritesEnabled();
+      requireJson(request);
+      consumeAuthenticatedUpload(auth.id);
+      return reply.code(201).send(createGuide(request.body || {}, auth.id));
+    },
+  );
+  app.get<{ Params: { slug: string } }>("/api/guides/:slug", async (request, reply) => {
+    const auth = requireApiAuth(request, "upload");
+    const guide = getOwnedGuide(request.params.slug, auth.id, auth.scopes.has("admin"));
+    reply.header("ETag", `"${guide.editRevision}"`);
+    return guide;
+  });
+  app.patch<{ Params: { slug: string }; Body: Record<string, unknown> }>(
+    "/api/guides/:slug",
+    async (request, reply) => {
+      const auth = requireApiAuth(request, "upload");
+      requireWritesEnabled();
+      requireJson(request);
+      consumeAuthenticatedUpload(auth.id);
+      const guide = updateGuide(
+        request.params.slug,
+        request.body || {},
+        auth.id,
+        auth.scopes.has("admin"),
+        expectedEditRevision(request),
+      );
+      reply.header("ETag", `"${guide.editRevision}"`);
+      return guide;
+    },
+  );
+  app.post<{ Params: { slug: string }; Body: Record<string, unknown> }>(
+    "/api/guides/:slug/steps",
+    async (request, reply) => {
+      const auth = requireApiAuth(request, "upload");
+      requireWritesEnabled();
+      consumeAuthenticatedUpload(auth.id);
+      const { input, screenshot } = await guideStepPayload(request);
+      const guide = await addGuideStep(
+        request.params.slug,
+        input,
+        screenshot,
+        auth.id,
+        auth.scopes.has("admin"),
+        expectedEditRevision(request),
+        headerValue(request.headers["idempotency-key"]),
+      );
+      reply.header("ETag", `"${guide.editRevision}"`);
+      return reply.code(201).send(guide);
+    },
+  );
+  app.patch<{ Params: { slug: string; stepId: string }; Body: Record<string, unknown> }>(
+    "/api/guides/:slug/steps/:stepId",
+    async (request, reply) => {
+      const auth = requireApiAuth(request, "upload");
+      requireWritesEnabled();
+      requireJson(request);
+      consumeAuthenticatedUpload(auth.id);
+      const guide = updateGuideStep(
+        request.params.slug,
+        request.params.stepId,
+        request.body || {},
+        auth.id,
+        auth.scopes.has("admin"),
+        expectedEditRevision(request),
+      );
+      reply.header("ETag", `"${guide.editRevision}"`);
+      return guide;
+    },
+  );
+  app.put<{ Params: { slug: string; stepId: string } }>(
+    "/api/guides/:slug/steps/:stepId/screenshot",
+    async (request, reply) => {
+      const auth = requireApiAuth(request, "upload");
+      requireWritesEnabled();
+      consumeAuthenticatedUpload(auth.id);
+      const part = await request.file({
+        limits: { fileSize: config.maxImageInputBytes, files: 1 },
+      });
+      if (part?.fieldname !== "screenshot")
+        throw new AppError("Expected one multipart file field named screenshot.", 422);
+      const guide = await replaceGuideScreenshot(
+        request.params.slug,
+        request.params.stepId,
+        part,
+        auth.id,
+        auth.scopes.has("admin"),
+        expectedEditRevision(request),
+      );
+      reply.header("ETag", `"${guide.editRevision}"`);
+      return guide;
+    },
+  );
+  app.put<{ Params: { slug: string }; Body: { order?: unknown } }>(
+    "/api/guides/:slug/order",
+    async (request, reply) => {
+      const auth = requireApiAuth(request, "upload");
+      requireWritesEnabled();
+      requireJson(request);
+      consumeAuthenticatedUpload(auth.id);
+      const guide = reorderGuideSteps(
+        request.params.slug,
+        request.body?.order,
+        auth.id,
+        auth.scopes.has("admin"),
+        expectedEditRevision(request),
+      );
+      reply.header("ETag", `"${guide.editRevision}"`);
+      return guide;
+    },
+  );
+  app.delete<{ Params: { slug: string; stepId: string } }>(
+    "/api/guides/:slug/steps/:stepId",
+    async (request, reply) => {
+      const auth = requireApiAuth(request, "upload");
+      requireWritesEnabled();
+      consumeAuthenticatedUpload(auth.id);
+      const guide = await deleteGuideStep(
+        request.params.slug,
+        request.params.stepId,
+        auth.id,
+        auth.scopes.has("admin"),
+        expectedEditRevision(request),
+      );
+      reply.header("ETag", `"${guide.editRevision}"`);
+      return guide;
+    },
+  );
+  app.post<{ Params: { slug: string } }>("/api/guides/:slug/finish", async (request) => {
+    const auth = requireApiAuth(request, "upload");
+    requireWritesEnabled();
+    consumeAuthenticatedUpload(auth.id);
+    return finishGuide(
+      request.params.slug,
+      auth.id,
+      auth.scopes.has("admin"),
+      expectedEditRevision(request),
+    );
+  });
+  app.post<{ Params: { slug: string } }>("/api/guides/:slug/publish", async (request, reply) => {
+    const auth = requireApiAuth(request, "upload");
+    requireWritesEnabled();
+    consumeAuthenticatedUpload(auth.id);
+    return reply
+      .code(201)
+      .send(
+        publishGuide(
+          request.params.slug,
+          auth.id,
+          auth.scopes.has("admin"),
+          expectedEditRevision(request),
+        ),
+      );
+  });
+
+  app.get<{ Params: { slug: string } }>("/g/:slug", async (request, reply) =>
+    sendGuide(reply, request.params.slug),
+  );
+  app.get<{ Params: { slug: string; revision: string } }>(
+    "/g/:slug/:revision",
+    async (request, reply) =>
+      sendGuide(reply, request.params.slug, Number(request.params.revision)),
+  );
+  app.get<{ Params: { slug: string } }>("/g/:slug.json", async (request, reply) => {
+    const result = getPublishedGuide(request.params.slug);
+    if (!result) throw new AppError("Guide not found.", 404, "not_found");
+    publicGuideHeaders(reply, result.revision);
+    return reply.type("application/json; charset=utf-8").send(result.guide);
+  });
+  app.get<{ Params: { slug: string } }>("/g/:slug.md", async (request, reply) => {
+    const result = getPublishedGuide(request.params.slug);
+    if (!result) throw new AppError("Guide not found.", 404, "not_found");
+    publicGuideHeaders(reply, result.revision);
+    reply.header("Content-Disposition", `attachment; filename="${request.params.slug}.md"`);
+    return reply.type("text/markdown; charset=utf-8").send(result.markdown);
+  });
+  app.get<{ Params: { slug: string; imageId: string } }>(
+    "/g/:slug/images/:imageId.webp",
+    async (request, reply) => {
+      const token = request.headers.authorization
+        ? authenticateToken(bearerToken(request.headers.authorization))
+        : null;
+      const guideImage = getGuideImage(
+        request.params.slug,
+        request.params.imageId,
+        token?.id,
+        token?.scopes.has("admin"),
+      );
+      if (!guideImage) throw new AppError("Guide image not found.", 404, "not_found");
+      reply.headers({
+        "Cache-Control": token ? "private, no-store" : "public, max-age=31536000, immutable",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Cross-Origin-Resource-Policy": "same-origin",
+      });
+      return reply.type("image/webp").send(openStoredFile(guideImage.storage_path));
+    },
+  );
+
   app.get<{ Params: { slug: string } }>("/p/:slug", async (request, reply) => {
     return sendPage(reply, request.params.slug);
   });
@@ -381,6 +599,7 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
       renderAdmin({
         pages: listPages(),
         files: listFiles(),
+        guides: listGuides(),
         tokens: listTokens(),
         users: listUsers(),
         settings: getInstanceSettings(),
@@ -442,6 +661,11 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     await deleteFile(request.params.id);
     return reply.redirect("/admin#files");
   });
+  app.post<{ Params: { slug: string } }>("/admin/guides/:slug/delete", async (request, reply) => {
+    requireAdminCookie(request);
+    await deleteGuide(request.params.slug);
+    return reply.redirect("/admin#guides");
+  });
   app.post<{ Params: { id: string } }>("/admin/tokens/:id/revoke", async (request, reply) => {
     const auth = requireAdminCookie(request);
     revokeToken(request.params.id, auth.id);
@@ -461,6 +685,7 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
       renderAdmin({
         pages: listPages(),
         files: listFiles(),
+        guides: listGuides(),
         tokens: listTokens(),
         users: listUsers(),
         settings: getInstanceSettings(),
@@ -493,6 +718,19 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
       return reply
         .code(413)
         .send({ error: "file_too_large", message: "Upload exceeds the configured limit." });
+    }
+    if (
+      error &&
+      typeof error === "object" &&
+      "statusCode" in error &&
+      Number.isInteger(error.statusCode) &&
+      Number(error.statusCode) >= 400 &&
+      Number(error.statusCode) < 500
+    ) {
+      return reply.code(Number(error.statusCode)).send({
+        error: "invalid_request",
+        message: error instanceof Error ? error.message : "Invalid request.",
+      });
     }
     request.log.error({ err: error }, "request failed");
     return reply.code(500).send({ error: "internal_error", message: "Internal server error." });
@@ -581,6 +819,65 @@ function parseRange(
 
 function safeInlineType(mediaType: string): boolean {
   return /^(image\/(?!svg\+xml)|audio\/|video\/|text\/plain$)/i.test(mediaType);
+}
+
+async function sendGuide(reply: FastifyReply, slug: string, revision?: number) {
+  const result = getPublishedGuide(slug, revision);
+  if (!result) throw new AppError("Guide not found.", 404, "not_found");
+  publicGuideHeaders(reply, result.revision, Boolean(revision));
+  return reply.type("text/html; charset=utf-8").send(result.html);
+}
+
+function publicGuideHeaders(reply: FastifyReply, revision: number, immutable = false): void {
+  reply.headers({
+    "Content-Security-Policy": pageCsp,
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "X-Frame-Options": "DENY",
+    "X-Schaffa-Guide-Revision": String(revision),
+    "Cache-Control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
+  });
+}
+
+function requireJson(request: FastifyRequest): void {
+  if (!request.headers["content-type"]?.toLowerCase().startsWith("application/json")) {
+    throw new AppError("This endpoint requires application/json.", 415, "unsupported_media_type");
+  }
+}
+
+function expectedEditRevision(request: FastifyRequest): number {
+  const value = headerValue(request.headers["if-match"]);
+  if (!value) throw new AppError("If-Match is required.", 428, "precondition_required");
+  const match = /^(?:W\/)?"?(\d+)"?$/.exec(value.trim());
+  if (!match) throw new AppError("If-Match must contain the current editRevision.", 422);
+  return Number(match[1]);
+}
+
+function headerValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+async function guideStepPayload(request: FastifyRequest): Promise<{
+  input: Record<string, unknown>;
+  screenshot?: MultipartFile;
+}> {
+  if (request.headers["content-type"]?.toLowerCase().startsWith("application/json")) {
+    return { input: (request.body || {}) as Record<string, unknown> };
+  }
+  const screenshot = await request.file({
+    limits: { files: 1, fields: 1, parts: 2, fileSize: config.maxImageInputBytes },
+  });
+  if (screenshot?.fieldname !== "screenshot")
+    throw new AppError("Expected one screenshot file.", 422);
+  const field = screenshot.fields.step;
+  if (!field || Array.isArray(field) || field.type !== "field")
+    throw new AppError("Expected one JSON field named step before the screenshot.", 422);
+  try {
+    const parsed: unknown = JSON.parse(String(field.value));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+    return { input: parsed as Record<string, unknown>, screenshot };
+  } catch {
+    throw new AppError("step must be a valid JSON object.", 422);
+  }
 }
 
 function requireApiAuth(request: FastifyRequest, scope: "upload") {

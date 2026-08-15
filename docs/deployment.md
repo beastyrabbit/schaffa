@@ -25,6 +25,9 @@ Set `SCHAFFA_BASE_URL=https://schaffa.dev`. Keep Pangolin authentication enabled
 - `api`
 - `api/*`
 - `api/*/*`
+- `api/*/*/*`
+- `api/*/*/*/*`
+- `api/*/*/*/*/*`
 - `account`
 - `account/*`
 - `assets/*`
@@ -34,6 +37,9 @@ Set `SCHAFFA_BASE_URL=https://schaffa.dev`. Keep Pangolin authentication enabled
 - `p/*/*`
 - `p/*/*/*`
 - `f/*`
+- `g/*`
+- `g/*/*`
+- `g/*/*/*`
 - `metadata/*`
 
 Pangolin matches each path segment separately, so the additional patterns cover the landing page, OpenAPI metadata, page versions, `/raw`, API operations containing an ID or slug, and the Shoo user login flow. Requests to `/admin` therefore continue to Pangolin authentication. API clients, user accounts, public pages, and files remain directly reachable on the same hostname. Pangolin evaluates rules by priority; do not add a broader bypass rule that also matches `/admin`.

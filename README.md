@@ -14,6 +14,8 @@ Schaffa is heavily inspired by [PostPlan](https://postplan.dev) and [UploadThing
 - Keeps immutable page versions while `/p/:slug` always serves the latest.
 - Returns byte-identical HTML from normal and `/raw` URLs.
 - Publishes files under random 128-bit IDs without retaining original filenames.
+- Records guides incrementally with optimistic concurrency, idempotent steps, cleaned screenshots, preflight checks, and immutable revisions.
+- Publishes script-free Marp presentations with optional PDF/PPTX/source artifacts through the CLI.
 - Converts images to metadata-free WebP, limits them to 2560 px and preserves transparency.
 - Accepts new anonymous HTML pages for one hour; tokens make pages permanent and enable files or updates.
 - Lets users sign in through Shoo and issue revocable upload tokens for their own agents.
@@ -61,6 +63,21 @@ from npmjs.org:
 
 ```sh
 npx schaffa upload ./plan.html
+```
+
+Record a workflow while it happens:
+
+```sh
+npx schaffa guide start --title "Create a project"
+npx schaffa guide step --title "Open projects" --text "Open the project list."
+npx schaffa guide finish
+npx schaffa guide publish
+```
+
+Publish a Marp presentation and its export artifacts:
+
+```sh
+npx schaffa publish deck.md --kind presentation --export pdf --export pptx
 ```
 
 The CLI defaults to `https://schaffa.dev`. New HTML pages work without a token and disappear after one hour. For permanent pages, files, and `--slug <slug>` updates, set `SCHAFFA_TOKEN` or pass `--token <token>` directly.

@@ -5,7 +5,7 @@ export function openApiDocument() {
     openapi: "3.1.0",
     info: {
       title: "Schaffa API",
-      version: "0.2.1",
+      version: "0.3.0",
       description:
         "Stable HTTP API for publishing standalone HTML pages and files. New HTML pages may be published anonymously for one hour; permanent publishing, page updates, and files use bearer tokens.",
       license: { name: "MIT", identifier: "MIT" },
@@ -15,6 +15,7 @@ export function openApiDocument() {
     tags: [
       { name: "Pages", description: "Publish and read standalone HTML pages." },
       { name: "Files", description: "Publish and read immutable files." },
+      { name: "Guides", description: "Record, edit, and publish incremental guides." },
     ],
     paths: {
       "/api/pages": {
@@ -105,6 +106,175 @@ export function openApiDocument() {
           },
         },
       },
+      "/api/guides": {
+        post: {
+          tags: ["Guides"],
+          summary: "Start a guide recording",
+          operationId: "createGuide",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["title"],
+                  properties: {
+                    title: { type: "string", maxLength: 160 },
+                    description: { type: "string", maxLength: 4000 },
+                    language: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": jsonResponse("Guide recording started", { $ref: "#/components/schemas/Guide" }),
+            "401": errorResponse("Missing or invalid upload token"),
+          },
+        },
+      },
+      "/api/guides/{slug}": {
+        get: {
+          tags: ["Guides"],
+          summary: "Read the current owner view",
+          operationId: "getGuideDraft",
+          security: [{ bearerAuth: [] }],
+          parameters: [slugParameter],
+          responses: {
+            "200": jsonResponse("Current guide", { $ref: "#/components/schemas/Guide" }),
+            "403": errorResponse("The token does not own this guide"),
+          },
+        },
+        patch: {
+          tags: ["Guides"],
+          summary: "Edit guide metadata",
+          operationId: "updateGuide",
+          security: [{ bearerAuth: [] }],
+          parameters: [slugParameter, ifMatchParameter],
+          responses: {
+            "200": jsonResponse("Updated guide", { $ref: "#/components/schemas/Guide" }),
+            "409": errorResponse("Edit revision conflict"),
+          },
+        },
+      },
+      "/api/guides/{slug}/steps": {
+        post: {
+          tags: ["Guides"],
+          summary: "Append a guide step",
+          operationId: "createGuideStep",
+          description:
+            "Accepts JSON without a screenshot or multipart with a JSON field named step before one screenshot file.",
+          security: [{ bearerAuth: [] }],
+          parameters: [slugParameter, ifMatchParameter, idempotencyParameter],
+          responses: {
+            "201": jsonResponse("Step appended", { $ref: "#/components/schemas/Guide" }),
+            "409": errorResponse("Edit or idempotency conflict"),
+          },
+        },
+      },
+      "/api/guides/{slug}/steps/{stepId}": {
+        patch: {
+          tags: ["Guides"],
+          summary: "Edit a guide step",
+          operationId: "updateGuideStep",
+          security: [{ bearerAuth: [] }],
+          parameters: [slugParameter, stepIdParameter, ifMatchParameter],
+          responses: {
+            "200": jsonResponse("Step updated", { $ref: "#/components/schemas/Guide" }),
+          },
+        },
+        delete: {
+          tags: ["Guides"],
+          summary: "Delete a guide step",
+          operationId: "deleteGuideStep",
+          security: [{ bearerAuth: [] }],
+          parameters: [slugParameter, stepIdParameter, ifMatchParameter],
+          responses: {
+            "200": jsonResponse("Step deleted", { $ref: "#/components/schemas/Guide" }),
+          },
+        },
+      },
+      "/api/guides/{slug}/steps/{stepId}/screenshot": {
+        put: {
+          tags: ["Guides"],
+          summary: "Replace a step screenshot",
+          operationId: "replaceGuideScreenshot",
+          security: [{ bearerAuth: [] }],
+          parameters: [slugParameter, stepIdParameter, ifMatchParameter],
+          requestBody: multipartBody("screenshot", "image/*"),
+          responses: {
+            "200": jsonResponse("Screenshot replaced", { $ref: "#/components/schemas/Guide" }),
+          },
+        },
+      },
+      "/api/guides/{slug}/order": {
+        put: {
+          tags: ["Guides"],
+          summary: "Reorder every guide step",
+          operationId: "reorderGuideSteps",
+          security: [{ bearerAuth: [] }],
+          parameters: [slugParameter, ifMatchParameter],
+          responses: {
+            "200": jsonResponse("Guide reordered", { $ref: "#/components/schemas/Guide" }),
+          },
+        },
+      },
+      "/api/guides/{slug}/finish": {
+        post: {
+          tags: ["Guides"],
+          summary: "Finish recording and run preflight",
+          operationId: "finishGuide",
+          security: [{ bearerAuth: [] }],
+          parameters: [slugParameter, ifMatchParameter],
+          responses: { "200": jsonResponse("Draft and preflight") },
+        },
+      },
+      "/api/guides/{slug}/publish": {
+        post: {
+          tags: ["Guides"],
+          summary: "Publish an immutable revision",
+          operationId: "publishGuide",
+          security: [{ bearerAuth: [] }],
+          parameters: [slugParameter, ifMatchParameter],
+          responses: {
+            "201": jsonResponse("Published revision"),
+            "422": errorResponse("Preflight failed"),
+          },
+        },
+      },
+      "/g/{slug}": guideRead("Read the latest published guide", "getPublishedGuide", [
+        slugParameter,
+      ]),
+      "/g/{slug}/{version}": guideRead("Read an immutable guide revision", "getGuideRevision", [
+        slugParameter,
+        versionParameter,
+      ]),
+      "/g/{slug}.json": {
+        get: {
+          tags: ["Guides"],
+          summary: "Download guide JSON",
+          operationId: "getGuideJson",
+          parameters: [slugParameter],
+          responses: {
+            "200": jsonResponse("Published guide", { $ref: "#/components/schemas/Guide" }),
+          },
+        },
+      },
+      "/g/{slug}.md": {
+        get: {
+          tags: ["Guides"],
+          summary: "Download guide Markdown",
+          operationId: "getGuideMarkdown",
+          parameters: [slugParameter],
+          responses: {
+            "200": {
+              description: "Published guide Markdown",
+              content: { "text/markdown": { schema: { type: "string" } } },
+            },
+          },
+        },
+      },
     },
     components: {
       securitySchemes: {
@@ -137,6 +307,30 @@ export function openApiDocument() {
           },
           ["id", "filename", "mediaType", "bytes", "publicUrl"],
         ),
+        Guide: objectSchema(
+          {
+            schemaVersion: { const: 1 },
+            slug: { type: "string", pattern: "^[a-z2-7]{12}$" },
+            title: { type: "string" },
+            status: { enum: ["recording", "draft", "published"] },
+            revision: { type: "integer", minimum: 0 },
+            editRevision: { type: "integer", minimum: 1 },
+            publicUrl: { type: "string", format: "uri" },
+            apiUrl: { type: "string", format: "uri" },
+            steps: { type: "array", items: { type: "object" } },
+          },
+          [
+            "schemaVersion",
+            "slug",
+            "title",
+            "status",
+            "revision",
+            "editRevision",
+            "publicUrl",
+            "apiUrl",
+            "steps",
+          ],
+        ),
       },
     },
   } as const;
@@ -154,6 +348,26 @@ const versionParameter = {
   in: "path",
   required: true,
   schema: { type: "integer", minimum: 1 },
+} as const;
+
+const stepIdParameter = {
+  name: "stepId",
+  in: "path",
+  required: true,
+  schema: { type: "string", format: "uuid" },
+} as const;
+const ifMatchParameter = {
+  name: "If-Match",
+  in: "header",
+  required: true,
+  description: "Current guide editRevision, optionally quoted.",
+  schema: { type: "string" },
+} as const;
+const idempotencyParameter = {
+  name: "Idempotency-Key",
+  in: "header",
+  required: false,
+  schema: { type: "string", minLength: 8, maxLength: 128 },
 } as const;
 
 function multipartBody(field: string, mediaType: string) {
@@ -201,6 +415,24 @@ function pageRead(summary: string, operationId: string, parameters: readonly obj
           description: "Page not found or no longer public",
           content: { "text/html": { schema: { type: "string" } } },
         },
+      },
+    },
+  };
+}
+
+function guideRead(summary: string, operationId: string, parameters: readonly object[]) {
+  return {
+    get: {
+      tags: ["Guides"],
+      summary,
+      operationId,
+      parameters,
+      responses: {
+        "200": {
+          description: "Published script-free guide HTML",
+          content: { "text/html": { schema: { type: "string" } } },
+        },
+        "404": errorResponse("No published guide revision"),
       },
     },
   };

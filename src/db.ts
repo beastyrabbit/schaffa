@@ -60,6 +60,50 @@ export interface FileRow {
   created_at: string;
 }
 
+export type GuideStatus = "recording" | "draft" | "published";
+
+export interface GuideRow {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  language: string;
+  status: GuideStatus;
+  owner_token_id: string;
+  current_revision: number;
+  edit_revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GuideStepRow {
+  id: string;
+  guide_id: string;
+  position: number;
+  title: string;
+  description: string;
+  action_type: string | null;
+  action_target: string | null;
+  verification: string | null;
+  visible: number;
+  capture: number;
+  screenshot_id: string | null;
+  screenshot_caption: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GuideImageRow {
+  id: string;
+  guide_id: string;
+  storage_path: string;
+  bytes: number;
+  sha256: string;
+  width: number;
+  height: number;
+  created_at: string;
+}
+
 let database: DatabaseSync | undefined;
 
 export function db(): DatabaseSync {
@@ -147,11 +191,84 @@ export function db(): DatabaseSync {
       expires_at TEXT NOT NULL
     ) STRICT;
 
+    CREATE TABLE IF NOT EXISTS guides (
+      id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL,
+      description TEXT,
+      language TEXT NOT NULL DEFAULT 'de',
+      status TEXT NOT NULL DEFAULT 'recording' CHECK(status IN ('recording','draft','published')),
+      owner_token_id TEXT NOT NULL REFERENCES tokens(id),
+      current_revision INTEGER NOT NULL DEFAULT 0,
+      edit_revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS guide_images (
+      id TEXT PRIMARY KEY,
+      guide_id TEXT NOT NULL REFERENCES guides(id) ON DELETE CASCADE,
+      storage_path TEXT NOT NULL UNIQUE,
+      bytes INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      width INTEGER NOT NULL,
+      height INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS guide_steps (
+      id TEXT PRIMARY KEY,
+      guide_id TEXT NOT NULL REFERENCES guides(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      action_type TEXT,
+      action_target TEXT,
+      verification TEXT,
+      visible INTEGER NOT NULL DEFAULT 1 CHECK(visible IN (0,1)),
+      capture INTEGER NOT NULL DEFAULT 1 CHECK(capture IN (0,1)),
+      screenshot_id TEXT REFERENCES guide_images(id) ON DELETE SET NULL,
+      screenshot_caption TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(guide_id, position)
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS guide_revisions (
+      id TEXT PRIMARY KEY,
+      guide_id TEXT NOT NULL REFERENCES guides(id) ON DELETE CASCADE,
+      revision INTEGER NOT NULL,
+      json_snapshot TEXT NOT NULL,
+      markdown_snapshot TEXT NOT NULL,
+      html_snapshot TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(guide_id, revision)
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS guide_idempotency (
+      guide_id TEXT NOT NULL REFERENCES guides(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      response_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(guide_id, key)
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS guide_revision_images (
+      revision_id TEXT NOT NULL REFERENCES guide_revisions(id) ON DELETE CASCADE,
+      image_id TEXT NOT NULL REFERENCES guide_images(id) ON DELETE RESTRICT,
+      PRIMARY KEY(revision_id, image_id)
+    ) STRICT;
+
     CREATE INDEX IF NOT EXISTS page_versions_page_idx ON page_versions(page_id, version DESC);
     CREATE INDEX IF NOT EXISTS files_created_idx ON files(created_at DESC);
     CREATE INDEX IF NOT EXISTS upload_events_subject_idx
       ON upload_events(subject, created_at DESC);
     CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions(user_id, expires_at);
+    CREATE INDEX IF NOT EXISTS guides_owner_idx ON guides(owner_token_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS guide_steps_guide_idx ON guide_steps(guide_id, position);
+    CREATE INDEX IF NOT EXISTS guide_images_guide_idx ON guide_images(guide_id);
+    CREATE INDEX IF NOT EXISTS guide_revisions_guide_idx ON guide_revisions(guide_id, revision DESC);
   `);
 
   const tokenColumns = database.prepare("PRAGMA table_info(tokens)").all() as unknown as Array<{
