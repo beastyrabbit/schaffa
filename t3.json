@@ -1,0 +1,30 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "iconPath": "public/icons/favicon-180.png",
+  "defaultThreadEnvMode": "worktree",
+  "scripts": [
+    {
+      "name": "Setup worktree",
+      "command": "pnpm install --frozen-lockfile",
+      "icon": "configure",
+      "runOnWorktreeCreate": true
+    },
+    {
+      "name": "Start dev server",
+      "command": "pnpm dev",
+      "icon": "play",
+      "previewUrl": "http://schaffa.localhost:1355/admin",
+      "autoOpenPreview": true
+    },
+    {
+      "name": "Run checks",
+      "command": "pnpm check",
+      "icon": "test"
+    },
+    {
+      "name": "Build",
+      "command": "pnpm build",
+      "icon": "build"
+    }
+  ]
+}
