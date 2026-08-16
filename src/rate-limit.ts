@@ -6,11 +6,15 @@ import { AppError } from "./errors.js";
 const windowSeconds = 60 * 60;
 
 export function consumeAnonymousUpload(address: string): void {
-  consume(`anonymous:${privateSubject(address)}`, config.anonymousUploadsPerHour, "Anonymous");
+  consume(
+    `anonymous:${privateSubject(address)}`,
+    config.anonymousUploadsPerHour,
+    "Anonymous upload",
+  );
 }
 
 export function consumeAuthenticatedUpload(tokenId: string): void {
-  consume(`token:${tokenId}`, config.authenticatedUploadsPerHour, "Authenticated");
+  consume(`token:${tokenId}`, config.authenticatedUploadsPerHour, "Authenticated upload");
 }
 
 export function consumeUserLogin(address: string): void {
@@ -29,11 +33,7 @@ function consume(subject: string, limit: number, label: string): void {
       .get(subject, `-${windowSeconds} seconds`) as unknown as { count: number };
     if (row.count >= limit) {
       db().exec("ROLLBACK");
-      throw new AppError(
-        `${label} upload rate limit exceeded. Try again later.`,
-        429,
-        "rate_limited",
-      );
+      throw new AppError(`${label} rate limit exceeded. Try again later.`, 429, "rate_limited");
     }
     db().prepare("INSERT INTO upload_events (subject) VALUES (?)").run(subject);
     db().exec("COMMIT");

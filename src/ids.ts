@@ -1,10 +1,22 @@
 import { randomBytes } from "node:crypto";
 
-const pageAlphabet = "abcdefghijklmnopqrstuvwxyz234567";
+const pageAlphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+const pageAlphabetLimit = 252;
+const guideAlphabet = "abcdefghijklmnopqrstuvwxyz234567";
 
 export function randomPageSlug(): string {
-  const bytes = randomBytes(12);
-  return [...bytes].map((byte) => pageAlphabet.charAt(byte & 31)).join("");
+  const slug: string[] = [];
+  while (slug.length < 16) {
+    for (const byte of randomBytes(16 - slug.length)) {
+      if (byte >= pageAlphabetLimit) continue;
+      slug.push(pageAlphabet.charAt(byte % pageAlphabet.length));
+    }
+  }
+  return slug.join("");
+}
+
+export function randomGuideSlug(): string {
+  return [...randomBytes(12)].map((byte) => guideAlphabet.charAt(byte & 31)).join("");
 }
 
 export function randomFileId(): string {

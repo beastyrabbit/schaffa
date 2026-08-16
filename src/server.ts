@@ -17,6 +17,7 @@ import {
   seedBootstrapToken,
 } from "./auth.js";
 import { config } from "./config.js";
+import type { PageKind, TokenScope } from "./db.js";
 import { closeDb, db } from "./db.js";
 import { AppError } from "./errors.js";
 import {
@@ -43,13 +44,20 @@ import {
   consumeUserLogin,
 } from "./rate-limit.js";
 import {
+  canRunInteractivePage,
   deleteFile,
+  deleteFileForUser,
   deletePage,
+  deletePageForUser,
   deletePageVersion,
+  deletePageVersionForUser,
   getFile,
+  getPagePublisher,
   getPageVersion,
   listFiles,
+  listFilesForUser,
   listPages,
+  listPagesForUser,
   listTokens,
   newPageSlug,
   publishFile,
@@ -66,6 +74,7 @@ import {
   renderAccountLogin,
   renderAdmin,
   renderAdminLogin,
+  renderInteractiveWarning,
   renderLanding,
   renderPublicNotFound,
 } from "./ui.js";
@@ -78,6 +87,7 @@ import {
   listUserTokens,
   revokeUserSession,
   revokeUserToken,
+  setInteractivePublishingPermission,
 } from "./users.js";
 import { scanUpload } from "./virus-scanner.js";
 
@@ -98,6 +108,26 @@ const pageCsp = [
   "form-action 'none'",
   "base-uri 'none'",
   "frame-ancestors 'none'",
+].join("; ");
+const interactivePageCsp = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "script-src-attr 'none'",
+  "style-src 'unsafe-inline'",
+  "img-src data: blob:",
+  "media-src data: blob:",
+  "font-src data:",
+  "connect-src 'none'",
+  "worker-src 'none'",
+  "child-src 'none'",
+  "frame-src 'none'",
+  "object-src 'none'",
+  "form-action 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+  "navigate-to 'none'",
+  "webrtc 'block'",
+  "sandbox allow-scripts",
 ].join("; ");
 
 export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {}) {
@@ -248,7 +278,10 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
       return reply.type("text/html").send(
         renderAccount({
           user,
+          pages: listPagesForUser(user.id),
+          files: listFilesForUser(user.id),
           tokens: listUserTokens(user.id),
+          interactivePublishingEnabled: getInstanceSettings().interactivePublishingEnabled,
         }),
       );
     }
@@ -288,52 +321,63 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     reply.clearCookie(userCookie, { path: "/account" });
     return reply.redirect("/account?signedOut=1");
   });
-  app.post<{ Body: { name?: string } }>("/account/tokens", async (request, reply) => {
-    accountHeaders(reply);
-    const user = requireUserSession(request);
-    const created = createUserToken(user.id, request.body?.name || "Unnamed agent");
-    return reply.type("text/html").send(
-      renderAccount({
-        user,
-        tokens: listUserTokens(user.id),
-        newToken: created.token,
-      }),
-    );
-  });
+  app.post<{ Body: { name?: string; scope?: string } }>(
+    "/account/tokens",
+    async (request, reply) => {
+      accountHeaders(reply);
+      const user = requireUserSession(request);
+      const scope = request.body?.scope || "upload";
+      if (scope !== "upload" && scope !== "interactive") {
+        throw new AppError("Invalid token scope.", 422, "invalid_scope");
+      }
+      const created = createUserToken(user.id, request.body?.name || "Unnamed agent", scope);
+      return reply.type("text/html").send(
+        renderAccount({
+          user,
+          pages: listPagesForUser(user.id),
+          files: listFilesForUser(user.id),
+          tokens: listUserTokens(user.id),
+          newToken: created.token,
+          interactivePublishingEnabled: getInstanceSettings().interactivePublishingEnabled,
+        }),
+      );
+    },
+  );
   app.post<{ Params: { id: string } }>("/account/tokens/:id/revoke", async (request, reply) => {
     const user = requireUserSession(request);
     revokeUserToken(user.id, request.params.id);
-    return reply.redirect("/account");
+    return reply.redirect("/account#tokens");
   });
-
-  app.put<{ Params: { slug: string }; Querystring: { title?: string } }>(
-    "/api/pages/:slug",
+  app.post<{ Params: { slug: string } }>("/account/pages/:slug/delete", async (request, reply) => {
+    const user = requireUserSession(request);
+    await deletePageForUser(user.id, request.params.slug);
+    return reply.redirect("/account#pages");
+  });
+  app.post<{ Params: { slug: string; version: string } }>(
+    "/account/pages/:slug/versions/:version/delete",
     async (request, reply) => {
-      const auth = requireApiAuth(request, "upload");
-      requireWritesEnabled();
-      consumeAuthenticatedUpload(auth.id);
-      const part = await request.file({ limits: { fileSize: config.maxPageBytes, files: 1 } });
-      if (part?.fieldname !== "html") {
-        throw new AppError("Expected one multipart file field named html.", 422);
-      }
-      const html = await part.toBuffer();
-      await scanUpload(html);
-      const result = await publishPage({
-        slug: request.params.slug,
-        ...(request.query.title === undefined ? {} : { title: request.query.title }),
-        html,
-        tokenId: auth.id,
-        isAdmin: auth.scopes.has("admin"),
-      });
-      return reply.code(result.version === 1 ? 201 : 200).send(result);
+      const user = requireUserSession(request);
+      await deletePageVersionForUser(user.id, request.params.slug, Number(request.params.version));
+      return reply.redirect("/account#pages");
     },
   );
+  app.post<{ Params: { id: string } }>("/account/files/:id/delete", async (request, reply) => {
+    const user = requireUserSession(request);
+    await deleteFileForUser(user.id, request.params.id);
+    return reply.redirect("/account#files");
+  });
 
-  app.post<{ Querystring: { title?: string } }>("/api/pages", async (request, reply) => {
-    const auth = optionalUploadAuth(request);
+  app.put<{
+    Params: { slug: string };
+    Querystring: { title?: string | string[]; type?: string | string[] };
+  }>("/api/pages/:slug", async (request, reply) => {
+    const kind = pageKind(request.query.type);
+    const auth =
+      kind === "interactive"
+        ? requireInteractiveApiAuth(request)
+        : requireApiAuth(request, "upload");
     requireWritesEnabled();
-    if (auth) consumeAuthenticatedUpload(auth.id);
-    else consumeAnonymousUpload(request.ip);
+    consumeAuthenticatedUpload(auth.id);
     const part = await request.file({ limits: { fileSize: config.maxPageBytes, files: 1 } });
     if (part?.fieldname !== "html") {
       throw new AppError("Expected one multipart file field named html.", 422);
@@ -341,15 +385,43 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     const html = await part.toBuffer();
     await scanUpload(html);
     const result = await publishPage({
-      slug: newPageSlug(),
-      ...(request.query.title === undefined ? {} : { title: request.query.title }),
+      slug: request.params.slug,
+      ...optionalTitle(request.query.title),
       html,
-      tokenId: auth?.id || anonymousActorId,
-      anonymous: !auth,
-      isAdmin: auth?.scopes.has("admin") || false,
+      tokenId: auth.id,
+      isAdmin: auth.scopes.has("admin"),
+      kind,
     });
-    return reply.code(201).send(result);
+    return reply.code(result.version === 1 ? 201 : 200).send(result);
   });
+
+  app.post<{ Querystring: { title?: string | string[]; type?: string | string[] } }>(
+    "/api/pages",
+    async (request, reply) => {
+      const kind = pageKind(request.query.type);
+      const auth =
+        kind === "interactive" ? requireInteractiveApiAuth(request) : optionalUploadAuth(request);
+      requireWritesEnabled();
+      if (auth) consumeAuthenticatedUpload(auth.id);
+      else consumeAnonymousUpload(request.ip);
+      const part = await request.file({ limits: { fileSize: config.maxPageBytes, files: 1 } });
+      if (part?.fieldname !== "html") {
+        throw new AppError("Expected one multipart file field named html.", 422);
+      }
+      const html = await part.toBuffer();
+      await scanUpload(html);
+      const result = await publishPage({
+        slug: newPageSlug(),
+        ...optionalTitle(request.query.title),
+        html,
+        tokenId: auth?.id || anonymousActorId,
+        anonymous: !auth,
+        isAdmin: auth?.scopes.has("admin") || false,
+        kind,
+      });
+      return reply.code(201).send(result);
+    },
+  );
 
   app.post("/api/files", async (request, reply) => {
     const auth = requireApiAuth(request, "upload");
@@ -570,21 +642,30 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
   );
 
   app.get<{ Params: { slug: string } }>("/p/:slug", async (request, reply) => {
-    return sendPage(reply, request.params.slug);
+    return sendPage(reply, request.params.slug, undefined, "public");
   });
   app.get<{ Params: { slug: string } }>("/p/:slug/raw", async (request, reply) => {
-    return sendPage(reply, request.params.slug);
+    return sendPage(reply, request.params.slug, undefined, "raw");
+  });
+  app.get<{ Params: { slug: string } }>("/p/:slug/run", async (request, reply) => {
+    return sendPage(reply, request.params.slug, undefined, "run");
   });
   app.get<{ Params: { slug: string; version: string } }>(
     "/p/:slug/:version",
     async (request, reply) => {
-      return sendPage(reply, request.params.slug, Number(request.params.version));
+      return sendPage(reply, request.params.slug, Number(request.params.version), "public");
     },
   );
   app.get<{ Params: { slug: string; version: string } }>(
     "/p/:slug/:version/raw",
     async (request, reply) => {
-      return sendPage(reply, request.params.slug, Number(request.params.version));
+      return sendPage(reply, request.params.slug, Number(request.params.version), "raw");
+    },
+  );
+  app.get<{ Params: { slug: string; version: string } }>(
+    "/p/:slug/:version/run",
+    async (request, reply) => {
+      return sendPage(reply, request.params.slug, Number(request.params.version), "run");
     },
   );
   app.get<{ Params: { filename: string } }>("/f/:filename", async (request, reply) =>
@@ -632,10 +713,20 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     return reply.redirect("/admin");
   });
   app.post<{
-    Body: { writesLocked?: string; signupsEnabled?: string; loginsEnabled?: string };
+    Body: {
+      writesLocked?: string;
+      signupsEnabled?: string;
+      loginsEnabled?: string;
+      interactivePublishingEnabled?: string;
+    };
   }>("/admin/settings", async (request, reply) => {
     requireAdminCookie(request);
-    const keys = ["writesLocked", "signupsEnabled", "loginsEnabled"] as const;
+    const keys = [
+      "writesLocked",
+      "signupsEnabled",
+      "loginsEnabled",
+      "interactivePublishingEnabled",
+    ] as const;
     const selected = keys.find((key) => request.body?.[key] !== undefined);
     if (!selected || !["true", "false"].includes(request.body[selected] || "")) {
       throw new AppError("Invalid setting.", 422);
@@ -701,6 +792,17 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     deleteUser(request.params.id);
     return reply.redirect("/admin#users");
   });
+  app.post<{ Params: { id: string }; Body: { allowed?: string } }>(
+    "/admin/users/:id/interactive",
+    async (request, reply) => {
+      requireAdminCookie(request);
+      if (!request.body || !["true", "false"].includes(request.body.allowed || "")) {
+        throw new AppError("Invalid interactive permission.", 422);
+      }
+      setInteractivePublishingPermission(request.params.id, request.body.allowed === "true");
+      return reply.redirect("/admin#users");
+    },
+  );
 
   app.setNotFoundHandler(async (_request, reply) => {
     return reply.code(404).send({ error: "not_found", message: "Route not found." });
@@ -743,7 +845,12 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
   return app;
 }
 
-async function sendPage(reply: FastifyReply, slug: string, version?: number) {
+async function sendPage(
+  reply: FastifyReply,
+  slug: string,
+  version: number | undefined,
+  mode: "public" | "raw" | "run",
+) {
   const result = await getPageVersion(slug, version);
   if (!result) {
     reply.headers({
@@ -754,17 +861,73 @@ async function sendPage(reply: FastifyReply, slug: string, version?: number) {
     });
     return reply.code(404).type("text/html; charset=utf-8").send(renderPublicNotFound());
   }
+  if (result.page.kind === "interactive" && mode === "public") {
+    const executionAllowed = canRunInteractivePage(result.page.id);
+    publicSiteHeaders(reply);
+    reply.headers({
+      "X-Schaffa-Page": result.page.slug,
+      "X-Schaffa-Version": String(result.version.version),
+      "Cache-Control": "no-store",
+    });
+    const versionPath = version ? `/${result.version.version}` : "";
+    return reply.type("text/html; charset=utf-8").send(
+      renderInteractiveWarning({
+        slug: result.page.slug,
+        title: result.page.title,
+        version: result.version.version,
+        publisher: getPagePublisher(result.page.id),
+        runUrl: `/p/${encodeURIComponent(result.page.slug)}${versionPath}/run`,
+        executionAllowed,
+      }),
+    );
+  }
+  if (result.page.kind === "static" && mode === "run") {
+    throw new AppError("This is a static page.", 404, "not_found");
+  }
+  if (
+    result.page.kind === "interactive" &&
+    mode === "run" &&
+    !canRunInteractivePage(result.page.id)
+  ) {
+    throw new AppError(
+      "Interactive execution is currently disabled for this page.",
+      503,
+      "interactive_disabled",
+    );
+  }
+  if (mode === "raw" && result.page.kind === "interactive") {
+    reply.headers({
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Content-Disposition": `inline; filename="${result.page.slug}-${result.version.version}.html.txt"`,
+      "X-Frame-Options": "DENY",
+      "X-Schaffa-Page": result.page.slug,
+      "X-Schaffa-Version": String(result.version.version),
+      "Cache-Control": "no-store",
+    });
+    return reply.type("text/plain; charset=utf-8").send(result.html);
+  }
+  const interactive = result.page.kind === "interactive";
   reply.headers({
-    "Content-Security-Policy": pageCsp,
+    "Content-Security-Policy": interactive ? interactivePageCsp : pageCsp,
     "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    ...(interactive
+      ? {
+          "Permissions-Policy":
+            "camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=(), fullscreen=(), payment=(), usb=()",
+          "X-DNS-Prefetch-Control": "off",
+        }
+      : {}),
     "X-Frame-Options": "DENY",
     "X-Schaffa-Page": result.page.slug,
     "X-Schaffa-Version": String(result.version.version),
-    "Cache-Control": result.page.expires_at
+    "Cache-Control": interactive
       ? "no-store"
-      : version
-        ? "public, max-age=300"
-        : "no-cache",
+      : result.page.expires_at
+        ? "no-store"
+        : version
+          ? "public, max-age=300"
+          : "no-cache",
   });
   return reply.type("text/html; charset=utf-8").send(result.html);
 }
@@ -775,8 +938,23 @@ async function sendFile(
 ) {
   const file = getFile(request.params.filename);
   if (!file) throw new AppError("File not found.", 404, "not_found");
-  const fileStat = await stat(`${config.dataDir}/${file.storage_path}`);
-  const range = parseRange(request.headers.range, fileStat.size);
+  const fileStat = await stat(`${config.dataDir}/${file.storage_path}`).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        throw new AppError("File not found.", 404, "not_found");
+      }
+      throw error;
+    },
+  );
+  let range: { start: number; end: number } | undefined;
+  try {
+    range = parseRange(request.headers.range, fileStat.size);
+  } catch (error) {
+    if (error instanceof AppError && error.statusCode === 416) {
+      reply.header("Content-Range", `bytes */${fileStat.size}`);
+    }
+    throw error;
+  }
   const disposition = safeInlineType(file.media_type) ? "inline" : "attachment";
   reply.headers({
     "Accept-Ranges": "bytes",
@@ -801,19 +979,26 @@ function parseRange(
   size: number,
 ): { start: number; end: number } | undefined {
   if (!value) return undefined;
-  const match = /^bytes=(\d+)-(\d*)$/.exec(value);
+  if (!value.startsWith("bytes=") || value.includes(",")) return undefined;
+  const match = /^bytes=(?:(\d+)-(\d*)|-(\d+))$/.exec(value);
   if (!match) throw new AppError("Invalid range.", 416, "invalid_range");
-  const start = Number(match[1]);
-  const end = match[2] ? Number(match[2]) : size - 1;
-  if (
-    !Number.isSafeInteger(start) ||
-    !Number.isSafeInteger(end) ||
-    start < 0 ||
-    end < start ||
-    end >= size
-  ) {
+
+  if (match[3]) {
+    const suffixLength = BigInt(match[3]);
+    if (suffixLength === 0n || size === 0) {
+      throw new AppError("Requested range is not satisfiable.", 416, "invalid_range");
+    }
+    const start = suffixLength >= BigInt(size) ? 0 : size - Number(suffixLength);
+    return { start, end: size - 1 };
+  }
+
+  const startValue = BigInt(match[1] || "0");
+  const requestedEnd = match[2] ? BigInt(match[2]) : BigInt(size - 1);
+  if (requestedEnd < startValue || startValue >= BigInt(size)) {
     throw new AppError("Requested range is not satisfiable.", 416, "invalid_range");
   }
+  const start = Number(startValue);
+  const end = requestedEnd >= BigInt(size) ? size - 1 : Number(requestedEnd);
   return { start, end };
 }
 
@@ -880,9 +1065,54 @@ async function guideStepPayload(request: FastifyRequest): Promise<{
   }
 }
 
-function requireApiAuth(request: FastifyRequest, scope: "upload") {
+function requireApiAuth(request: FastifyRequest, scope: TokenScope) {
   const token = bearerToken(request.headers.authorization);
   return requireScope(authenticateToken(token), scope);
+}
+
+function requireInteractiveApiAuth(request: FastifyRequest) {
+  const auth = requireApiAuth(request, "interactive");
+  const settings = getInstanceSettings();
+  if (!settings.interactivePublishingEnabled) {
+    throw new AppError(
+      "Interactive publishing is disabled on this instance.",
+      403,
+      "interactive_disabled",
+    );
+  }
+  const allowed = auth.userId
+    ? (db()
+        .prepare("SELECT can_publish_interactive FROM users WHERE id = ?")
+        .get(auth.userId) as unknown as { can_publish_interactive: number } | undefined)
+    : undefined;
+  if (!allowed?.can_publish_interactive) {
+    throw new AppError(
+      "Interactive publishing has not been enabled for this account.",
+      403,
+      "interactive_not_allowed",
+    );
+  }
+  return auth;
+}
+
+function pageKind(value: string | string[] | undefined): PageKind {
+  const selected = singleQueryValue(value, "type") || "static";
+  if (selected !== "static" && selected !== "interactive") {
+    throw new AppError("type must be static or interactive.", 422, "invalid_page_type");
+  }
+  return selected;
+}
+
+function optionalTitle(value: string | string[] | undefined): { title?: string } {
+  const title = singleQueryValue(value, "title");
+  return title === undefined ? {} : { title };
+}
+
+function singleQueryValue(value: string | string[] | undefined, name: string): string | undefined {
+  if (Array.isArray(value)) {
+    throw new AppError(`${name} may only be provided once.`, 422, "invalid_query");
+  }
+  return value;
 }
 
 function optionalUploadAuth(request: FastifyRequest) {

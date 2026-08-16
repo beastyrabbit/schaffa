@@ -4,13 +4,14 @@ export interface InstanceSettings {
   writesLocked: boolean;
   signupsEnabled: boolean;
   loginsEnabled: boolean;
+  interactivePublishingEnabled: boolean;
 }
 
 export function getInstanceSettings(): InstanceSettings {
   const rows = db()
     .prepare(
       `SELECT key, value FROM instance_settings
-       WHERE key IN ('writes_locked', 'signups_enabled', 'logins_enabled')`,
+       WHERE key IN ('writes_locked', 'signups_enabled', 'logins_enabled', 'interactive_publishing_enabled')`,
     )
     .all() as unknown as Array<{ key: string; value: string }>;
   const values = new Map(rows.map((row) => [row.key, row.value === "true"]));
@@ -18,6 +19,7 @@ export function getInstanceSettings(): InstanceSettings {
     writesLocked: values.get("writes_locked") || false,
     signupsEnabled: values.get("signups_enabled") ?? true,
     loginsEnabled: values.get("logins_enabled") ?? true,
+    interactivePublishingEnabled: values.get("interactive_publishing_enabled") ?? false,
   };
 }
 
@@ -26,6 +28,7 @@ export function updateInstanceSettings(input: Partial<InstanceSettings>): Instan
     ["writes_locked", input.writesLocked],
     ["signups_enabled", input.signupsEnabled],
     ["logins_enabled", input.loginsEnabled],
+    ["interactive_publishing_enabled", input.interactivePublishingEnabled],
   ] as const;
   const statement = db().prepare(
     `INSERT INTO instance_settings (key, value, updated_at)

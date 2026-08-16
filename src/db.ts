@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { config } from "./config.js";
 
-export type TokenScope = "upload" | "admin";
+export type TokenScope = "upload" | "interactive" | "admin";
+export type PageKind = "static" | "interactive";
 
 export interface TokenRow {
   id: string;
@@ -24,6 +25,7 @@ export interface UserRow {
   picture: string | null;
   created_at: string;
   last_login_at: string;
+  can_publish_interactive: number;
 }
 
 export interface PageRow {
@@ -36,6 +38,7 @@ export interface PageRow {
   expires_at: string | null;
   purge_at: string | null;
   owner_token_id: string | null;
+  kind: PageKind;
 }
 
 export interface PageVersionRow {
@@ -121,6 +124,7 @@ export function db(): DatabaseSync {
       email TEXT,
       name TEXT,
       picture TEXT,
+      can_publish_interactive INTEGER NOT NULL DEFAULT 0 CHECK(can_publish_interactive IN (0,1)),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       last_login_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) STRICT;
@@ -145,7 +149,8 @@ export function db(): DatabaseSync {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       expires_at TEXT,
       purge_at TEXT,
-      owner_token_id TEXT REFERENCES tokens(id)
+      owner_token_id TEXT REFERENCES tokens(id),
+      kind TEXT NOT NULL DEFAULT 'static' CHECK(kind IN ('static','interactive'))
     ) STRICT;
 
     CREATE TABLE IF NOT EXISTS page_versions (
@@ -280,6 +285,15 @@ export function db(): DatabaseSync {
     );
   }
 
+  const userColumns = database.prepare("PRAGMA table_info(users)").all() as unknown as Array<{
+    name: string;
+  }>;
+  if (!userColumns.some((column) => column.name === "can_publish_interactive")) {
+    database.exec(
+      "ALTER TABLE users ADD COLUMN can_publish_interactive INTEGER NOT NULL DEFAULT 0 CHECK(can_publish_interactive IN (0,1))",
+    );
+  }
+
   const pageColumns = database.prepare("PRAGMA table_info(pages)").all() as unknown as Array<{
     name: string;
   }>;
@@ -291,6 +305,9 @@ export function db(): DatabaseSync {
   }
   if (!pageColumns.some((column) => column.name === "owner_token_id")) {
     database.exec("ALTER TABLE pages ADD COLUMN owner_token_id TEXT REFERENCES tokens(id)");
+  }
+  if (!pageColumns.some((column) => column.name === "kind")) {
+    database.exec("ALTER TABLE pages ADD COLUMN kind TEXT NOT NULL DEFAULT 'static'");
   }
   database.exec(`
     UPDATE pages
@@ -314,15 +331,13 @@ export function db(): DatabaseSync {
     INSERT INTO instance_settings (key, value)
     VALUES ('logins_enabled', 'true')
     ON CONFLICT(key) DO NOTHING;
+
+    INSERT INTO instance_settings (key, value)
+    VALUES ('interactive_publishing_enabled', 'false')
+    ON CONFLICT(key) DO NOTHING;
   `);
 
   return database;
-}
-
-export function run(sql: string, ...params: SQLInputValue[]): void {
-  db()
-    .prepare(sql)
-    .run(...params);
 }
 
 export function closeDb(): void {

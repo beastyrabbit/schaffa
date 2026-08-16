@@ -5,7 +5,14 @@ import type { MultipartFile } from "@fastify/multipart";
 import { extension as extensionForMediaType, lookup } from "mime-types";
 import { anonymousActorId } from "./auth.js";
 import { config } from "./config.js";
-import { db, type FileRow, type PageRow, type PageVersionRow, type TokenRow } from "./db.js";
+import {
+  db,
+  type FileRow,
+  type PageKind,
+  type PageRow,
+  type PageVersionRow,
+  type TokenRow,
+} from "./db.js";
 import { AppError } from "./errors.js";
 import { validateHtml } from "./html-policy.js";
 import { isFileId, randomFileId, randomPageSlug } from "./ids.js";
@@ -47,6 +54,7 @@ export interface PublishedPage {
   versionRawUrl: string;
   expiresAt: string | null;
   purgeAt: string | null;
+  kind: PageKind;
 }
 
 export interface PublishedFile {
@@ -77,6 +85,7 @@ export async function publishPage(input: {
   tokenId: string;
   anonymous?: boolean;
   isAdmin?: boolean;
+  kind?: PageKind;
 }): Promise<PublishedPage> {
   return serializeMetadataWrite(() => publishPageLocked(input));
 }
@@ -97,6 +106,7 @@ async function publishPageLocked(input: {
   tokenId: string;
   anonymous?: boolean;
   isAdmin?: boolean;
+  kind?: PageKind;
 }): Promise<PublishedPage> {
   const slug = validateSlug(input.slug);
   if (input.html.length === 0) throw new AppError("HTML file is empty.", 422, "empty_file");
@@ -108,10 +118,13 @@ async function publishPageLocked(input: {
   if (Buffer.byteLength(html, "utf8") !== input.html.length) {
     throw new AppError("HTML must be valid UTF-8.", 422, "invalid_encoding");
   }
-  validateHtml(html);
+  const kind = input.kind || "static";
+  validateHtml(html, kind === "interactive");
 
   const title = input.title?.trim() || null;
-  if (title && title.length > 160) throw new AppError("Title may not exceed 160 characters.");
+  if (title && title.length > 160) {
+    throw new AppError("Title may not exceed 160 characters.", 422, "invalid_title");
+  }
 
   const existing = db().prepare("SELECT * FROM pages WHERE slug = ?").get(slug) as unknown as
     | PageRow
@@ -122,6 +135,14 @@ async function publishPageLocked(input: {
   if (existing && existing.owner_token_id !== input.tokenId && !input.isAdmin) {
     throw new AppError("This token does not own the page.", 403, "forbidden");
   }
+  if (existing && existing.kind !== kind) {
+    throw new AppError(
+      "A page cannot change between static and interactive.",
+      409,
+      "page_kind_mismatch",
+    );
+  }
+  const publishedTitle = title ?? existing?.title ?? null;
   const pageId = existing?.id || randomUUID();
   const version = (existing?.current_version || 0) + 1;
   const digest = sha256(input.html);
@@ -149,6 +170,14 @@ async function publishPageLocked(input: {
     : [];
   assertStorageCapacity(input.html.length - prunable.reduce((total, row) => total + row.bytes, 0));
   const storagePath = await storePage(slug, version, input.html);
+  if (kind === "interactive" && !interactivePublisherActive(input.tokenId)) {
+    await removeStoredFile(storagePath);
+    throw new AppError(
+      "Interactive publishing has not been enabled for this account.",
+      403,
+      "interactive_not_allowed",
+    );
+  }
 
   db().exec("BEGIN IMMEDIATE");
   try {
@@ -164,10 +193,10 @@ async function publishPageLocked(input: {
       db()
         .prepare(
           `INSERT INTO pages
-           (id, slug, title, current_version, expires_at, purge_at, owner_token_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (id, slug, title, current_version, expires_at, purge_at, owner_token_id, kind)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(pageId, slug, title, version, expiresAt, purgeAt, input.tokenId);
+        .run(pageId, slug, title, version, expiresAt, purgeAt, input.tokenId, kind);
     }
     db()
       .prepare(
@@ -197,7 +226,7 @@ async function publishPageLocked(input: {
 
   return {
     slug,
-    title,
+    title: publishedTitle,
     version,
     bytes: input.html.length,
     sha256: digest,
@@ -207,7 +236,27 @@ async function publishPageLocked(input: {
     versionRawUrl: `${config.baseUrl}/p/${slug}/${version}/raw`,
     expiresAt,
     purgeAt,
+    kind,
   };
+}
+
+function interactivePublisherActive(tokenId: string): boolean {
+  return Boolean(
+    db()
+      .prepare(
+        `SELECT 1 FROM tokens t
+         JOIN users u ON u.id = t.user_id
+         WHERE t.id = ?
+           AND t.revoked_at IS NULL
+           AND u.can_publish_interactive = 1
+           AND (',' || t.scopes || ',') LIKE '%,interactive,%'
+           AND EXISTS (
+             SELECT 1 FROM instance_settings s
+             WHERE s.key = 'interactive_publishing_enabled' AND s.value = 'true'
+           )`,
+      )
+      .get(tokenId),
+  );
 }
 
 export async function publishFile(
@@ -363,6 +412,48 @@ export function listFiles(): FileSummary[] {
     .all() as unknown as FileSummary[];
 }
 
+export function listPagesForUser(userId: string): PageSummary[] {
+  const pages = db()
+    .prepare(
+      `SELECT p.*,
+              (SELECT COUNT(*) FROM page_versions pv WHERE pv.page_id = p.id) AS version_count,
+              COALESCE(
+                (SELECT pv.bytes FROM page_versions pv
+                 WHERE pv.page_id = p.id ORDER BY pv.version DESC LIMIT 1),
+                0
+              ) AS latest_bytes,
+              owner.id AS uploader_id,
+              owner.name AS uploader_name
+       FROM pages p
+       JOIN tokens owner ON owner.id = p.owner_token_id
+       WHERE owner.user_id = ?
+         AND (p.expires_at IS NULL OR datetime(p.expires_at) > CURRENT_TIMESTAMP)
+       ORDER BY p.updated_at DESC`,
+    )
+    .all(userId) as unknown as Array<Omit<PageSummary, "version_numbers">>;
+  const versions = db().prepare(
+    "SELECT version FROM page_versions WHERE page_id = ? ORDER BY version DESC",
+  );
+  return pages.map((page) => ({
+    ...page,
+    version_numbers: (versions.all(page.id) as unknown as Array<{ version: number }>).map(
+      ({ version }) => version,
+    ),
+  }));
+}
+
+export function listFilesForUser(userId: string): FileSummary[] {
+  return db()
+    .prepare(
+      `SELECT f.*, t.id AS uploader_id, t.name AS uploader_name
+       FROM files f
+       JOIN tokens t ON t.id = f.created_by_token_id
+       WHERE t.user_id = ?
+       ORDER BY f.created_at DESC`,
+    )
+    .all(userId) as unknown as FileSummary[];
+}
+
 export function listTokens(): TokenRow[] {
   return db()
     .prepare(
@@ -373,6 +464,25 @@ export function listTokens(): TokenRow[] {
 }
 
 export async function deletePage(slugValue: string): Promise<void> {
+  return serializeMetadataWrite(() => deletePageLocked(slugValue));
+}
+
+export async function deletePageForUser(userId: string, slugValue: string): Promise<void> {
+  return serializeMetadataWrite(async () => {
+    const slug = validateSlug(slugValue);
+    const owned = db()
+      .prepare(
+        `SELECT 1 FROM pages p
+         JOIN tokens t ON t.id = p.owner_token_id
+         WHERE p.slug = ? AND t.user_id = ?`,
+      )
+      .get(slug, userId);
+    if (!owned) throw new AppError("Page not found.", 404, "not_found");
+    await deletePageLocked(slug);
+  });
+}
+
+async function deletePageLocked(slugValue: string): Promise<void> {
   const slug = validateSlug(slugValue);
   const result = db().prepare("DELETE FROM pages WHERE slug = ?").run(slug);
   if (result.changes === 0) throw new AppError("Page not found.", 404, "not_found");
@@ -380,6 +490,29 @@ export async function deletePage(slugValue: string): Promise<void> {
 }
 
 export async function deletePageVersion(slugValue: string, version: number): Promise<void> {
+  return serializeMetadataWrite(() => deletePageVersionLocked(slugValue, version));
+}
+
+export async function deletePageVersionForUser(
+  userId: string,
+  slugValue: string,
+  version: number,
+): Promise<void> {
+  return serializeMetadataWrite(async () => {
+    const slug = validateSlug(slugValue);
+    const owned = db()
+      .prepare(
+        `SELECT 1 FROM pages p
+         JOIN tokens t ON t.id = p.owner_token_id
+         WHERE p.slug = ? AND t.user_id = ?`,
+      )
+      .get(slug, userId);
+    if (!owned) throw new AppError("Page not found.", 404, "not_found");
+    await deletePageVersionLocked(slug, version);
+  });
+}
+
+async function deletePageVersionLocked(slugValue: string, version: number): Promise<void> {
   const slug = validateSlug(slugValue);
   if (!Number.isSafeInteger(version) || version < 1) {
     throw new AppError("Invalid page version.", 422, "invalid_version");
@@ -394,12 +527,10 @@ export async function deletePageVersion(slugValue: string, version: number): Pro
   if (!selected) throw new AppError("Page version not found.", 404, "not_found");
 
   const remaining = db()
-    .prepare(
-      "SELECT MAX(version) AS latest, COUNT(*) AS count FROM page_versions WHERE page_id = ?",
-    )
-    .get(page.id) as unknown as { latest: number; count: number };
+    .prepare("SELECT COUNT(*) AS count FROM page_versions WHERE page_id = ?")
+    .get(page.id) as unknown as { count: number };
   if (remaining.count === 1) {
-    await deletePage(slug);
+    await deletePageLocked(slug);
     return;
   }
 
@@ -425,6 +556,25 @@ export async function deletePageVersion(slugValue: string, version: number): Pro
 }
 
 export async function deleteFile(id: string): Promise<void> {
+  return serializeMetadataWrite(() => deleteFileLocked(id));
+}
+
+export async function deleteFileForUser(userId: string, id: string): Promise<void> {
+  return serializeMetadataWrite(async () => {
+    if (!isFileId(id)) throw new AppError("File not found.", 404, "not_found");
+    const owned = db()
+      .prepare(
+        `SELECT 1 FROM files f
+         JOIN tokens t ON t.id = f.created_by_token_id
+         WHERE f.id = ? AND t.user_id = ?`,
+      )
+      .get(id, userId);
+    if (!owned) throw new AppError("File not found.", 404, "not_found");
+    await deleteFileLocked(id);
+  });
+}
+
+async function deleteFileLocked(id: string): Promise<void> {
   if (!isFileId(id)) throw new AppError("File not found.", 404, "not_found");
   const result = db().prepare("DELETE FROM files WHERE id = ?").run(id);
   if (result.changes === 0) throw new AppError("File not found.", 404, "not_found");
@@ -450,7 +600,46 @@ export async function getPageVersion(
     .prepare("SELECT * FROM page_versions WHERE page_id = ? AND version = ?")
     .get(page.id, selectedVersion) as unknown as PageVersionRow | undefined;
   if (!row) return null;
-  return { page, version: row, html: await readStoredFile(row.storage_path) };
+  try {
+    return { page, version: row, html: await readStoredFile(row.storage_path) };
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export function getPagePublisher(pageId: string): string {
+  const publisher = db()
+    .prepare(
+      `SELECT COALESCE(u.name, u.email, t.name, 'Trusted publisher') AS name
+       FROM pages p
+       LEFT JOIN tokens t ON t.id = p.owner_token_id
+       LEFT JOIN users u ON u.id = t.user_id
+       WHERE p.id = ?`,
+    )
+    .get(pageId) as unknown as { name: string } | undefined;
+  return publisher?.name || "Trusted publisher";
+}
+
+export function canRunInteractivePage(pageId: string): boolean {
+  return Boolean(
+    db()
+      .prepare(
+        `SELECT 1 FROM pages p
+         JOIN tokens t ON t.id = p.owner_token_id
+         JOIN users u ON u.id = t.user_id
+         WHERE p.id = ?
+           AND p.kind = 'interactive'
+           AND u.can_publish_interactive = 1
+           AND EXISTS (
+             SELECT 1 FROM instance_settings s
+             WHERE s.key = 'interactive_publishing_enabled' AND s.value = 'true'
+           )`,
+      )
+      .get(pageId),
+  );
 }
 
 export function getFile(filename: string): FileRow | null {
@@ -469,6 +658,10 @@ export function filePublicUrl(filename: string): string {
 }
 
 export async function purgeRetainedAnonymousPages(): Promise<number> {
+  return serializeMetadataWrite(purgeRetainedAnonymousPagesLocked);
+}
+
+async function purgeRetainedAnonymousPagesLocked(): Promise<number> {
   const expired = db()
     .prepare(
       `SELECT slug FROM pages

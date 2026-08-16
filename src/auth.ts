@@ -7,6 +7,7 @@ export interface AuthToken {
   id: string;
   name: string;
   scopes: Set<TokenScope>;
+  userId: string | null;
 }
 
 export const anonymousActorId = "anonymous";
@@ -31,8 +32,11 @@ export function createToken(
   if (cleanName.length < 1 || cleanName.length > 80) {
     throw new AppError("Token name must contain 1 to 80 characters.");
   }
-  if (scopes.length === 0 || scopes.some((scope) => !["upload", "admin"].includes(scope))) {
-    throw new AppError("Token scopes must contain upload and/or admin.");
+  if (
+    scopes.length === 0 ||
+    scopes.some((scope) => !["upload", "interactive", "admin"].includes(scope))
+  ) {
+    throw new AppError("Token scopes must contain upload, interactive, and/or admin.");
   }
 
   const id = randomUUID();
@@ -120,6 +124,7 @@ export function authenticateToken(token: string | undefined): AuthToken | null {
     id: row.id,
     name: row.name,
     scopes: new Set(row.scopes.split(",") as TokenScope[]),
+    userId: row.user_id,
   };
 }
 

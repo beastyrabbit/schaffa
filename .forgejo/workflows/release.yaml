@@ -35,23 +35,7 @@ jobs:
           pnpm install --frozen-lockfile
 
       - name: Validate release version
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const fs = require("node:fs");
-          const tag = process.env.FORGEJO_REF_NAME;
-          const root = require("./package.json");
-          const cli = require("./packages/cli/package.json");
-          if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag || "")) {
-            throw new Error(`Release tag ${tag || "<missing>"} is not a supported semantic version.`);
-          }
-          if (root.version !== cli.version || tag !== `v${cli.version}`) {
-            throw new Error(
-              `Tag ${tag} must match root and CLI package versions (${root.version}, ${cli.version}).`,
-            );
-          }
-          fs.appendFileSync(process.env.GITHUB_ENV, `RELEASE_VERSION=${cli.version}\nRELEASE_TAG=${tag}\n`);
-          NODE
+        run: RELEASE_REF_NAME="$FORGEJO_REF_NAME" RELEASE_ENV_FILE="$GITHUB_ENV" node scripts/ci-validate-release.mjs
 
       - name: Run type, lint, and test checks
         run: pnpm typecheck && pnpm lint && pnpm test
@@ -126,13 +110,25 @@ jobs:
       - name: Publish CLI package
         run: |
           set -euo pipefail
+          error_file="$(mktemp)"
+          trap 'rm -f "$error_file"' EXIT
+          set +e
           published_version="$(npm view "schaffa@${RELEASE_VERSION}" version \
-            --registry "$FORGEJO_NPM_REGISTRY" 2>/dev/null || true)"
-          if [[ -n "$published_version" ]]; then
-            [[ "$published_version" == "$RELEASE_VERSION" ]]
+            --registry "$FORGEJO_NPM_REGISTRY" 2>"$error_file")"
+          status=$?
+          set -e
+          if [[ $status -eq 0 ]]; then
+            if [[ "$published_version" != "$RELEASE_VERSION" ]]; then
+              echo "Forgejo returned unexpected version '$published_version' for schaffa@${RELEASE_VERSION}." >&2
+              exit 1
+            fi
             echo "schaffa@$RELEASE_VERSION is already published; keeping the immutable package."
+          elif grep -Eq '(^|[[:space:]])E404([[:space:]]|$)' "$error_file"; then
+            pnpm --filter schaffa publish --no-git-checks \
+              --registry "$FORGEJO_NPM_REGISTRY" --tag "$RELEASE_DIST_TAG"
           else
-            pnpm --filter schaffa publish --no-git-checks --registry "$FORGEJO_NPM_REGISTRY"
+            cat "$error_file" >&2
+            exit "$status"
           fi
 
       - name: Create Forgejo release
@@ -149,15 +145,11 @@ jobs:
             "Tagged release with a Forgejo CLI package and immutable container image. npmjs.org publishing runs from the GitHub mirror." \
             "$RELEASE_VERSION" "$FORGEJO_REPOSITORY" "$RELEASE_VERSION" "$IMAGE_DIGEST" > "$body_file"
 
-          prerelease=false
-          if [[ "$RELEASE_VERSION" == *-* ]]; then
-            prerelease=true
-          fi
           release_payload="$(jq -n \
             --arg tag "$RELEASE_TAG" \
             --arg name "Schaffa $RELEASE_TAG" \
             --arg body "$(<"$body_file")" \
-            --argjson prerelease "$prerelease" \
+            --argjson prerelease "$RELEASE_PRERELEASE" \
             '{tag_name: $tag, name: $name, body: $body, draft: false, prerelease: $prerelease}')"
 
           existing_file="$RUNNER_TEMP/existing-release.json"

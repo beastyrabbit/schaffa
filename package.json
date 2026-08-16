@@ -1,6 +1,6 @@
 {
   "name": "schaffa-server",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Self-hosted public page and file publishing for agents.",
   "private": true,
   "engines": {
@@ -16,7 +16,8 @@
     "lint": "biome check .",
     "security": "gitleaks dir . --redact --no-banner",
     "start": "node dist/server.js",
-    "test": "pnpm test:server && pnpm --filter schaffa test",
+    "test": "pnpm test:server && pnpm test:release && pnpm --filter schaffa test",
+    "test:release": "node --test test/release-validation.test.mjs",
     "test:server": "tsx --test test/**/*.test.ts",
     "token": "tsx scripts/token.ts",
     "typecheck": "tsc --noEmit && pnpm --filter schaffa exec tsc --noEmit -p tsconfig.json"
