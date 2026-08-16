@@ -11,7 +11,7 @@ import {
   type GuideStepRow,
 } from "./db.js";
 import { AppError } from "./errors.js";
-import { randomFileId, randomPageSlug } from "./ids.js";
+import { randomFileId, randomGuideSlug } from "./ids.js";
 import { cleanImage, isLikelyImage, withImageProcessingPermit } from "./image-cleaner.js";
 import { removeGuide, removeStoredFile, sha256, storeGuideImage } from "./storage.js";
 import { scanUpload } from "./virus-scanner.js";
@@ -108,7 +108,7 @@ export function createGuide(
   const description = optionalText(input.description, "description", 4_000);
   const language = validateLanguage(input.language);
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const slug = randomPageSlug();
+    const slug = randomGuideSlug();
     if (db().prepare("SELECT 1 FROM guides WHERE slug = ?").get(slug)) continue;
     db()
       .prepare(

@@ -1,4 +1,15 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
+
+function readApplicationVersion(): string {
+  const packageJson = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version?: unknown };
+  if (typeof packageJson.version !== "string" || packageJson.version.length === 0) {
+    throw new Error("package.json must define a version.");
+  }
+  return packageJson.version;
+}
 
 function positiveInteger(name: string, fallback: number): number {
   const value = process.env[name];
@@ -34,6 +45,7 @@ const baseUrl = readBaseUrl(
 const shooBaseUrl = readBaseUrl("SHOO_BASE_URL", "https://shoo.dev");
 
 export const config = {
+  version: readApplicationVersion(),
   host: process.env.HOST || "0.0.0.0",
   port: positiveInteger("PORT", 3000),
   dataDir: path.resolve(process.env.SCHAFFA_DATA_DIR || "./data"),
@@ -68,5 +80,3 @@ export const config = {
   logLevel: process.env.LOG_LEVEL || "info",
   cookieSecure: new URL(baseUrl).protocol === "https:",
 };
-
-export type Config = typeof config;

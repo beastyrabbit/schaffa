@@ -10,15 +10,16 @@ Schaffa is heavily inspired by [PostPlan](https://postplan.dev) and [UploadThing
 
 ## What it does
 
-- Publishes complete HTML files under random 12-character slugs.
+- Publishes complete HTML files under random 16-character slugs.
 - Keeps immutable page versions while `/p/:slug` always serves the latest.
-- Returns byte-identical HTML from normal and `/raw` URLs.
+- Returns byte-identical HTML for static pages; interactive pages use a warning screen and isolated run URL.
 - Publishes files under random 128-bit IDs without retaining original filenames.
 - Records guides incrementally with optimistic concurrency, idempotent steps, cleaned screenshots, preflight checks, and immutable revisions.
 - Publishes script-free Marp presentations with optional PDF/PPTX/source artifacts through the CLI.
 - Converts images to metadata-free WebP, limits them to 2560 px and preserves transparency.
 - Accepts new anonymous HTML pages for one hour; tokens make pages permanent and enable files or updates.
 - Lets users sign in through Shoo and issue revocable upload tokens for their own agents.
+- Lets administrators enable sandboxed interactive pages only for explicitly trusted users.
 - Scans every upload with an isolated ClamAV service and never executes uploaded content.
 
 ## Pangolin access model
@@ -80,17 +81,19 @@ Publish a Marp presentation and its export artifacts:
 npx schaffa publish deck.md --kind presentation --export pdf --export pptx
 ```
 
-The CLI defaults to `https://schaffa.dev`. New HTML pages work without a token and disappear after one hour. For permanent pages, files, and `--slug <slug>` updates, set `SCHAFFA_TOKEN` or pass `--token <token>` directly.
+The CLI defaults to `https://schaffa.dev`. New HTML pages work without a token and disappear after one hour. For permanent pages, files, presentations, guides, and publishing at a chosen `--slug <slug>`, set `SCHAFFA_TOKEN` or pass `--token <token>` directly. Reusing a chosen slug creates the next immutable version.
+
+Trusted users can create a separate Interactive token in their account and publish inline JavaScript with `npx schaffa upload ./plan.html --interactive`. Visitors see a warning before the code runs in a sandbox without network, storage, forms, pop-ups, or navigation.
 
 ## Releases
 
 Pushes and pull requests run CI without publishing. A semantic version tag such
-as `v0.2.0` publishes the matching CLI package to npmjs.org and Forgejo plus an
+as `v0.2.1` publishes the matching CLI package to npmjs.org and Forgejo plus an
 immutable container image,
 then creates a Forgejo release with checksums and the image digest:
 
 ```sh
-docker pull git.heerlab.com/beasty/schaffa:0.2.0
+docker pull git.heerlab.com/beasty/schaffa:0.2.1
 ```
 
 Production deployments should pin the digest recorded in the Forgejo release.

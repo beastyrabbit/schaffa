@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -67,13 +67,14 @@ process.env.CLAMAV_HOST = "127.0.0.1";
 process.env.CLAMAV_PORT = String(scannerAddress.port);
 process.env.CLAMAV_TIMEOUT_MS = "1000";
 process.env.ANONYMOUS_UPLOADS_PER_HOUR = "3";
-process.env.AUTHENTICATED_UPLOADS_PER_HOUR = "20";
+process.env.AUTHENTICATED_UPLOADS_PER_HOUR = "50";
 process.env.MAX_PAGE_VERSIONS = "2";
 process.env.MAX_STORAGE_BYTES = String(1024 * 1024);
 process.env.MAX_PUBLISHED_IMAGE_BYTES = String(256 * 1024);
 process.env.LOG_LEVEL = "silent";
 
 const { buildServer } = await import("../src/server.js");
+const { config } = await import("../src/config.js");
 const { db } = await import("../src/db.js");
 const { createToken, seedBootstrapToken } = await import("../src/auth.js");
 const { purgeRetainedAnonymousPages } = await import("../src/service.js");
@@ -102,6 +103,14 @@ test("migrates legacy ownership and token schemas in place", () => {
     name: string;
   }>;
   assert.ok(tokenColumns.some((column) => column.name === "user_id"));
+  const pageColumns = db().prepare("PRAGMA table_info(pages)").all() as unknown as Array<{
+    name: string;
+  }>;
+  assert.ok(pageColumns.some((column) => column.name === "kind"));
+  const userColumns = db().prepare("PRAGMA table_info(users)").all() as unknown as Array<{
+    name: string;
+  }>;
+  assert.ok(userColumns.some((column) => column.name === "can_publish_interactive"));
   db().prepare("DELETE FROM pages WHERE id = 'legacy-page-id'").run();
   db().prepare("DELETE FROM tokens WHERE id = 'legacy-token'").run();
 });
@@ -252,7 +261,10 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.equal(specification.statusCode, 200);
   assert.match(specification.headers["content-type"] || "", /^application\/json/);
   assert.equal(specification.json().openapi, "3.1.0");
-  assert.equal(specification.json().info.version, "0.3.0");
+  const packageJson = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version: string };
+  assert.equal(specification.json().info.version, packageJson.version);
   assert.equal(specification.json().servers[0].url, "https://schaffa.test");
   assert.ok(specification.json().paths["/api/pages"].post);
   assert.ok(specification.json().paths["/api/pages/{slug}"].put);
@@ -270,6 +282,28 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.equal(specification.json().paths["/api/tokens"], undefined);
   assert.equal(specification.json().paths["/api/users"], undefined);
   assert.equal(specification.json().paths["/api/settings"], undefined);
+  const pagePut = specification.json().paths["/api/pages/{slug}"].put;
+  assert.ok(pagePut.responses["201"]);
+  assert.equal(pagePut.responses["404"], undefined);
+  assert.ok(pagePut.responses["413"]);
+  assert.ok(pagePut.responses["429"]);
+  assert.ok(pagePut.responses["503"]);
+  assert.ok(pagePut.parameters.some((parameter: { name: string }) => parameter.name === "title"));
+  assert.deepEqual(specification.json().components.schemas.PagePublication.required, [
+    "slug",
+    "title",
+    "kind",
+    "version",
+    "bytes",
+    "sha256",
+    "publicUrl",
+    "versionUrl",
+    "rawUrl",
+    "versionRawUrl",
+    "expiresAt",
+    "purgeAt",
+  ]);
+  assert.ok(specification.json().components.schemas.FilePublication.required.includes("sha256"));
 });
 
 test("publishes immutable page versions under a stable slug", async () => {
@@ -322,6 +356,87 @@ test("publishes immutable page versions under a stable slug", async () => {
   assert.match(admin.body, new RegExp(`${Buffer.byteLength(secondHtml)} B`));
 });
 
+test("retains a page title when an update omits it", async () => {
+  const firstBody = multipart("html", "titled.html", "text/html", "<h1>Version one</h1>");
+  const first = await app.inject({
+    method: "PUT",
+    url: "/api/pages/titled-page?title=Release%20plan",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${bootstrapToken}`,
+      "content-type": firstBody.contentType,
+    },
+    payload: firstBody.payload,
+  });
+  assert.equal(first.statusCode, 201);
+  assert.equal(first.json().title, "Release plan");
+
+  const updated = await publishHtml("titled-page", "<h1>Version two</h1>");
+  assert.equal(updated.statusCode, 200);
+  assert.equal(updated.json().title, "Release plan");
+
+  const longTitleBody = multipart("html", "long-title.html", "text/html", "<h1>Nope</h1>");
+  const longTitle = await app.inject({
+    method: "PUT",
+    url: `/api/pages/long-title?title=${"x".repeat(161)}`,
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${bootstrapToken}`,
+      "content-type": longTitleBody.contentType,
+    },
+    payload: longTitleBody.payload,
+  });
+  assert.equal(longTitle.statusCode, 422);
+  assert.equal(longTitle.json().error, "invalid_title");
+});
+
+test("rejects repeated page query parameters as a client error", async () => {
+  const body = multipart("html", "query.html", "text/html", "<h1>Query</h1>");
+  const response = await app.inject({
+    method: "PUT",
+    url: "/api/pages/repeated-query?title=one&title=two",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${bootstrapToken}`,
+      "content-type": body.contentType,
+    },
+    payload: body.payload,
+  });
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.json().error, "invalid_query");
+});
+
+test("allows custom slugs that only overlap top-level routes", async () => {
+  const created = await publishHtml("api", "<h1>Namespaced page</h1>");
+  assert.equal(created.statusCode, 201);
+  const page = await app.inject({
+    method: "GET",
+    url: "/p/api",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(page.statusCode, 200);
+  assert.equal(page.body, "<h1>Namespaced page</h1>");
+});
+
+test("returns 404 when page metadata outlives its stored content", async () => {
+  const created = await publishHtml("missing-page-content", "<h1>Temporary inconsistency</h1>");
+  assert.equal(created.statusCode, 201);
+  const row = db()
+    .prepare(
+      "SELECT storage_path FROM page_versions WHERE page_id = (SELECT id FROM pages WHERE slug = ?)",
+    )
+    .get("missing-page-content") as unknown as { storage_path: string };
+  await rm(path.join(dataDir, row.storage_path));
+
+  const missing = await app.inject({
+    method: "GET",
+    url: "/p/missing-page-content",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(missing.statusCode, 404);
+  db().prepare("DELETE FROM pages WHERE slug = ?").run("missing-page-content");
+});
+
 test("creates pages with non-semantic random slugs", async () => {
   const body = multipart("html", "named-plan.html", "text/html", "<h1>Named plan</h1>");
   const created = await app.inject({
@@ -335,7 +450,7 @@ test("creates pages with non-semantic random slugs", async () => {
     payload: body.payload,
   });
   assert.equal(created.statusCode, 201);
-  assert.match(created.json().slug, /^[a-z2-7]{12}$/);
+  assert.match(created.json().slug, /^[a-z0-9]{16}$/);
   assert.doesNotMatch(created.json().slug, /named|plan/);
   assert.equal(created.json().rawUrl, `https://schaffa.test/p/${created.json().slug}/raw`);
 });
@@ -653,7 +768,7 @@ test("keeps anonymous pages visible for one hour and stored for 30 days", async 
   });
   assert.equal(created.statusCode, 201);
   const { slug, expiresAt, purgeAt } = created.json();
-  assert.match(slug, /^[a-z2-7]{12}$/);
+  assert.match(slug, /^[a-z0-9]{16}$/);
   assert.ok(expiresAt);
   assert.ok(purgeAt);
   assert.ok(
@@ -758,6 +873,17 @@ test("rejects active HTML content", async () => {
   const response = await publishHtml("unsafe", '<button onclick="alert(1)">Nope</button>');
   assert.equal(response.statusCode, 422);
   assert.equal(response.json().error, "unsafe_html");
+
+  const template = await publishHtml(
+    "unsafe-template",
+    "<template><script>alert(1)</script></template>",
+  );
+  assert.equal(template.statusCode, 422);
+  assert.equal(template.json().error, "unsafe_html");
+
+  const obfuscatedUrl = await publishHtml("unsafe-url", '<a href="jav\nascript:alert(1)">Nope</a>');
+  assert.equal(obfuscatedUrl.statusCode, 422);
+  assert.equal(obfuscatedUrl.json().error, "unsafe_html");
 });
 
 test("uploads files under neutral 128-bit IDs and supports byte ranges", async () => {
@@ -787,6 +913,68 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
   assert.equal(ranged.headers["content-range"], "bytes 1-3/6");
   assert.equal(ranged.headers["content-security-policy"], "default-src 'none'; sandbox");
   assert.match(String(ranged.headers["strict-transport-security"]), /max-age=31536000/);
+
+  const suffix = await app.inject({
+    method: "GET",
+    url: publicUrl.pathname,
+    headers: { host: "schaffa.test", range: "bytes=-3" },
+  });
+  assert.equal(suffix.statusCode, 206);
+  assert.equal(suffix.body, "def");
+  assert.equal(suffix.headers["content-range"], "bytes 3-5/6");
+
+  const oversizedEnd = await app.inject({
+    method: "GET",
+    url: publicUrl.pathname,
+    headers: { host: "schaffa.test", range: "bytes=4-99" },
+  });
+  assert.equal(oversizedEnd.statusCode, 206);
+  assert.equal(oversizedEnd.body, "ef");
+  assert.equal(oversizedEnd.headers["content-range"], "bytes 4-5/6");
+
+  const hugeEnd = await app.inject({
+    method: "GET",
+    url: publicUrl.pathname,
+    headers: { host: "schaffa.test", range: `bytes=4-${"9".repeat(30)}` },
+  });
+  assert.equal(hugeEnd.statusCode, 206);
+  assert.equal(hugeEnd.body, "ef");
+
+  const hugeSuffix = await app.inject({
+    method: "GET",
+    url: publicUrl.pathname,
+    headers: { host: "schaffa.test", range: `bytes=-${"9".repeat(30)}` },
+  });
+  assert.equal(hugeSuffix.statusCode, 206);
+  assert.equal(hugeSuffix.body, "abcdef");
+
+  const multiple = await app.inject({
+    method: "GET",
+    url: publicUrl.pathname,
+    headers: { host: "schaffa.test", range: "bytes=0-1,4-5" },
+  });
+  assert.equal(multiple.statusCode, 200);
+  assert.equal(multiple.body, "abcdef");
+
+  const invalid = await app.inject({
+    method: "GET",
+    url: publicUrl.pathname,
+    headers: { host: "schaffa.test", range: "bytes=99-" },
+  });
+  assert.equal(invalid.statusCode, 416);
+  assert.equal(invalid.headers["content-range"], "bytes */6");
+
+  const row = db()
+    .prepare("SELECT storage_path FROM files WHERE filename = ?")
+    .get(publicUrl.pathname.slice("/f/".length)) as unknown as { storage_path: string };
+  await rm(path.join(dataDir, row.storage_path));
+  const missing = await app.inject({
+    method: "GET",
+    url: publicUrl.pathname,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(missing.statusCode, 404);
+  assert.equal(missing.json().error, "not_found");
 });
 
 test("downscales images, preserves alpha, and strips identifying metadata", async () => {
@@ -1016,7 +1204,7 @@ test("write lockdown blocks publishing but leaves takedown available", async () 
   });
 });
 
-test("creates Shoo users and lets them manage their own agent tokens", async () => {
+test("creates Shoo users and lets them manage their own tokens and uploads", async () => {
   const formLogin = await app.inject({
     method: "POST",
     url: "/auth/shoo",
@@ -1062,6 +1250,38 @@ test("creates Shoo users and lets them manage their own agent tokens", async () 
     .get("my-agent") as unknown as { id: string; user_id: string; revoked_at: string | null };
   assert.ok(tokenRow.user_id);
 
+  const page = await publishHtmlWithToken("account-owned-page", "<h1>Version one</h1>", token);
+  assert.equal(page.statusCode, 201);
+  const updatedPage = await publishHtmlWithToken(
+    "account-owned-page",
+    "<h1>Version two</h1>",
+    token,
+  );
+  assert.equal(updatedPage.statusCode, 200);
+  const fileBody = multipart("file", "account-note.txt", "text/plain", "account file");
+  const file = await app.inject({
+    method: "POST",
+    url: "/api/files",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${token}`,
+      "content-type": fileBody.contentType,
+    },
+    payload: fileBody.payload,
+  });
+  assert.equal(file.statusCode, 201);
+  const fileId = file.json().id as string;
+
+  const populatedAccount = await app.inject({
+    method: "GET",
+    url: "/account",
+    headers: { host: "schaffa.test", cookie },
+  });
+  assert.match(populatedAccount.body, /Dein Konto/);
+  assert.match(populatedAccount.body, /account-owned-page/);
+  assert.match(populatedAccount.body, new RegExp(fileId));
+  assert.match(populatedAccount.body, /my-agent/);
+
   const revoked = await app.inject({
     method: "POST",
     url: `/account/tokens/${tokenRow.id}/revoke`,
@@ -1075,6 +1295,58 @@ test("creates Shoo users and lets them manage their own agent tokens", async () 
       }
     ).revoked_at,
   );
+  const accountAfterRevoke = await app.inject({
+    method: "GET",
+    url: "/account",
+    headers: { host: "schaffa.test", cookie },
+  });
+  assert.match(accountAfterRevoke.body, /account-owned-page/);
+  assert.match(accountAfterRevoke.body, new RegExp(fileId));
+
+  const otherLogin = await shooLogin("shoo-user-beta-1234567890");
+  const otherCookie = responseCookie(otherLogin, "__Secure-schaffa_user");
+  const deniedPageDelete = await app.inject({
+    method: "POST",
+    url: "/account/pages/account-owned-page/delete",
+    headers: { host: "schaffa.test", cookie: otherCookie },
+  });
+  assert.equal(deniedPageDelete.statusCode, 404);
+  const deniedFileDelete = await app.inject({
+    method: "POST",
+    url: `/account/files/${fileId}/delete`,
+    headers: { host: "schaffa.test", cookie: otherCookie },
+  });
+  assert.equal(deniedFileDelete.statusCode, 404);
+
+  const deletedVersion = await app.inject({
+    method: "POST",
+    url: "/account/pages/account-owned-page/versions/1/delete",
+    headers: { host: "schaffa.test", cookie },
+  });
+  assert.equal(deletedVersion.statusCode, 302);
+  const remainingVersions = db()
+    .prepare(
+      "SELECT COUNT(*) AS count FROM page_versions WHERE page_id = (SELECT id FROM pages WHERE slug = ?)",
+    )
+    .get("account-owned-page") as unknown as { count: number };
+  assert.equal(remainingVersions.count, 1);
+  const deletedPage = await app.inject({
+    method: "POST",
+    url: "/account/pages/account-owned-page/delete",
+    headers: { host: "schaffa.test", cookie },
+  });
+  assert.equal(deletedPage.statusCode, 302);
+  const deletedFile = await app.inject({
+    method: "POST",
+    url: `/account/files/${fileId}/delete`,
+    headers: { host: "schaffa.test", cookie },
+  });
+  assert.equal(deletedFile.statusCode, 302);
+  assert.equal(
+    db().prepare("SELECT 1 FROM pages WHERE slug = ?").get("account-owned-page"),
+    undefined,
+  );
+  assert.equal(db().prepare("SELECT 1 FROM files WHERE id = ?").get(fileId), undefined);
 });
 
 test("admin controls Shoo signups and logins", async () => {
@@ -1104,6 +1376,189 @@ test("admin controls Shoo signups and logins", async () => {
   assert.match(expiredSession.body, /Anmeldungen sind.+deaktiviert/);
 
   await updateSettings({ signupsEnabled: true, loginsEnabled: true });
+});
+
+test("allows only explicitly trusted users to publish sandboxed interactive pages", async () => {
+  const interactiveHtml =
+    "<!doctype html><h1>Interactive plan</h1><script>document.body.dataset.ready = 'yes'</script>";
+  const disabledBody = multipart("html", "interactive.html", "text/html", interactiveHtml);
+  const disabled = await app.inject({
+    method: "PUT",
+    url: "/api/pages/trusted-interactive?type=interactive",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${bootstrapToken}`,
+      "content-type": disabledBody.contentType,
+    },
+    payload: disabledBody.payload,
+  });
+  assert.equal(disabled.statusCode, 403);
+  assert.equal(disabled.json().error, "interactive_disabled");
+
+  const login = await shooLogin("interactive-shoo-user-1234567890");
+  const cookie = responseCookie(login, "__Secure-schaffa_user");
+  const user = db()
+    .prepare("SELECT id FROM users WHERE shoo_subject = ?")
+    .get("interactive-shoo-user-1234567890") as unknown as { id: string };
+  await updateSettings({ interactivePublishingEnabled: true });
+  const granted = await app.inject({
+    method: "POST",
+    url: `/admin/users/${user.id}/interactive`,
+    headers: {
+      host: "schaffa.test",
+      cookie: adminCookie(bootstrapToken),
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    payload: "allowed=true",
+  });
+  assert.equal(granted.statusCode, 302);
+
+  const tokenPage = await app.inject({
+    method: "POST",
+    url: "/account/tokens",
+    headers: {
+      host: "schaffa.test",
+      cookie,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    payload: "name=interactive-agent&scope=interactive",
+  });
+  assert.equal(tokenPage.statusCode, 200);
+  const token = /sfa_[A-Za-z0-9_-]+/.exec(tokenPage.body)?.[0];
+  assert.ok(token);
+
+  const body = multipart("html", "interactive.html", "text/html", interactiveHtml);
+  const published = await app.inject({
+    method: "PUT",
+    url: "/api/pages/trusted-interactive?type=interactive",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${token}`,
+      "content-type": body.contentType,
+    },
+    payload: body.payload,
+  });
+  assert.equal(published.statusCode, 201);
+  assert.equal(published.json().kind, "interactive");
+
+  const warning = await app.inject({
+    method: "GET",
+    url: "/p/trusted-interactive",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(warning.statusCode, 200);
+  assert.match(warning.body, /Diese Seite führt Code aus/);
+  assert.doesNotMatch(warning.body, /document\.body\.dataset/);
+  assert.match(warning.body, /\/p\/trusted-interactive\/run/);
+
+  const run = await app.inject({
+    method: "GET",
+    url: "/p/trusted-interactive/run",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(run.statusCode, 200);
+  assert.equal(run.body, interactiveHtml);
+  assert.match(String(run.headers["content-security-policy"]), /sandbox allow-scripts/);
+  assert.match(String(run.headers["content-security-policy"]), /connect-src 'none'/);
+  assert.match(String(run.headers["content-security-policy"]), /webrtc 'block'/);
+  assert.doesNotMatch(String(run.headers["content-security-policy"]), /allow-same-origin/);
+  assert.match(String(run.headers["permissions-policy"]), /camera=\(\)/);
+  assert.equal(run.headers["x-dns-prefetch-control"], "off");
+
+  const raw = await app.inject({
+    method: "GET",
+    url: "/p/trusted-interactive/raw",
+    headers: { host: "schaffa.test" },
+  });
+  assert.match(raw.headers["content-type"] || "", /^text\/plain/);
+  assert.equal(raw.body, interactiveHtml);
+
+  const externalBody = multipart(
+    "html",
+    "external.html",
+    "text/html",
+    '<script src="https://example.test/app.js"></script>',
+  );
+  const external = await app.inject({
+    method: "PUT",
+    url: "/api/pages/external-interactive?type=interactive",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${token}`,
+      "content-type": externalBody.contentType,
+    },
+    payload: externalBody.payload,
+  });
+  assert.equal(external.statusCode, 422);
+  assert.equal(external.json().error, "unsafe_html");
+
+  const staticBody = multipart("html", "static.html", "text/html", "<h1>Static now</h1>");
+  const kindChange = await app.inject({
+    method: "PUT",
+    url: "/api/pages/trusted-interactive",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${bootstrapToken}`,
+      "content-type": staticBody.contentType,
+    },
+    payload: staticBody.payload,
+  });
+  assert.equal(kindChange.statusCode, 409);
+  assert.equal(kindChange.json().error, "page_kind_mismatch");
+
+  await updateSettings({ interactivePublishingEnabled: false });
+  const globallyStoppedRun = await app.inject({
+    method: "GET",
+    url: "/p/trusted-interactive/run",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(globallyStoppedRun.statusCode, 503);
+  assert.equal(globallyStoppedRun.json().error, "interactive_disabled");
+  const globallyStoppedWarning = await app.inject({
+    method: "GET",
+    url: "/p/trusted-interactive",
+    headers: { host: "schaffa.test" },
+  });
+  assert.doesNotMatch(globallyStoppedWarning.body, /Seite isoliert starten/);
+  await updateSettings({ interactivePublishingEnabled: true });
+
+  await app.inject({
+    method: "POST",
+    url: `/admin/users/${user.id}/interactive`,
+    headers: {
+      host: "schaffa.test",
+      cookie: adminCookie(bootstrapToken),
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    payload: "allowed=false",
+  });
+  const stoppedRun = await app.inject({
+    method: "GET",
+    url: "/p/trusted-interactive/run",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(stoppedRun.statusCode, 503);
+  assert.equal(stoppedRun.json().error, "interactive_disabled");
+  const stoppedWarning = await app.inject({
+    method: "GET",
+    url: "/p/trusted-interactive",
+    headers: { host: "schaffa.test" },
+  });
+  assert.match(stoppedWarning.body, /Ausführung wurde.+deaktiviert/);
+  assert.doesNotMatch(stoppedWarning.body, /Seite isoliert starten/);
+  const revokedBody = multipart("html", "revoked.html", "text/html", interactiveHtml);
+  const revoked = await app.inject({
+    method: "PUT",
+    url: "/api/pages/revoked-interactive?type=interactive",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${token}`,
+      "content-type": revokedBody.contentType,
+    },
+    payload: revokedBody.payload,
+  });
+  assert.equal(revoked.statusCode, 401);
+  await updateSettings({ interactivePublishingEnabled: false });
 });
 
 test("admin deletion removes a Shoo user and revokes their tokens", async () => {
@@ -1152,7 +1607,7 @@ test("admin deletion removes a Shoo user and revokes their tokens", async () => 
 
 test("enforces a persistent per-token upload rate limit", async () => {
   const limited = createToken("rate-limited");
-  for (let index = 0; index < 20; index += 1) {
+  for (let index = 0; index < config.authenticatedUploadsPerHour; index += 1) {
     const response = await publishHtmlWithToken(
       `rate-page-${index}`,
       `<h1>Rate page ${index}</h1>`,
@@ -1244,7 +1699,6 @@ test("bootstrap can be revoked after another admin exists and never resurrects",
 });
 
 test("rotating the bootstrap value reactivates it as the admin recovery path", async () => {
-  const { config } = await import("../src/config.js");
   const rotatedToken = `sfa_${"b".repeat(43)}`;
   const original = config.bootstrapToken;
   config.bootstrapToken = rotatedToken;

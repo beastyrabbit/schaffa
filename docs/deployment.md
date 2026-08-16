@@ -8,7 +8,7 @@ Version tags publish a Linux AMD64 image and record its immutable digest in the
 matching Forgejo release:
 
 ```sh
-docker pull git.heerlab.com/beasty/schaffa:0.2.0
+docker pull git.heerlab.com/beasty/schaffa:0.2.1
 ```
 
 Production deployments should use the release's manifest digest. Release tags
@@ -51,7 +51,7 @@ The `/admin` path has two deliberate gates:
 1. Pangolin authenticates the user before the admin page is reachable.
 2. Schaffa requires an admin token before it displays data or permits token management.
 
-Schaffa bearer tokens protect permanent pages, updates, files, and management operations even on bypassed API paths. A new HTML page may be uploaded without a token; it is virus-scanned, visible for one hour, hidden afterward, and physically removed after 30 days. Public page and file URLs are readable by anyone who has the URL. Schaffa also rejects application requests arriving on a hostname other than `SCHAFFA_BASE_URL`.
+Schaffa bearer tokens protect permanent pages, updates, files, and management operations even on bypassed API paths. A new static HTML page may be uploaded without a token; it is virus-scanned, visible for one hour, hidden afterward, and physically removed after 30 days. Interactive HTML requires the instance switch, a per-user admin grant, and a separate interactive-only token. Its run response uses an opaque CSP sandbox with scripts but without network, storage, forms, pop-ups, or navigation. Public page and file URLs are readable by anyone who has the URL. Schaffa also rejects application requests arriving on a hostname other than `SCHAFFA_BASE_URL`.
 
 When `SCHAFFA_BASE_URL` uses HTTPS, Schaffa sends HSTS with a one-year lifetime and `includeSubDomains`. Confirm that every subdomain is HTTPS-capable before deploying that policy; TLS termination remains the reverse proxy's responsibility.
 
@@ -72,7 +72,7 @@ Anonymous rate limiting uses the client address reported by the trusted reverse 
 
 Keep the pepper and any active bootstrap value in the approved secret manager and inject them only at runtime. Do not commit an `.env` file, Kubernetes Secret values, internal secret-store addresses, or project identifiers to this public repository. Give each workstation its own `upload` token so it can be revoked independently. Create a separate admin token, verify it works, and revoke the bootstrap token; restarting with the same bootstrap value never reactivates it, while setting a new, different value rotates the stored hash and reactivates bootstrap as the admin recovery path. Rotating `SCHAFFA_TOKEN_PEPPER` invalidates every existing API token and user session and therefore requires issuing replacements.
 
-The admin UI provides immediate page/file takedown and a publishing lockdown. Administrative operations are intentionally unavailable through the public API. Lockdown stops all new uploads and updates but intentionally leaves public reads, content deletion, token revocation, and the setting itself available for recovery. Admin logout only removes the eight-hour browser cookie; revoke the underlying token when it may be compromised.
+The admin UI provides immediate page/file takedown, a publishing lockdown, an instance-wide Interactive switch, and per-user Interactive grants. Administrative operations are intentionally unavailable through the public API. Lockdown stops all new uploads and updates but intentionally leaves public reads, content deletion, token revocation, and the setting itself available for recovery. Disabling Interactive globally or removing a user's grant blocks new execution loads of existing interactive pages; removing the grant also revokes that user's interactive tokens. Code already loaded in an open tab continues until that tab is closed or reloaded, so incident response should also remove the page when containment cannot wait. Admin logout only removes the eight-hour browser cookie; revoke the underlying token when it may be compromised.
 
 The user dashboard uses Shoo for Google OAuth/PKCE and stores its own HMAC-hashed, seven-day HttpOnly sessions. The admin can independently disable new local signups, disable all logins (which also clears active sessions), and delete users. User deletion revokes their agent tokens and sessions but deliberately leaves already published content available for a separate, auditable admin takedown. As of this integration Shoo labels itself an early work in progress; keep `SHOO_BASE_URL` and `SHOO_ISSUER` configurable and review Shoo's release/security status before a production rollout.
 

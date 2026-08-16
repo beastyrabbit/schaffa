@@ -5,7 +5,7 @@ export function openApiDocument() {
     openapi: "3.1.0",
     info: {
       title: "Schaffa API",
-      version: "0.3.0",
+      version: config.version,
       description:
         "Stable HTTP API for publishing standalone HTML pages and files. New HTML pages may be published anonymously for one hour; permanent publishing, page updates, and files use bearer tokens.",
       license: { name: "MIT", identifier: "MIT" },
@@ -23,12 +23,16 @@ export function openApiDocument() {
           tags: ["Pages"],
           summary: "Publish a new page",
           description:
-            "Without a bearer token, creates an anonymous page visible for one hour. With an upload token, creates a permanent page.",
+            "Without a bearer token, creates an anonymous static page visible for one hour. Interactive pages require an explicitly trusted user and an interactive-only token.",
           operationId: "createPage",
           security: [{}, { bearerAuth: [] }],
+          parameters: [titleParameter, pageTypeParameter],
           requestBody: multipartBody("html", "text/html"),
           responses: {
             "201": jsonResponse("Page published", { $ref: "#/components/schemas/PagePublication" }),
+            "401": errorResponse("Invalid upload token"),
+            "413": errorResponse("HTML exceeds the configured size limit"),
+            "429": errorResponse("Upload rate limit exceeded"),
             "422": errorResponse("Rejected HTML or invalid multipart input"),
             "503": errorResponse("Publishing is locked or malware scanning is unavailable"),
           },
@@ -37,18 +41,27 @@ export function openApiDocument() {
       "/api/pages/{slug}": {
         put: {
           tags: ["Pages"],
-          summary: "Publish the next page version",
+          summary: "Publish a page at a chosen slug",
+          description:
+            "Creates a permanent page at an unused slug or publishes the next immutable version of a page owned by the bearer token.",
           operationId: "updatePage",
           security: [{ bearerAuth: [] }],
-          parameters: [slugParameter],
+          parameters: [slugParameter, titleParameter, pageTypeParameter],
           requestBody: multipartBody("html", "text/html"),
           responses: {
             "200": jsonResponse("New version published", {
               $ref: "#/components/schemas/PagePublication",
             }),
+            "201": jsonResponse("Page created at the requested slug", {
+              $ref: "#/components/schemas/PagePublication",
+            }),
             "401": errorResponse("Missing or invalid upload token"),
             "403": errorResponse("The token does not own this page"),
-            "404": errorResponse("Page not found"),
+            "409": errorResponse("Anonymous pages cannot be updated"),
+            "413": errorResponse("HTML exceeds the configured size limit"),
+            "429": errorResponse("Upload rate limit exceeded"),
+            "422": errorResponse("Rejected HTML, slug, title, or multipart input"),
+            "503": errorResponse("Publishing is locked or malware scanning is unavailable"),
           },
         },
       },
@@ -65,6 +78,16 @@ export function openApiDocument() {
         "getPageVersionSource",
         [slugParameter, versionParameter],
       ),
+      "/p/{slug}/run": pageRead(
+        "Run the latest interactive page in its sandbox",
+        "runLatestInteractivePage",
+        [slugParameter],
+      ),
+      "/p/{slug}/{version}/run": pageRead(
+        "Run a specific interactive page version in its sandbox",
+        "runInteractivePageVersion",
+        [slugParameter, versionParameter],
+      ),
       "/api/files": {
         post: {
           tags: ["Files"],
@@ -75,7 +98,10 @@ export function openApiDocument() {
           responses: {
             "201": jsonResponse("File published", { $ref: "#/components/schemas/FilePublication" }),
             "401": errorResponse("Missing or invalid upload token"),
+            "413": errorResponse("File exceeds the configured size limit"),
+            "429": errorResponse("Upload rate limit exceeded"),
             "422": errorResponse("Invalid multipart input"),
+            "503": errorResponse("Publishing is locked or malware scanning is unavailable"),
           },
         },
       },
@@ -95,7 +121,7 @@ export function openApiDocument() {
               name: "Range",
               in: "header",
               required: false,
-              schema: { type: "string", pattern: "^bytes=[0-9]+-[0-9]*$" },
+              schema: { type: "string", pattern: "^bytes=(?:[0-9]+-[0-9]*|-[0-9]+)$" },
             },
           ],
           responses: {
@@ -287,15 +313,39 @@ export function openApiDocument() {
         ]),
         PagePublication: objectSchema(
           {
-            slug: { type: "string", pattern: "^[a-z2-7]{12}$" },
+            slug: { type: "string", pattern: "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$" },
+            title: { type: ["string", "null"], maxLength: 160 },
+            kind: { enum: ["static", "interactive"] },
             version: { type: "integer", minimum: 1 },
+            bytes: { type: "integer", minimum: 1 },
+            sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
             publicUrl: { type: "string", format: "uri" },
             versionUrl: { type: "string", format: "uri" },
             rawUrl: { type: "string", format: "uri" },
-            expiresAt: { type: ["string", "null"], format: "date-time" },
-            purgeAt: { type: ["string", "null"], format: "date-time" },
+            versionRawUrl: { type: "string", format: "uri" },
+            expiresAt: {
+              type: ["string", "null"],
+              description: "UTC SQLite timestamp for anonymous pages, otherwise null.",
+            },
+            purgeAt: {
+              type: ["string", "null"],
+              description: "UTC SQLite timestamp for anonymous-page retention, otherwise null.",
+            },
           },
-          ["slug", "version", "publicUrl", "versionUrl", "rawUrl"],
+          [
+            "slug",
+            "title",
+            "kind",
+            "version",
+            "bytes",
+            "sha256",
+            "publicUrl",
+            "versionUrl",
+            "rawUrl",
+            "versionRawUrl",
+            "expiresAt",
+            "purgeAt",
+          ],
         ),
         FilePublication: objectSchema(
           {
@@ -303,9 +353,10 @@ export function openApiDocument() {
             filename: { type: "string" },
             mediaType: { type: "string" },
             bytes: { type: "integer", minimum: 0 },
+            sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
             publicUrl: { type: "string", format: "uri" },
           },
-          ["id", "filename", "mediaType", "bytes", "publicUrl"],
+          ["id", "filename", "mediaType", "bytes", "sha256", "publicUrl"],
         ),
         Guide: objectSchema(
           {
@@ -368,6 +419,23 @@ const idempotencyParameter = {
   in: "header",
   required: false,
   schema: { type: "string", minLength: 8, maxLength: 128 },
+} as const;
+
+const titleParameter = {
+  name: "title",
+  in: "query",
+  required: false,
+  description: "Optional display title. On updates, omitting it retains the existing title.",
+  schema: { type: "string", maxLength: 160 },
+} as const;
+
+const pageTypeParameter = {
+  name: "type",
+  in: "query",
+  required: false,
+  description:
+    "Page execution model. Interactive requires an interactive token and instance/user approval; the value is immutable after creation.",
+  schema: { enum: ["static", "interactive"], default: "static" },
 } as const;
 
 function multipartBody(field: string, mediaType: string) {

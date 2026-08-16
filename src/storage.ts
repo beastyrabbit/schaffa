@@ -9,12 +9,11 @@ import { AppError } from "./errors.js";
 import { isFileId } from "./ids.js";
 
 export const reservedSlugs = new Set(["admin", "api", "f", "g", "p", "healthz"]);
-
 export function validateSlug(value: string): string {
   const slug = value.toLowerCase();
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug) || reservedSlugs.has(slug)) {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug)) {
     throw new AppError(
-      "Slug must be 1-63 lowercase letters, numbers or hyphens and may not be reserved.",
+      "Slug must be 1-63 lowercase letters, numbers or hyphens.",
       422,
       "invalid_slug",
     );

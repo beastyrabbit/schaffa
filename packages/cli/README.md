@@ -46,7 +46,7 @@ npx schaffa upload ./plan.html --token "sfa_…"
 
 `--token` takes precedence when both methods are used. Command-line arguments may be retained in shell history, so prefer `SCHAFFA_TOKEN` when that is a concern.
 
-To update a permanent HTML page, reuse its slug. Each update creates a new immutable version:
+To publish a permanent HTML page at a chosen slug, pass `--slug`. Reusing that slug later creates a new immutable version:
 
 ```sh
 npx schaffa upload ./plan.html --slug abc234def567
@@ -54,10 +54,21 @@ npx schaffa upload ./plan.html --slug abc234def567
 
 Add `--json` to print the complete API response instead of only the public URL.
 
+## Publish trusted interactive HTML
+
+Interactive pages are available only after the instance administrator enables the feature and grants your account permission. Create a separate Interactive token in the account page, then run:
+
+```sh
+export SCHAFFA_TOKEN="sfa_…"
+npx schaffa upload ./interactive-plan.html --interactive
+```
+
+Visitors see a warning before the page runs. Schaffa allows inline JavaScript but isolates it without network, browser storage, forms, pop-ups, or navigation. The interactive token cannot upload static pages or files.
+
 ## Get a token
 
 1. Sign in at [schaffa.dev/account](https://schaffa.dev/account).
-2. Open the token section and create an upload token.
+2. Open the token section and create an upload token, or an Interactive token when your account has been approved.
 3. Copy the token when it is shown. Schaffa displays it only once.
 4. Store it in your secret manager or export it as `SCHAFFA_TOKEN`.
 

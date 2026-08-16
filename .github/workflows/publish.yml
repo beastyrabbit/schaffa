@@ -33,30 +33,29 @@ jobs:
           package-manager-cache: false
 
       - name: Validate release version
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const fs = require("node:fs");
-          const tag = process.env.GITHUB_REF_NAME;
-          const root = require("./package.json");
-          const cli = require("./packages/cli/package.json");
-          if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag || "")) {
-            throw new Error(`Release tag ${tag || "<missing>"} is not a supported semantic version.`);
-          }
-          if (root.version !== cli.version || tag !== `v${cli.version}`) {
-            throw new Error(
-              `Tag ${tag} must match root and CLI package versions (${root.version}, ${cli.version}).`,
-            );
-          }
-          fs.appendFileSync(process.env.GITHUB_ENV, `RELEASE_VERSION=${cli.version}\nRELEASE_TAG=${tag}\n`);
-          NODE
+        run: RELEASE_REF_NAME="$GITHUB_REF_NAME" RELEASE_ENV_FILE="$GITHUB_ENV" node scripts/ci-validate-release.mjs
 
       - name: Ensure this version is not already published
         run: |
           set -euo pipefail
-          if npm view "schaffa@${RELEASE_VERSION}" version >/dev/null 2>&1; then
-            echo "schaffa@${RELEASE_VERSION} is already published. Bump the version instead of moving the tag." >&2
-            exit 1
+          error_file="$(mktemp)"
+          trap 'rm -f "$error_file"' EXIT
+          set +e
+          published_version="$(npm view "schaffa@${RELEASE_VERSION}" version 2>"$error_file")"
+          status=$?
+          set -e
+          if [[ $status -eq 0 ]]; then
+            if [[ "$published_version" != "$RELEASE_VERSION" ]]; then
+              echo "npm returned unexpected version '$published_version' for schaffa@${RELEASE_VERSION}." >&2
+              exit 1
+            fi
+            echo "schaffa@${RELEASE_VERSION} is already published; skipping the immutable package."
+            echo "PUBLISH_NPM=false" >> "$GITHUB_ENV"
+          elif grep -Eq '(^|[[:space:]])E404([[:space:]]|$)' "$error_file"; then
+            echo "PUBLISH_NPM=true" >> "$GITHUB_ENV"
+          else
+            cat "$error_file" >&2
+            exit "$status"
           fi
 
       - name: Enable pnpm
@@ -65,11 +64,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Run type, lint, and test checks
+        run: pnpm typecheck && pnpm lint && pnpm test
+
       - name: Publish CLI with npm Trusted Publishing
-        run: |
-          set -euo pipefail
-          dist_tag=latest
-          if [[ "$RELEASE_VERSION" == *-* ]]; then
-            dist_tag=next
-          fi
-          pnpm --filter schaffa publish --no-git-checks --access public --tag "$dist_tag"
+        if: env.PUBLISH_NPM != 'false'
+        run: pnpm --filter schaffa publish --no-git-checks --access public --tag "$RELEASE_DIST_TAG"

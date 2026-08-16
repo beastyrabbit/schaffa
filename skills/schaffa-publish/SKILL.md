@@ -35,7 +35,7 @@ Keep images local to the deck and do not reference CDNs or external fonts. The H
 
 ## Publish a page
 
-Create a page with a random, non-semantic 12-character slug:
+Create a page with a random, non-semantic 16-character slug:
 
 ```sh
 skills/schaffa-publish/scripts/publish.sh page <html-file>
@@ -53,9 +53,11 @@ Reusing a slug creates the next immutable version while its stable URL points to
 
 Read `publicUrl`, `rawUrl`, `versionUrl`, `versionRawUrl`, and `version` from the JSON response. Use `publicUrl` for humans. Use `rawUrl` when an agent should fetch and process the exact HTML source. Return immutable version URLs when revision history matters.
 
-Schaffa does not inject CSS or wrap the page. The uploaded file must be a complete HTML document and should include its own `<style>` block when styling is required. Both the normal and `/raw` URLs return the exact uploaded bytes; `/raw` is an explicit agent-facing alias, not a transformed representation.
+Schaffa does not inject CSS into static pages. The uploaded file must be a complete HTML document and should include its own `<style>` block when styling is required. For static pages, both the normal and `/raw` URLs return the exact uploaded bytes; `/raw` is an explicit agent-facing alias, not a transformed representation.
 
 Schaffa rejects scripts, forms, frames, event-handler attributes, JavaScript URLs, and meta refresh. If an upload fails with `unsafe_html`, remove the active construct; do not weaken or bypass the policy.
+
+When the user explicitly needs runtime guidance or another interactive behavior, use the CLI with an approved interactive-only token: `npx schaffa upload <html-file> --interactive`. Do not silently switch a static publication to interactive. The instance and user must already be approved; visitors receive a warning and the page runs without network, storage, forms, pop-ups, or navigation.
 
 ## Publish a file
 

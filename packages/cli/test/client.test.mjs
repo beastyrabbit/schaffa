@@ -59,7 +59,7 @@ test("requires a token for files and page updates", async () => {
   await assert.rejects(upload({ filePath }), /SCHAFFA_TOKEN is required to upload files/);
   await assert.rejects(
     upload({ filePath: htmlPath, slug: "abc234def567" }),
-    /SCHAFFA_TOKEN is required to update/,
+    /SCHAFFA_TOKEN is required to publish at a chosen slug/,
   );
 });
 
@@ -99,6 +99,26 @@ test("updates an HTML page when a slug is supplied", async () => {
 
   assert.equal(requests[0].url, "http://schaffa.localhost:1355/api/pages/abc234def567");
   assert.equal(requests[0].init.method, "PUT");
+});
+
+test("publishes interactive HTML only with a token and explicit query type", async () => {
+  const filePath = path.join(directory, "interactive.html");
+  await writeFile(filePath, "<script>document.body.textContent = 'ready'</script>");
+  await assert.rejects(
+    upload({ filePath, interactive: true }),
+    /SCHAFFA_TOKEN is required for interactive publishing/,
+  );
+  const requests = [];
+  await upload({
+    filePath,
+    token,
+    interactive: true,
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return jsonResponse({ publicUrl: "https://schaffa.dev/p/interactive" }, 201);
+    },
+  });
+  assert.equal(requests[0].url, "https://schaffa.dev/api/pages?type=interactive");
 });
 
 test("uploads non-HTML content through the file endpoint", async () => {

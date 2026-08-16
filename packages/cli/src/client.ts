@@ -6,6 +6,7 @@ export interface UploadOptions {
   token?: string;
   baseUrl?: string;
   slug?: string;
+  interactive?: boolean;
   fetch?: typeof fetch;
 }
 
@@ -74,13 +75,19 @@ export async function upload(options: UploadOptions): Promise<UploadResult> {
   if (options.slug && !isHtml) {
     throw new Error("--slug can only be used with an HTML file.");
   }
+  if (options.interactive && !isHtml) {
+    throw new Error("--interactive can only be used with an HTML file.");
+  }
+  if (options.interactive && !options.token) {
+    throw new Error("SCHAFFA_TOKEN is required for interactive publishing.");
+  }
   if (!options.token && !isHtml) {
     throw new Error(
       "SCHAFFA_TOKEN is required to upload files. Anonymous uploads accept HTML only.",
     );
   }
   if (!options.token && options.slug) {
-    throw new Error("SCHAFFA_TOKEN is required to update an existing page.");
+    throw new Error("SCHAFFA_TOKEN is required to publish at a chosen slug.");
   }
   if (options.slug && !isValidSlug(options.slug)) {
     throw new Error("--slug must contain 1-63 lowercase letters, numbers, or hyphens.");
@@ -98,7 +105,9 @@ export async function upload(options: UploadOptions): Promise<UploadResult> {
       : "/api/pages"
     : "/api/files";
   const headers = options.token ? { Authorization: `Bearer ${options.token}` } : undefined;
-  const response = await (options.fetch || fetch)(new URL(endpoint, origin), {
+  const target = new URL(endpoint, origin);
+  if (options.interactive) target.searchParams.set("type", "interactive");
+  const response = await (options.fetch || fetch)(target, {
     method: options.slug ? "PUT" : "POST",
     ...(headers ? { headers } : {}),
     body: form,

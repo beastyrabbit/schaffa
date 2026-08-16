@@ -17,7 +17,7 @@ Set `SCHAFFA_TOKEN="sfa_…"` for permanent pages, files, and updates. Public pa
 
 `GET /account` provides the Shoo-backed user dashboard. Shoo handles Google OAuth and PKCE in the browser; Schaffa verifies every returned ID token server-side against the configured JWKS, issuer, expiration, ES256 signature, and exact `origin:<SCHAFFA_BASE_URL origin>` audience. The verified `pairwise_sub` becomes the local user identity.
 
-A first login creates a local user when signups are enabled. Users can create and revoke their own upload-only agent tokens from the dashboard; plaintext values are shown once. Schaffa stores an HMAC hash of its local HttpOnly session token, not the Shoo ID token. Automated tests inject a local verifier and never call Shoo.
+A first login creates a local user when signups are enabled. Users can create and revoke their own upload tokens from the dashboard; plaintext values are shown once. When an administrator enables Interactive Publishing both instance-wide and for a specific user, that user can also mint separate interactive-only tokens. Schaffa stores an HMAC hash of its local HttpOnly session token, not the Shoo ID token. Automated tests inject a local verifier and never call Shoo.
 
 ## Pages
 
@@ -31,7 +31,7 @@ curl --fail-with-body --silent --show-error \
 
 Add `-H "Authorization: Bearer $SCHAFFA_TOKEN"` to make the new page permanent. All uploads are rate-limited and scanned before publication. If ClamAV is unavailable or returns an invalid response, the upload fails closed.
 
-Update an existing page by reusing its slug:
+Create a permanent page at a chosen slug, or update it later by reusing that slug:
 
 ```sh
 curl --fail-with-body --silent --show-error \
@@ -41,7 +41,17 @@ curl --fail-with-body --silent --show-error \
   "$SCHAFFA_URL/api/pages/$SLUG"
 ```
 
-Only the token that created a permanent page may update it; admin tokens may update any permanent page. Anonymous pages cannot be claimed or updated, and their expiration is never cleared. Each update creates the next immutable version. The oldest version is deleted when the configured per-page version cap is exceeded:
+An unused slug creates version 1. Only the token that created a permanent page may update it; admin tokens may update any permanent page. Anonymous pages cannot be claimed or updated, and their expiration is never cleared. Each update creates the next immutable version. The oldest version is deleted when the configured per-page version cap is exceeded:
+
+Both page endpoints accept an optional `?title=` query parameter of up to 160 characters. Omitting it during an update retains the existing title.
+
+### Trusted interactive pages
+
+Static pages remain the default. Interactive publishing is disabled instance-wide until an administrator enables it, grants one Shoo user permission, and that user creates an `interactive` token. The dedicated token cannot publish static pages, files, presentations, or guides. The permission is checked on every write and execution start; removing it revokes the user's interactive tokens and blocks new loads of their existing interactive pages. The instance-wide switch is also a kill switch for new execution starts. Code already loaded in an open tab can continue until the tab is closed or reloaded.
+
+Publish an interactive page by adding `?type=interactive` or using the CLI's `--interactive` flag. Page type is immutable across versions. Anonymous publishing and global admin tokens cannot publish interactive pages.
+
+The public page URL shows a warning screen. Continuing to `/run` executes only inline classic scripts under a CSP sandbox without `allow-same-origin`. Network access, workers, child frames, forms, browser storage, pop-ups, downloads, and top-level navigation are unavailable. External and module scripts, event-handler attributes, frames, forms, JavaScript URLs, and meta refresh are rejected during upload. The sandbox reduces risk but cannot prevent misleading UI or a page from consuming CPU in its own tab.
 
 | URL | Result |
 | --- | --- |
@@ -49,10 +59,12 @@ Only the token that created a permanent page may update it; admin tokens may upd
 | `/p/:slug/:version` | Specific immutable version |
 | `/p/:slug/raw` | Latest byte-identical HTML source |
 | `/p/:slug/:version/raw` | Specific byte-identical HTML source |
+| `/p/:slug/run` | Latest interactive version in the restricted sandbox |
+| `/p/:slug/:version/run` | Specific interactive version in the restricted sandbox |
 
-Page slugs contain 60 random bits, but page URLs are public identifiers—not access control. Treat them the same way as file URLs and use admin takedown when a URL or its content is exposed unintentionally.
+Server-generated page slugs contain approximately 83 random bits; caller-chosen slugs have only the entropy supplied by the caller. Page URLs are public identifiers—not access control. Treat them the same way as file URLs and use admin takedown when a URL or its content is exposed unintentionally.
 
-Schaffa does not inject CSS or add a viewer. Upload one complete UTF-8 HTML file, including its own `<style>` block when needed. Scripts, forms, frames, event handlers, JavaScript URLs, and meta refresh are rejected.
+Schaffa does not inject CSS into uploaded content. Upload one complete UTF-8 HTML file, including its own `<style>` block when needed. Static pages reject scripts, forms, frames, event handlers, JavaScript URLs, and meta refresh.
 
 Uploaded HTML is parsed for policy checks and served as inert stored bytes under a strict Content Security Policy. It is never opened, rendered, or executed by the server. ClamAV receives every upload over its `INSTREAM` protocol and runs in a separate container.
 
@@ -75,7 +87,7 @@ File reads support byte ranges. Public file and version responses use a five-min
 
 ## Administration
 
-Administration is intentionally not part of the public HTTP API or OpenAPI contract. Use the protected `/admin` interface to list and remove pages, individual page versions, and files; create and revoke upload or admin tokens; delete users; and control publishing lockdown, signups, and logins.
+Administration is intentionally not part of the public HTTP API or OpenAPI contract. Use the protected `/admin` interface to list and remove pages, individual page versions, and files; create and revoke upload or admin tokens; delete users; grant interactive publishing per user; and control publishing lockdown, interactive publishing, signups, and logins.
 
 Publishing lockdown preserves reads and takedowns. Disabling logins immediately deletes all active user sessions; disabling signups still permits existing users to log in. Revoking the bootstrap token requires another active admin token. Restarting with the same bootstrap environment value never reactivates it, but setting a new, different value replaces the stored hash and reactivates bootstrap; that rotation is the recovery path when every other admin token is lost.
 

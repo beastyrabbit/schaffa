@@ -15,6 +15,7 @@ export interface UserSession {
   id: string;
   displayName: string;
   email: string | null;
+  canPublishInteractive: boolean;
 }
 
 export function createUserSession(identity: ShooIdentity): { user: UserSession; token: string } {
@@ -67,6 +68,7 @@ export function createUserSession(identity: ShooIdentity): { user: UserSession; 
         id: userId,
         displayName: name || existing?.name || email || existing?.email || "Shoo user",
         email: email || existing?.email || null,
+        canPublishInteractive: Boolean(existing?.can_publish_interactive),
       },
       token,
     };
@@ -90,6 +92,7 @@ export function authenticateUserSession(token: string | undefined): UserSession 
     id: row.id,
     displayName: row.name || row.email || "Shoo user",
     email: row.email,
+    canPublishInteractive: Boolean(row.can_publish_interactive),
   };
 }
 
@@ -98,14 +101,30 @@ export function revokeUserSession(token: string | undefined): void {
   db().prepare("DELETE FROM user_sessions WHERE token_hash = ?").run(hashSessionToken(token));
 }
 
-export function createUserToken(userId: string, name: string): { id: string; token: string } {
+export function createUserToken(
+  userId: string,
+  name: string,
+  scope: "upload" | "interactive" = "upload",
+): { id: string; token: string } {
   const active = db()
     .prepare("SELECT COUNT(*) AS count FROM tokens WHERE user_id = ? AND revoked_at IS NULL")
     .get(userId) as unknown as { count: number };
   if (active.count >= 20) {
     throw new AppError("Revoke an existing token before creating another one.", 409, "token_limit");
   }
-  return createToken(name, ["upload"], userId);
+  if (scope === "interactive") {
+    const user = db()
+      .prepare("SELECT can_publish_interactive FROM users WHERE id = ?")
+      .get(userId) as unknown as { can_publish_interactive: number } | undefined;
+    if (!getInstanceSettings().interactivePublishingEnabled || !user?.can_publish_interactive) {
+      throw new AppError(
+        "Interactive publishing has not been enabled for this account.",
+        403,
+        "interactive_not_allowed",
+      );
+    }
+  }
+  return createToken(name, [scope], userId);
 }
 
 export function listUserTokens(userId: string): TokenRow[] {
@@ -162,6 +181,21 @@ export function deleteUser(userId: string): void {
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
     throw error;
+  }
+}
+
+export function setInteractivePublishingPermission(userId: string, allowed: boolean): void {
+  const result = db()
+    .prepare("UPDATE users SET can_publish_interactive = ? WHERE id = ?")
+    .run(allowed ? 1 : 0, userId);
+  if (result.changes === 0) throw new AppError("User not found.", 404, "not_found");
+  if (!allowed) {
+    db()
+      .prepare(
+        `UPDATE tokens SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP)
+         WHERE user_id = ? AND (',' || scopes || ',') LIKE '%,interactive,%'`,
+      )
+      .run(userId);
   }
 }
 
