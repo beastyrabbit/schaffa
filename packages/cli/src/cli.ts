@@ -24,7 +24,7 @@ const help = `Schaffa publishes pages, presentations, files, and incrementally r
 Usage:
   schaffa upload <file> [--token <token>] [--slug <slug>] [--interactive] [--json]
   schaffa publish <deck.md> --kind presentation [--export pdf] [--export pptx] [--json]
-  schaffa guide start --title <title> [--description <text>] [--language <tag>] [--json]
+  schaffa guide start --title <title> [--description <text>] [--url <url>] [--language <tag>] [--json]
   schaffa guide step --title <title> --text <text> [--screenshot <path>] [--action <type>] [--target <text>] [--verification <text>] [--json]
   schaffa guide finish [--json]
   schaffa guide publish [--json]
@@ -108,6 +108,7 @@ async function runGuide(args: string[]): Promise<void> {
       json: { type: "boolean" },
       title: { type: "string" },
       description: { type: "string" },
+      url: { type: "string" },
       language: { type: "string" },
       text: { type: "string" },
       screenshot: { type: "string" },
@@ -132,6 +133,7 @@ async function runGuide(args: string[]): Promise<void> {
       ...common,
       title: values.title,
       ...(values.description ? { description: values.description } : {}),
+      ...(values.url ? { targetUrl: values.url } : {}),
       ...(values.language ? { language: values.language } : {}),
     });
     output = result;

@@ -29,7 +29,7 @@ curl --fail-with-body --silent --show-error \
   "$SCHAFFA_URL/api/pages"
 ```
 
-Add `-H "Authorization: Bearer $SCHAFFA_TOKEN"` to make the new page permanent. All uploads are rate-limited and scanned before publication. If ClamAV is unavailable or returns an invalid response, the upload fails closed.
+Add `-H "Authorization: Bearer $SCHAFFA_TOKEN"` to make the new page permanent. Page and file writes return `202 Accepted` with `publicUrl`, `scanStatus: "pending"`, and `statusUrl`. The stable public URL displays a self-refreshing status page while the payload remains quarantined. Clean content replaces that page at the same URL. If ClamAV is unavailable, the worker keeps retrying; unscanned bytes are never public. Malware deletes the payload and leaves a rejection tombstone with a sanitized signature.
 
 Create a permanent page at a chosen slug, or update it later by reusing that slug:
 
@@ -61,6 +61,8 @@ The public page URL shows a warning screen. Continuing to `/run` executes only i
 | `/p/:slug/:version/raw` | Specific byte-identical HTML source |
 | `/p/:slug/run` | Latest interactive version in the restricted sandbox |
 | `/p/:slug/:version/run` | Specific interactive version in the restricted sandbox |
+| `/p/:slug/status` | Latest version scan status as JSON |
+| `/p/:slug/:version/status` | Specific version scan status as JSON |
 
 Server-generated page slugs contain approximately 83 random bits; caller-chosen slugs have only the entropy supplied by the caller. Page URLs are public identifiers—not access control. Treat them the same way as file URLs and use admin takedown when a URL or its content is exposed unintentionally.
 
@@ -79,9 +81,9 @@ curl --fail-with-body --silent --show-error \
   "$SCHAFFA_URL/api/files"
 ```
 
-The response contains an immutable URL shaped like `/f/<22-character-id>.<extension>`. The original filename is not stored. IDs contain 128 random bits and are difficult to guess, but the URL is not access control.
+The response contains an immutable URL shaped like `/f/<22-character-id>.<extension>` plus `/f/<filename>/status` for machine-readable scan state. The original filename is not stored. IDs contain 128 random bits and are difficult to guess, but the URL is not access control.
 
-Recognized images are auto-oriented, resized, stripped of EXIF/XMP/IPTC/ICC metadata, and stored only as WebP. Transparency is retained and the original image is discarded immediately. Videos and other non-image files are currently stored unchanged.
+Recognized images are scanned in quarantine, then auto-oriented, resized, stripped of EXIF/XMP/IPTC/ICC metadata, and stored only as WebP. Transparency is retained and the quarantined original is deleted when scanning and conversion finish. Videos and other non-image files are currently stored unchanged after a clean scan.
 
 File reads support byte ranges. Public file and version responses use a five-minute cache lifetime so an admin takedown is not hidden behind a year-long immutable cache. Potentially active types such as HTML, SVG, XML, JavaScript, and PDF are served as downloads rather than rendered inline; file responses also carry a sandboxed, deny-by-default CSP.
 

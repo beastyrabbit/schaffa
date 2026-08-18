@@ -156,8 +156,9 @@ docker compose logs --tail=100 schaffa clamav
 ```
 
 The first ClamAV startup can take several minutes while signatures download.
-Schaffa fails uploads closed when ClamAV is unavailable; do not weaken that
-behavior to make an unhealthy deployment appear ready.
+Schaffa returns the final URL immediately, shows a no-cache scan status page,
+and keeps the payload quarantined until ClamAV is ready. Scanner outages are
+retried; unscanned bytes are never served.
 
 For unattended restarts, configure your service manager to authenticate the
 machine identity and invoke the same `infisical run -- docker compose up ...`
@@ -174,11 +175,12 @@ and Schaffa; the default is one.
 The following paths are intentionally public:
 
 - `/` — landing page
+- `/skills`, `/skills/*`, `/llm.txt`, and `/llms.txt` — agent examples and discovery
 - `/metadata/*` — stable OpenAPI metadata
 - `/api`, `/api/*`, and `/api/*/*` — bearer-protected API plus anonymous page creation
 - `/account`, `/account/*`, `/assets/*`, `/auth/*`, `/shoo/*` — user login and token dashboard
 - `/p/*`, `/p/*/*`, `/p/*/*/*` — public pages and versions
-- `/f/*` — public files
+- `/f/*` — public files and scan status
 
 Keep `/admin` behind your reverse proxy's SSO when available. Schaffa then
 applies a second gate by requiring an admin token. Keep `/healthz` private to

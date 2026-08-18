@@ -33,6 +33,11 @@ Set `SCHAFFA_BASE_URL=https://schaffa.dev`. Keep Pangolin authentication enabled
 - `assets/*`
 - `auth/*`
 - `shoo/*`
+- `skills`
+- `skills/*`
+- `skills/*/*`
+- `llm.txt`
+- `llms.txt`
 - `p/*`
 - `p/*/*`
 - `p/*/*/*`
@@ -89,9 +94,13 @@ curl --fail http://127.0.0.1:3000/healthz
 
 Set `SCHAFFA_IMAGE` to the manifest digest produced by the selected CI build; Compose intentionally has no mutable `latest` fallback. Run Compose through the local secret manager so the required values are present in its environment. The repository intentionally does not prescribe or expose instance-specific secret-store coordinates.
 
+## Kubernetes scale-to-zero
+
+Schaffa exposes the private Prometheus gauge `schaffa_pending_scans` at `/metrics`. It counts quarantined page/file jobs plus a guide screenshot waiting for ClamAV. A Kubernetes deployment can scrape it and use KEDA's Prometheus scaler with `minReplicaCount: 0`, `maxReplicaCount: 1`, and a cooldown period. Keep the Schaffa application running: it returns the stable URL, stores payloads in quarantine, and retries while KEDA starts ClamAV. Persist `/var/lib/clamav` so cold starts reuse downloaded signatures. Do not expose `/metrics` through the public reverse proxy.
+
 ## Persistent data and upgrades
 
-SQLite metadata and stored files must be backed up together. Back up the complete `/data` volume rather than copying only the database or only the object directories. The ClamAV signature volume is reproducible and does not contain uploads. All page and file uploads are scanned, including authenticated writes; scanner unavailability fails closed.
+SQLite metadata and stored files must be backed up together. Back up the complete `/data` volume rather than copying only the database or only the object directories. The ClamAV signature volume is reproducible and does not contain uploads. Page and file uploads receive a stable URL immediately and remain in `/data/quarantine` until ClamAV accepts them. Scanner unavailability leaves them pending for retry; rejected payload bytes are deleted while the URL keeps a status tombstone.
 
 For an update:
 

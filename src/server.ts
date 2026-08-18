@@ -20,6 +20,7 @@ import { config } from "./config.js";
 import type { PageKind, TokenScope } from "./db.js";
 import { closeDb, db } from "./db.js";
 import { AppError } from "./errors.js";
+import { findExampleSkill, llmText } from "./example-skills.js";
 import {
   addGuideStep,
   createGuide,
@@ -43,6 +44,7 @@ import {
   consumeAuthenticatedUpload,
   consumeUserLogin,
 } from "./rate-limit.js";
+import { pendingScanCount, processNextPendingScan, resetInterruptedScans } from "./scan-worker.js";
 import {
   canRunInteractivePage,
   deleteFile,
@@ -77,6 +79,8 @@ import {
   renderInteractiveWarning,
   renderLanding,
   renderPublicNotFound,
+  renderScanStatusPage,
+  renderSkills,
 } from "./ui.js";
 import {
   authenticateUserSession,
@@ -89,7 +93,6 @@ import {
   revokeUserToken,
   setInteractivePublishingPermission,
 } from "./users.js";
-import { scanUpload } from "./virus-scanner.js";
 
 const adminCookie = config.cookieSecure ? "__Secure-schaffa_admin" : "schaffa_admin";
 const userCookie = config.cookieSecure ? "__Secure-schaffa_user" : "schaffa_user";
@@ -130,7 +133,9 @@ const interactivePageCsp = [
   "sandbox allow-scripts",
 ].join("; ");
 
-export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {}) {
+export function buildServer(
+  options: { verifyShooToken?: ShooTokenVerifier; scanIntervalMs?: number } = {},
+) {
   const shooVerifier = options.verifyShooToken || verifyShooToken;
   if (!config.tokenPepper) {
     throw new Error("SCHAFFA_TOKEN_PEPPER is required.");
@@ -138,6 +143,7 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
   db();
   seedAnonymousActor();
   const bootstrap = seedBootstrapToken();
+  resetInterruptedScans();
 
   const app = Fastify({
     trustProxy: config.trustedProxyHops,
@@ -182,9 +188,32 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     app.log.error({ err: error }, "initial anonymous page retention cleanup failed");
   });
 
+  let activeScan: Promise<void> | null = null;
+  const scanIntervalMs = options.scanIntervalMs ?? 2_000;
+  const runScan = () => {
+    if (activeScan) return activeScan;
+    activeScan = processNextPendingScan()
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        app.log.error({ err: error }, "pending virus scan failed");
+      })
+      .finally(() => {
+        activeScan = null;
+      });
+    return activeScan;
+  };
+  const scanTimer =
+    scanIntervalMs > 0
+      ? setInterval(() => {
+          void runScan();
+        }, scanIntervalMs)
+      : null;
+  scanTimer?.unref();
+
   app.addHook("onRequest", async (request) => {
     const hostname = rawRequestHostname(request.headers.host);
-    if (request.url !== "/healthz" && hostname !== config.baseHost) {
+    const pathname = request.url.split("?", 1)[0];
+    if (pathname !== "/healthz" && pathname !== "/metrics" && hostname !== config.baseHost) {
       throw new AppError("Route not found.", 404, "not_found");
     }
   });
@@ -208,10 +237,34 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
   });
 
   app.get("/healthz", async () => ({ ok: true }));
+  app.get("/metrics", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return reply
+      .type("text/plain; version=0.0.4; charset=utf-8")
+      .send(
+        `# HELP schaffa_pending_scans Publications waiting for virus scanning.\n# TYPE schaffa_pending_scans gauge\nschaffa_pending_scans ${pendingScanCount()}\n`,
+      );
+  });
   app.get("/", async (_request, reply) => {
     publicSiteHeaders(reply);
     return reply.type("text/html; charset=utf-8").send(renderLanding());
   });
+  app.get("/skills", async (_request, reply) => {
+    publicSiteHeaders(reply);
+    return reply.type("text/html; charset=utf-8").send(renderSkills());
+  });
+  app.get<{ Params: { slug: string } }>("/skills/:slug/SKILL.md", async (request, reply) => {
+    const skill = findExampleSkill(request.params.slug);
+    if (!skill) throw new AppError("Example skill not found.", 404, "not_found");
+    publicTextHeaders(reply);
+    return reply.type("text/markdown; charset=utf-8").send(`${skill.markdown}\n`);
+  });
+  for (const path of ["/llm.txt", "/llms.txt"]) {
+    app.get(path, async (_request, reply) => {
+      publicTextHeaders(reply);
+      return reply.type("text/plain; charset=utf-8").send(llmText());
+    });
+  }
   app.register(scalarApiReference, {
     routePrefix: "/api",
     configuration: {
@@ -383,7 +436,6 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
       throw new AppError("Expected one multipart file field named html.", 422);
     }
     const html = await part.toBuffer();
-    await scanUpload(html);
     const result = await publishPage({
       slug: request.params.slug,
       ...optionalTitle(request.query.title),
@@ -392,7 +444,8 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
       isAdmin: auth.scopes.has("admin"),
       kind,
     });
-    return reply.code(result.version === 1 ? 201 : 200).send(result);
+    if (scanIntervalMs > 0) void runScan();
+    return reply.code(202).send(result);
   });
 
   app.post<{ Querystring: { title?: string | string[]; type?: string | string[] } }>(
@@ -409,7 +462,6 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
         throw new AppError("Expected one multipart file field named html.", 422);
       }
       const html = await part.toBuffer();
-      await scanUpload(html);
       const result = await publishPage({
         slug: newPageSlug(),
         ...optionalTitle(request.query.title),
@@ -419,7 +471,8 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
         isAdmin: auth?.scopes.has("admin") || false,
         kind,
       });
-      return reply.code(201).send(result);
+      if (scanIntervalMs > 0) void runScan();
+      return reply.code(202).send(result);
     },
   );
 
@@ -437,19 +490,19 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
       auth.id,
       Number.isSafeInteger(contentLength) ? contentLength : undefined,
     );
-    return reply.code(201).send(result);
+    if (scanIntervalMs > 0) void runScan();
+    return reply.code(202).send(result);
   });
 
-  app.post<{ Body: { title?: unknown; description?: unknown; language?: unknown } }>(
-    "/api/guides",
-    async (request, reply) => {
-      const auth = requireApiAuth(request, "upload");
-      requireWritesEnabled();
-      requireJson(request);
-      consumeAuthenticatedUpload(auth.id);
-      return reply.code(201).send(createGuide(request.body || {}, auth.id));
-    },
-  );
+  app.post<{
+    Body: { title?: unknown; description?: unknown; targetUrl?: unknown; language?: unknown };
+  }>("/api/guides", async (request, reply) => {
+    const auth = requireApiAuth(request, "upload");
+    requireWritesEnabled();
+    requireJson(request);
+    consumeAuthenticatedUpload(auth.id);
+    return reply.code(201).send(createGuide(request.body || {}, auth.id));
+  });
   app.get<{ Params: { slug: string } }>("/api/guides/:slug", async (request, reply) => {
     const auth = requireApiAuth(request, "upload");
     const guide = getOwnedGuide(request.params.slug, auth.id, auth.scopes.has("admin"));
@@ -644,6 +697,9 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
   app.get<{ Params: { slug: string } }>("/p/:slug", async (request, reply) => {
     return sendPage(reply, request.params.slug, undefined, "public");
   });
+  app.get<{ Params: { slug: string } }>("/p/:slug/status", async (request, reply) =>
+    sendPageStatus(reply, request.params.slug),
+  );
   app.get<{ Params: { slug: string } }>("/p/:slug/raw", async (request, reply) => {
     return sendPage(reply, request.params.slug, undefined, "raw");
   });
@@ -655,6 +711,11 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
     async (request, reply) => {
       return sendPage(reply, request.params.slug, Number(request.params.version), "public");
     },
+  );
+  app.get<{ Params: { slug: string; version: string } }>(
+    "/p/:slug/:version/status",
+    async (request, reply) =>
+      sendPageStatus(reply, request.params.slug, Number(request.params.version)),
   );
   app.get<{ Params: { slug: string; version: string } }>(
     "/p/:slug/:version/raw",
@@ -670,6 +731,9 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
   );
   app.get<{ Params: { filename: string } }>("/f/:filename", async (request, reply) =>
     sendFile(request, reply),
+  );
+  app.get<{ Params: { filename: string } }>("/f/:filename/status", async (request, reply) =>
+    sendFileStatus(reply, request.params.filename),
   );
 
   app.get<{ Querystring: AdminQuery }>("/admin", async (request, reply) => {
@@ -839,6 +903,8 @@ export function buildServer(options: { verifyShooToken?: ShooTokenVerifier } = {
   });
   app.addHook("onClose", async () => {
     clearInterval(cleanupTimer);
+    if (scanTimer) clearInterval(scanTimer);
+    await activeScan;
     closeDb();
   });
 
@@ -861,6 +927,10 @@ async function sendPage(
     });
     return reply.code(404).type("text/html; charset=utf-8").send(renderPublicNotFound());
   }
+  if (result.version.scan_status !== "clean") {
+    return sendScanState(reply, result.version.scan_status, result.version.scan_message, mode);
+  }
+  if (!result.html) throw new Error("Clean page content is missing.");
   if (result.page.kind === "interactive" && mode === "public") {
     const executionAllowed = canRunInteractivePage(result.page.id);
     publicSiteHeaders(reply);
@@ -938,6 +1008,9 @@ async function sendFile(
 ) {
   const file = getFile(request.params.filename);
   if (!file) throw new AppError("File not found.", 404, "not_found");
+  if (file.scan_status !== "clean") {
+    return sendScanState(reply, file.scan_status, file.scan_message, "public");
+  }
   const fileStat = await stat(`${config.dataDir}/${file.storage_path}`).catch(
     (error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") {
@@ -972,6 +1045,64 @@ async function sendFile(
     reply.header("Content-Length", String(fileStat.size));
   }
   return reply.type(file.media_type).send(openStoredFile(file.storage_path, range));
+}
+
+async function sendPageStatus(reply: FastifyReply, slug: string, version?: number) {
+  const result = await getPageVersion(slug, version);
+  if (!result) throw new AppError("Page not found.", 404, "not_found");
+  return sendStatusJson(reply, result.version.scan_status, result.version.scan_message);
+}
+
+function sendFileStatus(reply: FastifyReply, filename: string) {
+  const file = getFile(filename);
+  if (!file) throw new AppError("File not found.", 404, "not_found");
+  return sendStatusJson(reply, file.scan_status, file.scan_message);
+}
+
+function sendStatusJson(
+  reply: FastifyReply,
+  status: "pending" | "scanning" | "clean" | "rejected",
+  message: string | null,
+) {
+  reply.header("Cache-Control", "no-store");
+  if (status === "pending" || status === "scanning") reply.header("Retry-After", "2");
+  return reply.code(scanStatusCode(status)).send({
+    scanStatus: status,
+    ...(message ? { message } : {}),
+  });
+}
+
+function sendScanState(
+  reply: FastifyReply,
+  status: "pending" | "scanning" | "rejected",
+  message: string | null,
+  mode: "public" | "raw" | "run",
+) {
+  const pending = status !== "rejected";
+  reply.headers({
+    "Cache-Control": "no-store",
+    "Content-Security-Policy":
+      "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+    "X-Frame-Options": "DENY",
+    ...(pending ? { "Retry-After": "2" } : {}),
+  });
+  const code = pending ? 202 : 422;
+  if (mode === "raw") {
+    const text = pending
+      ? "Virus scan in progress. Content will be available when the scan completes."
+      : `Upload rejected.${message ? ` ${message}` : ""}`;
+    return reply.code(code).type("text/plain; charset=utf-8").send(text);
+  }
+  return reply
+    .code(code)
+    .type("text/html; charset=utf-8")
+    .send(renderScanStatusPage({ status: pending ? "pending" : "rejected", message }));
+}
+
+function scanStatusCode(status: "pending" | "scanning" | "clean" | "rejected"): number {
+  if (status === "clean") return 200;
+  if (status === "rejected") return 422;
+  return 202;
 }
 
 function parseRange(
@@ -1215,6 +1346,14 @@ function publicSiteHeaders(reply: FastifyReply): void {
   reply.headers({
     "Content-Security-Policy":
       "default-src 'none'; img-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+    "X-Frame-Options": "DENY",
+  });
+}
+
+function publicTextHeaders(reply: FastifyReply): void {
+  reply.headers({
+    "Cache-Control": "public, max-age=3600",
+    "Content-Security-Policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
     "X-Frame-Options": "DENY",
   });
 }

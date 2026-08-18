@@ -70,6 +70,7 @@ export interface GuideView {
   slug: string;
   title: string;
   description: string | null;
+  targetUrl: string | null;
   language: string;
   status: GuideStatus;
   revision: number;
@@ -101,21 +102,22 @@ interface RevisionRow {
 }
 
 export function createGuide(
-  input: { title?: unknown; description?: unknown; language?: unknown },
+  input: { title?: unknown; description?: unknown; targetUrl?: unknown; language?: unknown },
   tokenId: string,
 ): GuideView {
   const title = requiredText(input.title, "title", 160);
   const description = optionalText(input.description, "description", 4_000);
+  const targetUrl = validateTargetUrl(input.targetUrl);
   const language = validateLanguage(input.language);
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const slug = randomGuideSlug();
     if (db().prepare("SELECT 1 FROM guides WHERE slug = ?").get(slug)) continue;
     db()
       .prepare(
-        `INSERT INTO guides (id, slug, title, description, language, owner_token_id)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO guides (id, slug, title, description, target_url, language, owner_token_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(randomUUID(), slug, title, description, language, tokenId);
+      .run(randomUUID(), slug, title, description, targetUrl, language, tokenId);
     return getOwnedGuide(slug, tokenId, false);
   }
   throw new Error("Could not allocate a unique guide slug.");
@@ -128,7 +130,13 @@ export function getOwnedGuide(slug: string, tokenId: string, isAdmin: boolean): 
 
 export function updateGuide(
   slug: string,
-  input: { title?: unknown; description?: unknown; language?: unknown; status?: unknown },
+  input: {
+    title?: unknown;
+    description?: unknown;
+    targetUrl?: unknown;
+    language?: unknown;
+    status?: unknown;
+  },
   tokenId: string,
   isAdmin: boolean,
   expectedRevision: number,
@@ -143,14 +151,16 @@ export function updateGuide(
     input.description === undefined
       ? guide.description
       : optionalText(input.description, "description", 4_000);
+  const targetUrl =
+    input.targetUrl === undefined ? guide.target_url : validateTargetUrl(input.targetUrl);
   const language = input.language === undefined ? guide.language : validateLanguage(input.language);
   const status = input.status === undefined ? mutableStatus(guide) : input.status;
   mutateGuide(
     guide.id,
     expectedRevision,
-    `UPDATE guides SET title = ?, description = ?, language = ?, status = ?,
+    `UPDATE guides SET title = ?, description = ?, target_url = ?, language = ?, status = ?,
      edit_revision = edit_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND edit_revision = ?`,
-    [title, description, language, status, guide.id, expectedRevision],
+    [title, description, targetUrl, language, status, guide.id, expectedRevision],
   );
   return getOwnedGuide(slug, tokenId, isAdmin);
 }
@@ -560,6 +570,7 @@ export function guidePreflight(guide: GuideView): GuidePreflight {
 export function renderGuideMarkdown(guide: GuideView): string {
   const lines = [`# ${guide.title}`, ""];
   if (guide.description) lines.push(guide.description, "");
+  if (guide.targetUrl) lines.push(`[Ziel öffnen](<${guide.targetUrl}>)`, "");
   lines.push(`Revision ${guide.revision}`, "");
   for (const [index, step] of guide.steps.filter((item) => item.visible).entries()) {
     lines.push(`## ${index + 1}. ${step.title}`, "", step.description, "");
@@ -596,7 +607,7 @@ export function renderGuideHtml(guide: GuideView): string {
     )
     .join("");
   return `<!doctype html><html lang="${escapeHtml(guide.language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(guide.title)}</title><style>${guideCss}</style></head><body>
-  <header><div><a class="brand" href="/">Schaffa</a><span>Guide · Revision ${guide.revision}</span></div><h1>${escapeHtml(guide.title)}</h1>${guide.description ? `<p>${escapeHtml(guide.description)}</p>` : ""}<nav aria-label="Downloads"><a href="${escapeHtml(guide.jsonUrl)}">JSON</a><a href="${escapeHtml(guide.markdownUrl)}">Markdown</a></nav></header>
+  <header><div><a class="brand" href="/">Schaffa</a><span>Guide · Revision ${guide.revision}</span></div><h1>${escapeHtml(guide.title)}</h1>${guide.description ? `<p>${escapeHtml(guide.description)}</p>` : ""}<nav aria-label="Guide-Aktionen">${guide.targetUrl ? `<a class="target-link" href="${escapeHtml(guide.targetUrl)}">Ziel öffnen <span aria-hidden="true">↗</span></a>` : ""}<a href="${escapeHtml(guide.jsonUrl)}">JSON</a><a href="${escapeHtml(guide.markdownUrl)}">Markdown</a></nav></header>
   <main><nav class="toc" aria-label="Schritte">${toc}</nav><article>${steps}</article></main>
   <footer>Veröffentlicht mit Schaffa · ${guide.steps.filter((step) => step.visible).length} Schritte</footer></body></html>`;
 }
@@ -607,6 +618,7 @@ function guideView(guide: GuideRow, steps: GuideStepRow[]): GuideView {
     slug: guide.slug,
     title: guide.title,
     description: guide.description,
+    targetUrl: guide.target_url,
     language: guide.language,
     status: guide.status,
     revision: guide.current_revision,
@@ -664,21 +676,23 @@ async function prepareGuideImage(guide: GuideRow, part: MultipartFile): Promise<
   if (!isLikelyImage(part.filename, part.mimetype)) {
     throw new AppError("Screenshot must be a recognized image.", 422, "invalid_image");
   }
-  const data = await readLimited(part, config.maxImageInputBytes);
-  await scanUpload(data);
-  const cleaned = await withImageProcessingPermit(() => cleanImage(data));
-  const metadata = await sharp(cleaned.data).metadata();
-  const id = randomFileId();
-  return {
-    id,
-    guide_id: guide.id,
-    storage_path: await storeGuideImage(guide.slug, id, cleaned.data),
-    bytes: cleaned.data.length,
-    sha256: sha256(cleaned.data),
-    width: metadata.width || 0,
-    height: metadata.height || 0,
-    created_at: "",
-  };
+  return withImageProcessingPermit(async () => {
+    const data = await readLimited(part, config.maxImageInputBytes);
+    await scanUpload(data);
+    const cleaned = await cleanImage(data);
+    const metadata = await sharp(cleaned.data).metadata();
+    const id = randomFileId();
+    return {
+      id,
+      guide_id: guide.id,
+      storage_path: await storeGuideImage(guide.slug, id, cleaned.data),
+      bytes: cleaned.data.length,
+      sha256: sha256(cleaned.data),
+      width: metadata.width || 0,
+      height: metadata.height || 0,
+      created_at: "",
+    };
+  });
 }
 
 async function readLimited(part: MultipartFile, limit: number): Promise<Buffer> {
@@ -690,6 +704,9 @@ async function readLimited(part: MultipartFile, limit: number): Promise<Buffer> 
     if (bytes > limit)
       throw new AppError("Image input exceeds the configured size limit.", 413, "file_too_large");
     chunks.push(chunk);
+  }
+  if (part.file.readableAborted) {
+    throw new AppError("Screenshot upload was interrupted.", 400, "invalid_upload");
   }
   return Buffer.concat(chunks);
 }
@@ -907,6 +924,24 @@ function validateLanguage(value: unknown): string {
   return value;
 }
 
+function validateTargetUrl(value: unknown): string | null {
+  const targetUrl = optionalText(value, "targetUrl", 2_000);
+  if (!targetUrl) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(targetUrl);
+  } catch {
+    throw new AppError("targetUrl must be a valid HTTP or HTTPS URL.", 422);
+  }
+  if (!new Set(["http:", "https:"]).has(parsed.protocol) || parsed.username || parsed.password) {
+    throw new AppError("targetUrl must be an HTTP or HTTPS URL without embedded credentials.", 422);
+  }
+  if (parsed.href.length > 2_000) {
+    throw new AppError("targetUrl may not exceed 2000 characters.", 422);
+  }
+  return parsed.href;
+}
+
 function paragraphs(value: string): string {
   return escapeHtml(value)
     .replace(/\n{2,}/g, "</p><p>")
@@ -923,5 +958,5 @@ function escapeHtml(value: string): string {
 }
 
 const guideCss = `
-:root{--paper:#f3f0e8;--surface:#fffdf8;--ink:#20211e;--muted:#696961;--line:#cbc5b8;--accent:#a43f24;--gold:#d8b64b;font-family:"Avenir Next","Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;line-height:1.62}header{padding:52px max(24px,calc((100vw - 1120px)/2));border-bottom:2px solid var(--ink);background:var(--surface)}header>div{display:flex;justify-content:space-between;color:var(--muted);font-size:13px}.brand{font:700 22px Georgia,serif;color:var(--ink);text-decoration:none}h1,h2{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.035em}h1{max-width:920px;margin:50px 0 18px;font-size:clamp(44px,7vw,78px);line-height:.98}header>p{max-width:720px;color:#4b4c45;font-size:19px}header nav{display:flex;gap:18px;margin-top:28px}header nav a{color:var(--accent);font-weight:700;text-underline-offset:4px}main{display:grid;grid-template-columns:240px minmax(0,820px);gap:56px;max-width:1120px;margin:auto;padding:52px 24px 100px}.toc{position:sticky;top:24px;align-self:start;border-top:3px solid var(--ink)}.toc a{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px;text-decoration:none}.toc span{font-family:ui-monospace,monospace;color:var(--accent)}.step{padding:0 0 64px;margin:0 0 60px;border-bottom:2px solid var(--ink)}.number{display:block;color:var(--accent);font:700 13px ui-monospace,monospace}.step h2{margin:8px 0 18px;font-size:36px;line-height:1.08}.step-copy>p{max-width:720px;font-size:17px}.step dl{display:grid;grid-template-columns:90px 1fr;margin:18px 0}.step dt{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}.step dd{margin:0}.step code{padding:3px 6px;background:#e4ded1;font-family:ui-monospace,monospace}figure{margin:30px 0 0}img{display:block;width:100%;height:auto;border:2px solid var(--ink);background:#ddd;box-shadow:8px 8px 0 var(--gold)}figcaption{margin-top:13px;color:var(--muted);font-size:13px}.text-step{margin-top:28px;padding:18px;border-left:4px solid var(--gold);background:var(--surface);color:var(--muted)}footer{padding:25px;border-top:2px solid var(--ink);text-align:center;color:var(--muted);font-size:13px}@media(max-width:760px){header{padding:34px 20px}header>div{align-items:center}.brand{font-size:20px}h1{margin-top:38px;font-size:46px}main{display:block;padding:34px 20px 70px}.toc{position:static;margin-bottom:50px}.step h2{font-size:31px}.step dl{grid-template-columns:1fr;gap:3px}img{box-shadow:5px 5px 0 var(--gold)}}@media print{header{padding:0 0 24px}.toc,header nav,footer{display:none}main{display:block;padding:20px 0}.step{break-inside:avoid}img{box-shadow:none}body{background:#fff;font-size:11pt}}
+:root{--paper:#f3f0e8;--surface:#fffdf8;--ink:#20211e;--muted:#696961;--line:#cbc5b8;--accent:#a43f24;--gold:#d8b64b;font-family:"Avenir Next","Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;line-height:1.62}header{padding:52px max(24px,calc((100vw - 1120px)/2));border-bottom:2px solid var(--ink);background:var(--surface)}header>div{display:flex;justify-content:space-between;color:var(--muted);font-size:13px}.brand{font:700 22px Georgia,serif;color:var(--ink);text-decoration:none}h1,h2{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.035em}h1{max-width:920px;margin:50px 0 18px;font-size:clamp(44px,7vw,78px);line-height:.98}header>p{max-width:720px;color:#4b4c45;font-size:19px}header nav{display:flex;align-items:center;gap:18px;margin-top:28px}header nav a{color:var(--accent);font-weight:700;text-underline-offset:4px}.target-link{display:inline-flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:var(--surface);text-decoration:none}.target-link:focus-visible{outline:3px solid var(--gold);outline-offset:3px}main{display:grid;grid-template-columns:240px minmax(0,820px);gap:56px;max-width:1120px;margin:auto;padding:52px 24px 100px}.toc{position:sticky;top:24px;align-self:start;border-top:3px solid var(--ink)}.toc a{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px;text-decoration:none}.toc span{font-family:ui-monospace,monospace;color:var(--accent)}.step{padding:0 0 64px;margin:0 0 60px;border-bottom:2px solid var(--ink)}.number{display:block;color:var(--accent);font:700 13px ui-monospace,monospace}.step h2{margin:8px 0 18px;font-size:36px;line-height:1.08}.step-copy>p{max-width:720px;font-size:17px}.step dl{display:grid;grid-template-columns:90px 1fr;margin:18px 0}.step dt{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}.step dd{margin:0}.step code{padding:3px 6px;background:#e4ded1;font-family:ui-monospace,monospace}figure{margin:30px 0 0}img{display:block;width:100%;height:auto;border:2px solid var(--ink);background:#ddd;box-shadow:8px 8px 0 var(--gold)}figcaption{margin-top:13px;color:var(--muted);font-size:13px}.text-step{margin-top:28px;padding:18px;border-left:4px solid var(--gold);background:var(--surface);color:var(--muted)}footer{padding:25px;border-top:2px solid var(--ink);text-align:center;color:var(--muted);font-size:13px}@media(max-width:760px){header{padding:34px 20px}header>div{align-items:center}.brand{font-size:20px}h1{margin-top:38px;font-size:46px}header nav{align-items:flex-start;flex-wrap:wrap}main{display:block;padding:34px 20px 70px}.toc{position:static;margin-bottom:50px}.step h2{font-size:31px}.step dl{grid-template-columns:1fr;gap:3px}img{box-shadow:5px 5px 0 var(--gold)}}@media print{header{padding:0 0 24px}.toc,header nav,footer{display:none}main{display:block;padding:20px 0}.step{break-inside:avoid}img{box-shadow:none}body{background:#fff;font-size:11pt}}
 `;

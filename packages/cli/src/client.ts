@@ -12,11 +12,14 @@ export interface UploadOptions {
 
 export interface UploadResult {
   publicUrl: string;
+  scanStatus?: "pending";
+  statusUrl?: string;
   [key: string]: unknown;
 }
 
 export interface GuideResult {
   slug: string;
+  targetUrl: string | null;
   status: "recording" | "draft" | "published";
   revision: number;
   editRevision: number;
@@ -127,6 +130,7 @@ export async function upload(options: UploadOptions): Promise<UploadResult> {
 export async function startGuide(options: {
   title: string;
   description?: string;
+  targetUrl?: string;
   language?: string;
   token?: string;
   baseUrl?: string;
@@ -137,6 +141,7 @@ export async function startGuide(options: {
     body: JSON.stringify({
       title: options.title,
       ...(options.description ? { description: options.description } : {}),
+      ...(options.targetUrl ? { targetUrl: options.targetUrl } : {}),
       ...(options.language ? { language: options.language } : {}),
     }),
     headers: { "Content-Type": "application/json" },

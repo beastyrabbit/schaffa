@@ -1,5 +1,6 @@
 import { config } from "./config.js";
 import type { GuideRow, TokenRow } from "./db.js";
+import { exampleSkills } from "./example-skills.js";
 import type { FileSummary, PageSummary } from "./service.js";
 import { filePublicUrl } from "./service.js";
 import type { InstanceSettings } from "./settings.js";
@@ -17,7 +18,7 @@ export function renderLanding(): string {
     "Publish agent work",
     `<div class="landing-page"><header class="landing-nav">
       <a class="wordmark" href="/">Schaffa</a>
-      <nav aria-label="Primary navigation"><a href="/api">API</a><a class="nav-action" href="/account">Sign in</a></nav>
+      <nav aria-label="Primary navigation"><a href="/skills">Skills</a><a href="/api">API</a><a class="nav-action" href="/account">Sign in</a></nav>
     </header>
     <main class="landing">
       <section class="landing-hero">
@@ -34,6 +35,37 @@ export function renderLanding(): string {
       </section>
     </main>
     <footer class="landing-footer"><span>Schaffa means getting work done.</span><span>Inspired by <a href="https://postplan.dev">PostPlan</a> and <a href="https://uploadthing.com">UploadThing</a>. Built to be self-hosted.</span></footer></div>`,
+    "",
+    "en",
+  );
+}
+
+export function renderSkills(): string {
+  const skills = exampleSkills
+    .map(
+      (
+        skill,
+      ) => `<section class="skill-example" id="${escapeHtml(skill.slug)}" aria-labelledby="${escapeHtml(skill.slug)}-heading">
+        <div><h2 id="${escapeHtml(skill.slug)}-heading">${escapeHtml(skill.title)}</h2><a href="/skills/${escapeHtml(skill.slug)}/SKILL.md" aria-label="Open raw ${escapeHtml(skill.title)} SKILL.md">Raw SKILL.md</a></div>
+        <pre><code>${escapeHtml(skill.markdown)}</code></pre>
+      </section>`,
+    )
+    .join("");
+  return layout(
+    "Example skills",
+    `<div class="landing-page skills-page"><header class="landing-nav">
+      <a class="wordmark" href="/">Schaffa</a>
+      <nav aria-label="Primary navigation"><a href="/">Home</a><a href="/api">API</a><a class="nav-action" href="/account">Sign in</a></nav>
+    </header>
+    <main class="skill-docs">
+      <header><h1>Example skills.</h1><p>Copy one complete <code>SKILL.md</code>.</p></header>
+      <section class="skill-install" aria-labelledby="use-skill"><h2 id="use-skill">Read a URL</h2><pre><code>curl -fsSL "&lt;schaffa-url&gt;"</code></pre></section>
+      <div class="skill-grid">${skills}</div>
+    </main>
+    <footer class="landing-footer"><span><a href="/llm.txt">llm.txt</a></span><span><a href="/metadata/openapi.json">OpenAPI</a></span></footer></div>`,
+    "",
+    "en",
+    skillStyles,
   );
 }
 
@@ -67,6 +99,28 @@ export function renderPublicNotFound(): string {
         <p class="lede">Unter diesem Slug wurde noch nichts veröffentlicht. Prüfe die URL oder veröffentliche die Seite erneut.</p>
       </section>
     </main>`,
+  );
+}
+
+export function renderScanStatusPage(input: {
+  status: "pending" | "rejected";
+  message: string | null;
+}): string {
+  const pending = input.status === "pending";
+  return layout(
+    pending ? "Virus scan in progress" : "Upload rejected",
+    `<main class="login-shell">
+      <section class="login-panel not-found" role="status" aria-live="polite">
+        <a class="wordmark" href="/">Schaffa</a>
+        <p class="error-code">${pending ? "SCAN" : "REJECTED"}</p>
+        <h1>${pending ? "Virus scan in progress" : "Upload rejected"}</h1>
+        <p class="lede">${pending ? "Content will appear automatically when the scan completes." : escapeHtml(input.message || "The upload did not pass the virus scan.")}</p>
+      </section>
+    </main>`,
+    "",
+    "en",
+    "",
+    pending ? '<meta http-equiv="refresh" content="2">' : "",
   );
 }
 
@@ -311,9 +365,16 @@ export function renderInteractiveWarning(input: {
   );
 }
 
-function layout(title: string, content: string, scripts = ""): string {
+function layout(
+  title: string,
+  content: string,
+  scripts = "",
+  language: "de" | "en" = "de",
+  extraStyles = "",
+  extraHead = "",
+): string {
   return `<!doctype html>
-<html lang="de">
+<html lang="${language}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -322,8 +383,9 @@ function layout(title: string, content: string, scripts = ""): string {
   <link rel="apple-touch-icon" href="/assets/favicon-180.png" sizes="180x180">
   <link rel="manifest" href="/site.webmanifest">
   <meta name="theme-color" content="#20211e">
+  ${extraHead}
   <title>${escapeHtml(title)} · Schaffa</title>
-  <style>${styles}</style>
+  <style>${styles}${extraStyles}</style>
 </head>
 <body>${content}${scripts}</body>
 </html>`;
@@ -392,6 +454,10 @@ function formatDate(value: string): string {
     timeZone: "Europe/Berlin",
   }).format(new Date(value.endsWith("Z") ? value : `${value}Z`));
 }
+
+const skillStyles = `
+.skill-docs{max-width:1240px;margin:0 auto;padding:64px 32px 88px}.skill-docs>header{padding-bottom:32px;border-bottom:2px solid var(--ink)}.skill-docs h1{margin:0;font:700 clamp(42px,6vw,70px)/.95 Georgia,"Times New Roman",serif;letter-spacing:-.05em}.skill-docs>header p{margin:16px 0 0;color:var(--muted);font-size:16px}.skill-install{display:grid;grid-template-columns:180px minmax(0,1fr);gap:24px;align-items:start;padding:32px 0;border-bottom:2px solid var(--ink)}.skill-install h2{margin:0;font-size:17px}.skill-install pre{margin:0;overflow:auto;padding:18px;background:#292a26;color:#f6f2e9;white-space:pre-wrap;overflow-wrap:anywhere}.skill-install code{font-size:12px;line-height:1.65}.skill-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;padding-top:32px}.skill-example{min-width:0;padding:0;border:2px solid var(--ink);background:var(--surface)}.skill-example>div{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;border-bottom:2px solid var(--ink)}.skill-example h2{margin:0;font-size:17px}.skill-example a{font-size:13px;font-weight:700;color:var(--accent)}.skill-example pre{margin:0;overflow:auto;padding:18px;background:#292a26;color:#f6f2e9;white-space:pre-wrap;overflow-wrap:anywhere}.skill-example code{font-size:12px;line-height:1.65}.skills-page .landing-footer{margin-top:0}@media(max-width:760px){.skill-docs{padding:42px 18px 64px}.skill-install{grid-template-columns:1fr;gap:12px}.skill-grid{grid-template-columns:1fr}.skills-page .landing-nav a[href="/"]{display:none}}
+`;
 
 const styles = `
 :root{--paper:#f3f0e8;--surface:#fbfaf6;--ink:#20211e;--muted:#68685f;--line:#d6d1c5;--accent:#a43f24;--accent-dark:#7c2e1a;--success:#315a3a;--danger:#8c3329;font-family:"Avenir Next","Segoe UI",sans-serif;color:var(--ink);background:var(--paper);font-synthesis:none}

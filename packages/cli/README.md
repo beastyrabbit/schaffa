@@ -13,7 +13,7 @@ npx schaffa upload ./plan.html
 ## Guides and presentations
 
 ```sh
-schaffa guide start --title "Create a project"
+schaffa guide start --title "Create a project" --url "https://app.example.com/projects"
 schaffa guide step --title "Open projects" --text "Open the project list."
 schaffa guide finish
 schaffa guide publish
@@ -21,9 +21,9 @@ schaffa guide publish
 schaffa publish deck.md --kind presentation --export pdf --export pptx
 ```
 
-Guide commands persist the active random slug and edit revision under `.schaffa/guide-session.json`. Keep this working file out of source control. The bearer token remains in `SCHAFFA_TOKEN` and is never written to the session file.
+The optional `--url` adds a prominent “Ziel öffnen” link to the published guide so readers can jump directly to the guided application. Guide commands persist the active random slug and edit revision under `.schaffa/guide-session.json`. Keep this working file out of source control. The bearer token remains in `SCHAFFA_TOKEN` and is never written to the session file.
 
-The command prints the public URL. New HTML pages can be published without an account; anonymous pages remain public for one hour and are deleted after 30 days.
+The command prints the stable public URL immediately. Until the asynchronous virus scan completes, that URL shows a self-refreshing status page; clean content appears at the same URL. New HTML pages can be published without an account; anonymous pages remain public for one hour and are deleted after 30 days.
 
 Other file types are published as files and require a token:
 

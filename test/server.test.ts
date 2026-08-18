@@ -28,10 +28,21 @@ legacyDb.exec(`
     sha256 TEXT NOT NULL, created_by_token_id TEXT NOT NULL REFERENCES tokens(id),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(page_id, version)
   ) STRICT;
+  CREATE TABLE guides (
+    id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL, description TEXT,
+    language TEXT NOT NULL DEFAULT 'de',
+    status TEXT NOT NULL DEFAULT 'recording' CHECK(status IN ('recording','draft','published')),
+    owner_token_id TEXT NOT NULL REFERENCES tokens(id),
+    current_revision INTEGER NOT NULL DEFAULT 0, edit_revision INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  ) STRICT;
   INSERT INTO tokens (id, name, token_hash, scopes)
   VALUES ('legacy-token', 'Legacy token', 'system:legacy', 'upload');
   INSERT INTO pages (id, slug, current_version)
   VALUES ('legacy-page-id', 'legacy-page', 1);
+  INSERT INTO guides (id, slug, title, owner_token_id)
+  VALUES ('legacy-guide-id', 'abc234def567', 'Legacy guide', 'legacy-token');
   INSERT INTO page_versions
     (id, page_id, version, storage_path, bytes, sha256, created_by_token_id)
   VALUES
@@ -39,16 +50,25 @@ legacyDb.exec(`
 `);
 legacyDb.close();
 const bootstrapToken = `sfa_${"a".repeat(43)}`;
-let scannerMode: "ok" | "infected" | "unavailable" = "ok";
-const scanner = net.createServer((socket) => {
+let scannerMode: "ok" | "infected" | "unavailable" | "error" | "stall" = "ok";
+const stalledScannerSockets = new Set<net.Socket>();
+const scanner = net.createServer({ allowHalfOpen: true }, (socket) => {
   const request: Buffer[] = [];
   socket.on("data", (chunk) =>
     request.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk),
   );
   socket.on("end", () => {
     if (scannerMode === "unavailable") return socket.destroy();
+    if (scannerMode === "stall") {
+      stalledScannerSockets.add(socket);
+      return;
+    }
     const response =
-      scannerMode === "infected" ? "stream: Eicar-Test-Signature FOUND\0" : "stream: OK\0";
+      scannerMode === "infected"
+        ? "stream: Eicar-Test-Signature FOUND\0"
+        : scannerMode === "error"
+          ? "stream: INSTREAM size limit exceeded. ERROR\0"
+          : "stream: OK\0";
     socket.end(response);
   });
 });
@@ -77,8 +97,11 @@ const { buildServer } = await import("../src/server.js");
 const { config } = await import("../src/config.js");
 const { db } = await import("../src/db.js");
 const { createToken, seedBootstrapToken } = await import("../src/auth.js");
+const { exampleSkills } = await import("../src/example-skills.js");
 const { purgeRetainedAnonymousPages } = await import("../src/service.js");
+const { pendingScanCount, processNextPendingScan } = await import("../src/scan-worker.js");
 const app = buildServer({
+  scanIntervalMs: 0,
   verifyShooToken: async (idToken: string) => ({
     subject: idToken,
     email: `${idToken.slice(0, 16)}@example.test`,
@@ -107,11 +130,25 @@ test("migrates legacy ownership and token schemas in place", () => {
     name: string;
   }>;
   assert.ok(pageColumns.some((column) => column.name === "kind"));
+  const migratedVersion = db()
+    .prepare("SELECT scan_status, scan_message FROM page_versions WHERE id = 'legacy-version-id'")
+    .get() as unknown as { scan_status: string; scan_message: string | null };
+  assert.equal(migratedVersion.scan_status, "clean");
+  assert.equal(migratedVersion.scan_message, null);
   const userColumns = db().prepare("PRAGMA table_info(users)").all() as unknown as Array<{
     name: string;
   }>;
   assert.ok(userColumns.some((column) => column.name === "can_publish_interactive"));
+  const guideColumns = db().prepare("PRAGMA table_info(guides)").all() as unknown as Array<{
+    name: string;
+  }>;
+  assert.ok(guideColumns.some((column) => column.name === "target_url"));
+  const guide = db().prepare("SELECT target_url FROM guides WHERE id = 'legacy-guide-id'").get() as
+    | { target_url: string | null }
+    | undefined;
+  assert.equal(guide?.target_url, null);
   db().prepare("DELETE FROM pages WHERE id = 'legacy-page-id'").run();
+  db().prepare("DELETE FROM guides WHERE id = 'legacy-guide-id'").run();
   db().prepare("DELETE FROM tokens WHERE id = 'legacy-token'").run();
 });
 
@@ -160,6 +197,8 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.match(landing.body, /Turn finished work into a link/);
   assert.equal(landing.body.match(/href="\/account"/g)?.length, 1);
   assert.match(landing.body, /href="\/account">Sign in/);
+  assert.match(landing.body, /href="\/skills">Skills/);
+  assert.match(landing.body, /<html lang="en">/);
   assert.doesNotMatch(landing.body, /Publish anonymously|landing-principles|>01<|>02<|>03</);
   assert.match(landing.body, /href="\/api">API/);
   assert.match(landing.body, /npx schaffa upload \.\/mypage\.html/);
@@ -272,6 +311,11 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.ok(specification.json().paths["/api/guides"].post);
   assert.ok(specification.json().paths["/api/guides/{slug}/steps"].post);
   assert.equal(
+    specification.json().paths["/api/guides"].post.requestBody.content["application/json"].schema
+      .properties.targetUrl.format,
+    "uri",
+  );
+  assert.equal(
     specification.json().tags.some((tag: { name: string }) => tag.name === "Administration"),
     false,
   );
@@ -283,7 +327,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.equal(specification.json().paths["/api/users"], undefined);
   assert.equal(specification.json().paths["/api/settings"], undefined);
   const pagePut = specification.json().paths["/api/pages/{slug}"].put;
-  assert.ok(pagePut.responses["201"]);
+  assert.ok(pagePut.responses["202"]);
   assert.equal(pagePut.responses["404"], undefined);
   assert.ok(pagePut.responses["413"]);
   assert.ok(pagePut.responses["429"]);
@@ -302,21 +346,94 @@ test("serves a minimal public landing page while keeping API discovery machine-r
     "versionRawUrl",
     "expiresAt",
     "purgeAt",
+    "scanStatus",
+    "statusUrl",
   ]);
   assert.ok(specification.json().components.schemas.FilePublication.required.includes("sha256"));
+});
+
+test("serves concise example skills and LLM discovery text", async () => {
+  assert.equal(exampleSkills.length, 2);
+  const readSkill = exampleSkills.find((skill) => skill.slug === "read");
+  const writeSkill = exampleSkills.find((skill) => skill.slug === "write");
+  assert.ok(readSkill);
+  assert.ok(writeSkill);
+  assert.match(readSkill.markdown, /curl -fsSL/);
+  for (const route of ["/p/", "/f/", "/g/"]) assert.match(readSkill.markdown, new RegExp(route));
+  assert.match(writeSkill.markdown, /npx schaffa upload/);
+
+  const page = await app.inject({
+    method: "GET",
+    url: "/skills",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(page.statusCode, 200);
+  assert.match(page.headers["content-type"] || "", /^text\/html/);
+  assert.match(page.body, /<html lang="en">/);
+  assert.match(page.body, /Copy one complete/);
+  assert.match(page.body, /curl -fsSL "&lt;schaffa-url&gt;"/);
+
+  for (const skill of exampleSkills) {
+    assert.ok(skill.markdown.trim().split("\n").length <= 12);
+    assert.ok(skill.markdown.length < 400);
+    assert.match(skill.markdown, /^---\nname: schaffa-/);
+    assert.match(page.body, new RegExp(`href="/skills/${skill.slug}/SKILL\\.md"`));
+    const raw = await app.inject({
+      method: "GET",
+      url: `/skills/${skill.slug}/SKILL.md`,
+      headers: { host: "schaffa.test" },
+    });
+    assert.equal(raw.statusCode, 200);
+    assert.match(raw.headers["content-type"] || "", /^text\/markdown/);
+    assert.match(String(raw.headers["content-security-policy"]), /default-src 'none'/);
+    assert.equal(raw.body, `${skill.markdown}\n`);
+  }
+
+  const missing = await app.inject({
+    method: "GET",
+    url: "/skills/missing/SKILL.md",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(missing.statusCode, 404);
+
+  const llm = await app.inject({
+    method: "GET",
+    url: "/llm.txt",
+    headers: { host: "schaffa.test" },
+  });
+  const llms = await app.inject({
+    method: "GET",
+    url: "/llms.txt",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(llm.statusCode, 200);
+  assert.match(llm.headers["content-type"] || "", /^text\/plain/);
+  assert.match(String(llm.headers["content-security-policy"]), /default-src 'none'/);
+  assert.equal(llm.body, llms.body);
+  assert.ok(llm.body.trim().split("\n").length <= 60);
+  assert.match(llm.body, /\/p\/<slug>.*published HTML page/);
+  assert.match(llm.body, /\/f\/<id>\.<ext>.*published file/);
+  assert.match(llm.body, /\/g\/<slug>.*published step-by-step guide/);
+  assert.match(llm.body, /All returned publication URLs are public/);
+  assert.match(llm.body, /Writes require a bearer token/);
+  assert.match(llm.body, /202 Accepted/);
+  assert.match(llm.body, /https:\/\/schaffa\.test\/skills/);
+  assert.match(llm.body, /https:\/\/schaffa\.test\/skills\/read\/SKILL\.md/);
+  assert.match(llm.body, /https:\/\/schaffa\.test\/skills\/write\/SKILL\.md/);
+  assert.match(llm.body, /https:\/\/schaffa\.test\/metadata\/openapi\.json/);
 });
 
 test("publishes immutable page versions under a stable slug", async () => {
   const firstHtml = "<h1>Hello version one is deliberately longer</h1>";
   const secondHtml = "<h1>Hello v2</h1>";
   const first = await publishHtml("hello", firstHtml);
-  assert.equal(first.statusCode, 201);
+  assert.equal(first.statusCode, 202);
   assert.equal(first.json().version, 1);
   assert.equal(first.json().publicUrl, "https://schaffa.test/p/hello");
   assert.equal(first.json().rawUrl, "https://schaffa.test/p/hello/raw");
 
   const second = await publishHtml("hello", secondHtml);
-  assert.equal(second.statusCode, 200);
+  assert.equal(second.statusCode, 202);
   assert.equal(second.json().version, 2);
 
   const latest = await app.inject({
@@ -368,11 +485,11 @@ test("retains a page title when an update omits it", async () => {
     },
     payload: firstBody.payload,
   });
-  assert.equal(first.statusCode, 201);
+  assert.equal(first.statusCode, 202);
   assert.equal(first.json().title, "Release plan");
 
   const updated = await publishHtml("titled-page", "<h1>Version two</h1>");
-  assert.equal(updated.statusCode, 200);
+  assert.equal(updated.statusCode, 202);
   assert.equal(updated.json().title, "Release plan");
 
   const longTitleBody = multipart("html", "long-title.html", "text/html", "<h1>Nope</h1>");
@@ -388,6 +505,59 @@ test("retains a page title when an update omits it", async () => {
   });
   assert.equal(longTitle.statusCode, 422);
   assert.equal(longTitle.json().error, "invalid_title");
+});
+
+test("keeps reused page versions isolated from stale scan workers", async () => {
+  await publishHtml("scan-race", "<h1>Version one</h1>");
+  const oldVersion = await queueHtmlWithToken(
+    "scan-race",
+    "<h1>Old version two</h1>",
+    bootstrapToken,
+  );
+  assert.equal(oldVersion.statusCode, 202);
+
+  scannerMode = "stall";
+  const staleScan = processNextPendingScan();
+  await waitForStalledScanner();
+  const deleted = await app.inject({
+    method: "POST",
+    url: "/admin/pages/scan-race/versions/2/delete",
+    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+  });
+  assert.equal(deleted.statusCode, 302);
+
+  const replacementHtml = "<h1>Replacement version two</h1>";
+  const replacement = await queueHtmlWithToken("scan-race", replacementHtml, bootstrapToken);
+  assert.equal(replacement.statusCode, 202);
+  const replacementRow = db()
+    .prepare(
+      `SELECT pv.storage_path, pv.scan_status
+       FROM page_versions pv JOIN pages p ON p.id = pv.page_id
+       WHERE p.slug = 'scan-race' AND pv.version = 2`,
+    )
+    .get() as unknown as { storage_path: string; scan_status: string };
+
+  scannerMode = "ok";
+  for (const socket of stalledScannerSockets) socket.end("stream: OK\0");
+  stalledScannerSockets.clear();
+  await assert.rejects(staleScan);
+  const replacementStatus = db()
+    .prepare("SELECT scan_status FROM page_versions WHERE storage_path = ?")
+    .get(replacementRow.storage_path) as unknown as { scan_status: string };
+  assert.equal(replacementStatus.scan_status, "pending");
+  assert.equal(
+    await readFile(path.join(dataDir, replacementRow.storage_path), "utf8"),
+    replacementHtml,
+  );
+
+  await finishPendingScans();
+  const published = await app.inject({
+    method: "GET",
+    url: "/p/scan-race",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(published.statusCode, 200);
+  assert.equal(published.body, replacementHtml);
 });
 
 test("rejects repeated page query parameters as a client error", async () => {
@@ -408,7 +578,7 @@ test("rejects repeated page query parameters as a client error", async () => {
 
 test("allows custom slugs that only overlap top-level routes", async () => {
   const created = await publishHtml("api", "<h1>Namespaced page</h1>");
-  assert.equal(created.statusCode, 201);
+  assert.equal(created.statusCode, 202);
   const page = await app.inject({
     method: "GET",
     url: "/p/api",
@@ -420,7 +590,7 @@ test("allows custom slugs that only overlap top-level routes", async () => {
 
 test("returns 404 when page metadata outlives its stored content", async () => {
   const created = await publishHtml("missing-page-content", "<h1>Temporary inconsistency</h1>");
-  assert.equal(created.statusCode, 201);
+  assert.equal(created.statusCode, 202);
   const row = db()
     .prepare(
       "SELECT storage_path FROM page_versions WHERE page_id = (SELECT id FROM pages WHERE slug = ?)",
@@ -449,7 +619,8 @@ test("creates pages with non-semantic random slugs", async () => {
     },
     payload: body.payload,
   });
-  assert.equal(created.statusCode, 201);
+  assert.equal(created.statusCode, 202);
+  await finishPendingScans();
   assert.match(created.json().slug, /^[a-z0-9]{16}$/);
   assert.doesNotMatch(created.json().slug, /named|plan/);
   assert.equal(created.json().rawUrl, `https://schaffa.test/p/${created.json().slug}/raw`);
@@ -463,12 +634,17 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
     method: "POST",
     url: "/api/guides",
     headers: { ...auth, "content-type": "application/json" },
-    payload: { title: "Projekt anlegen", description: "Ein belastbarer Beispielguide." },
+    payload: {
+      title: "Projekt anlegen",
+      description: "Ein belastbarer Beispielguide.",
+      targetUrl: "https://app.example.com/projects?view=active&sort=name",
+    },
   });
   assert.equal(created.statusCode, 201);
   assert.match(created.json().slug, /^[a-z2-7]{12}$/);
   assert.equal(created.json().status, "recording");
   assert.equal(created.json().editRevision, 1);
+  assert.equal(created.json().targetUrl, "https://app.example.com/projects?view=active&sort=name");
   const slug = created.json().slug as string;
 
   const privateBeforePublish = await app.inject({
@@ -617,6 +793,11 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   assert.equal(publicGuide.statusCode, 200);
   assert.match(publicGuide.body, /Projekt anlegen/);
   assert.match(publicGuide.body, /Projektübersicht öffnen/);
+  assert.match(
+    publicGuide.body,
+    /class="target-link" href="https:\/\/app\.example\.com\/projects\?view=active&amp;sort=name"/,
+  );
+  assert.match(publicGuide.body, /Ziel öffnen/);
   assert.doesNotMatch(publicGuide.body, /<script|<form|onclick=/i);
   assert.match(String(publicGuide.headers["content-security-policy"]), /script-src 'none'/);
   const publicImage = await app.inject({
@@ -638,7 +819,12 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   });
   assert.equal(json.statusCode, 200);
   assert.equal(json.json().revision, 1);
+  assert.equal(json.json().targetUrl, "https://app.example.com/projects?view=active&sort=name");
   assert.match(markdown.body, /# Projekt anlegen/);
+  assert.match(
+    markdown.body,
+    /\[Ziel öffnen\]\(<https:\/\/app\.example\.com\/projects\?view=active&sort=name>\)/,
+  );
 
   const newDraft = await app.inject({
     method: "PATCH",
@@ -654,6 +840,71 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
     headers: { host: "schaffa.test" },
   });
   assert.doesNotMatch(immutableV1.body, /Revision zwei/);
+});
+
+test("accepts only safe web destinations for guides", async () => {
+  const owner = createToken("guide URL owner");
+  const headers = {
+    host: "schaffa.test",
+    authorization: `Bearer ${owner.token}`,
+    "content-type": "application/json",
+  };
+  for (const targetUrl of [
+    "javascript:alert(document.domain)",
+    "https://user:password@app.example.com/projects",
+    "/projects",
+  ]) {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/guides",
+      headers,
+      payload: { title: "Unsafe destination", targetUrl },
+    });
+    assert.equal(response.statusCode, 422);
+  }
+});
+
+test("sets, clears, and limits a guide destination", async () => {
+  const owner = createToken("guide destination owner");
+  const headers = {
+    host: "schaffa.test",
+    authorization: `Bearer ${owner.token}`,
+    "content-type": "application/json",
+  };
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/guides",
+    headers,
+    payload: { title: "Destination edits" },
+  });
+  assert.equal(created.statusCode, 201);
+  const slug = created.json().slug as string;
+
+  const set = await app.inject({
+    method: "PATCH",
+    url: `/api/guides/${slug}`,
+    headers: { ...headers, "if-match": '"1"' },
+    payload: { targetUrl: " https://app.example.com/projects " },
+  });
+  assert.equal(set.statusCode, 200);
+  assert.equal(set.json().targetUrl, "https://app.example.com/projects");
+
+  const clear = await app.inject({
+    method: "PATCH",
+    url: `/api/guides/${slug}`,
+    headers: { ...headers, "if-match": '"2"' },
+    payload: { targetUrl: "" },
+  });
+  assert.equal(clear.statusCode, 200);
+  assert.equal(clear.json().targetUrl, null);
+
+  const normalizedOverlong = await app.inject({
+    method: "PATCH",
+    url: `/api/guides/${slug}`,
+    headers: { ...headers, "if-match": '"3"' },
+    payload: { targetUrl: `https://example.com/${"é".repeat(990)}` },
+  });
+  assert.equal(normalizedOverlong.statusCode, 422);
 });
 
 test("rejects sensitive guide text during publication", async () => {
@@ -766,7 +1017,7 @@ test("keeps anonymous pages visible for one hour and stored for 30 days", async 
     headers: { host: "schaffa.test", "content-type": body.contentType },
     payload: body.payload,
   });
-  assert.equal(created.statusCode, 201);
+  assert.equal(created.statusCode, 202);
   const { slug, expiresAt, purgeAt } = created.json();
   assert.match(slug, /^[a-z0-9]{16}$/);
   assert.ok(expiresAt);
@@ -775,6 +1026,27 @@ test("keeps anonymous pages visible for one hour and stored for 30 days", async 
     new Date(`${purgeAt}Z`).getTime() - new Date(`${expiresAt}Z`).getTime() > 29 * 86_400_000,
   );
 
+  const pending = await app.inject({
+    method: "GET",
+    url: `/p/${slug}`,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(pending.statusCode, 202);
+  assert.match(pending.body, /Virus scan in progress/);
+  assert.match(pending.body, /http-equiv="refresh" content="2"/);
+  assert.doesNotMatch(pending.body, /Temporary plan/);
+  assert.equal(pending.headers["cache-control"], "no-store");
+  const pendingStatus = await app.inject({
+    method: "GET",
+    url: `/p/${slug}/status`,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(pendingStatus.statusCode, 202);
+  assert.equal(pendingStatus.json().scanStatus, "pending");
+  const metrics = await app.inject({ method: "GET", url: "/metrics" });
+  assert.match(metrics.body, /schaffa_pending_scans 1/);
+
+  await finishPendingScans();
   const visible = await app.inject({
     method: "GET",
     url: `/p/${slug}`,
@@ -843,8 +1115,16 @@ test("rejects anonymous files, updates, malware, and scanner failures", async ()
     headers: { host: "schaffa.test", "content-type": infectedBody.contentType },
     payload: infectedBody.payload,
   });
-  assert.equal(infected.statusCode, 422);
-  assert.equal(infected.json().error, "malware_detected");
+  assert.equal(infected.statusCode, 202);
+  assert.equal((await processNextPendingScan()).status, "rejected");
+  const infectedPage = await app.inject({
+    method: "GET",
+    url: new URL(infected.json().publicUrl).pathname,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(infectedPage.statusCode, 422);
+  assert.match(infectedPage.body, /Eicar-Test-Signature/);
+  assert.doesNotMatch(infectedPage.body, /stream:/);
 
   scannerMode = "unavailable";
   const unavailableBody = multipart("html", "retry.html", "text/html", "<h1>Retry later</h1>");
@@ -854,9 +1134,16 @@ test("rejects anonymous files, updates, malware, and scanner failures", async ()
     headers: { host: "schaffa.test", "content-type": unavailableBody.contentType },
     payload: unavailableBody.payload,
   });
-  assert.equal(unavailable.statusCode, 503);
-  assert.equal(unavailable.json().error, "scanner_unavailable");
+  assert.equal(unavailable.statusCode, 202);
+  assert.equal((await processNextPendingScan()).status, "pending");
+  const unavailablePage = await app.inject({
+    method: "GET",
+    url: new URL(unavailable.json().publicUrl).pathname,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(unavailablePage.statusCode, 202);
   scannerMode = "ok";
+  await finishPendingScans();
 
   const limitedBody = multipart("html", "limited.html", "text/html", "<h1>Too many</h1>");
   const limited = await app.inject({
@@ -886,6 +1173,29 @@ test("rejects active HTML content", async () => {
   assert.equal(obfuscatedUrl.json().error, "unsafe_html");
 });
 
+test("rotates unavailable scan jobs instead of starving the queue", async () => {
+  const first = await queueHtmlWithToken("scan-fair-one", "<h1>One</h1>", bootstrapToken);
+  const second = await queueHtmlWithToken("scan-fair-two", "<h1>Two</h1>", bootstrapToken);
+  assert.equal(first.statusCode, 202);
+  assert.equal(second.statusCode, 202);
+
+  scannerMode = "unavailable";
+  assert.equal((await processNextPendingScan()).status, "pending");
+  assert.equal((await processNextPendingScan()).status, "pending");
+  const attempts = db()
+    .prepare(
+      `SELECT p.slug, pv.scan_attempted_at
+       FROM page_versions pv JOIN pages p ON p.id = pv.page_id
+       WHERE p.slug IN ('scan-fair-one', 'scan-fair-two')`,
+    )
+    .all() as unknown as Array<{ slug: string; scan_attempted_at: string | null }>;
+  assert.equal(attempts.length, 2);
+  assert.ok(attempts.every((row) => row.scan_attempted_at));
+
+  scannerMode = "ok";
+  await finishPendingScans();
+});
+
 test("uploads files under neutral 128-bit IDs and supports byte ranges", async () => {
   const body = multipart("file", "hello.txt", "text/plain", "abcdef");
   const upload = await app.inject({
@@ -898,10 +1208,25 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
     },
     payload: body.payload,
   });
-  assert.equal(upload.statusCode, 201);
+  assert.equal(upload.statusCode, 202);
   const publicUrl = new URL(upload.json().publicUrl);
   assert.match(publicUrl.pathname, /^\/f\/[A-Za-z0-9_-]{22}\.txt$/);
   assert.doesNotMatch(upload.body, /hello\.txt/);
+  const pending = await app.inject({
+    method: "GET",
+    url: publicUrl.pathname,
+    headers: { host: "schaffa.test", range: "bytes=0-5" },
+  });
+  assert.equal(pending.statusCode, 202);
+  assert.doesNotMatch(pending.body, /abcdef/);
+  const pendingStatus = await app.inject({
+    method: "GET",
+    url: `${publicUrl.pathname}/status`,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(pendingStatus.statusCode, 202);
+  assert.equal(pendingStatus.json().scanStatus, "pending");
+  await finishPendingScans();
 
   const ranged = await app.inject({
     method: "GET",
@@ -1002,10 +1327,13 @@ test("downscales images, preserves alpha, and strips identifying metadata", asyn
     payload: body.payload,
   });
 
-  assert.equal(upload.statusCode, 201);
+  assert.equal(upload.statusCode, 202);
+  await finishPendingScans();
   assert.match(upload.json().filename, /^[A-Za-z0-9_-]{22}\.webp$/);
   assert.doesNotMatch(upload.body, /private-holiday-name/);
   assert.equal(upload.json().mediaType, "image/webp");
+  assert.equal(upload.json().bytes, null);
+  assert.equal(upload.json().sha256, null);
 
   const publicPath = new URL(upload.json().publicUrl).pathname;
   const download = await app.inject({
@@ -1043,14 +1371,14 @@ test("enforces page ownership and prunes versions beyond the configured cap", as
   const owner = createToken("owner");
   const other = createToken("other");
   const first = await publishHtmlWithToken("owned-page", "<h1>Owner version one</h1>", owner.token);
-  assert.equal(first.statusCode, 201);
+  assert.equal(first.statusCode, 202);
 
   const denied = await publishHtmlWithToken("owned-page", "<h1>Defaced</h1>", other.token);
   assert.equal(denied.statusCode, 403);
   assert.equal(denied.json().error, "forbidden");
 
-  assert.equal((await publishHtml("owned-page", "<h1>Admin version two</h1>")).statusCode, 200);
-  assert.equal((await publishHtml("owned-page", "<h1>Admin version three</h1>")).statusCode, 200);
+  assert.equal((await publishHtml("owned-page", "<h1>Admin version two</h1>")).statusCode, 202);
+  assert.equal((await publishHtml("owned-page", "<h1>Admin version three</h1>")).statusCode, 202);
   const pruned = await app.inject({
     method: "GET",
     url: "/p/owned-page/1",
@@ -1068,8 +1396,14 @@ test("enforces page ownership and prunes versions beyond the configured cap", as
 test("scans authenticated pages and files", async () => {
   scannerMode = "infected";
   const page = await publishHtml("authenticated-malware", "<h1>Malware marker</h1>");
-  assert.equal(page.statusCode, 422);
-  assert.equal(page.json().error, "malware_detected");
+  assert.equal(page.statusCode, 202);
+  const rejectedPage = await app.inject({
+    method: "GET",
+    url: new URL(page.json().publicUrl).pathname,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(rejectedPage.statusCode, 422);
+  assert.match(rejectedPage.body, /Eicar-Test-Signature/);
 
   const body = multipart("file", "payload.bin", "application/octet-stream", "malware marker");
   const file = await app.inject({
@@ -1082,8 +1416,54 @@ test("scans authenticated pages and files", async () => {
     },
     payload: body.payload,
   });
-  assert.equal(file.statusCode, 422);
-  assert.equal(file.json().error, "malware_detected");
+  assert.equal(file.statusCode, 202);
+  assert.equal((await processNextPendingScan()).status, "rejected");
+  const rejectedFile = await app.inject({
+    method: "GET",
+    url: new URL(file.json().publicUrl).pathname,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(rejectedFile.statusCode, 422);
+  assert.match(rejectedFile.body, /Eicar-Test-Signature/);
+  const rejectedRow = db()
+    .prepare("SELECT storage_path, bytes, scan_message FROM files WHERE id = ?")
+    .get(file.json().id) as unknown as {
+    storage_path: string;
+    bytes: number;
+    scan_message: string;
+  };
+  assert.equal(rejectedRow.bytes, 0);
+  assert.match(rejectedRow.scan_message, /Eicar-Test-Signature/);
+  await assert.rejects(readFile(path.join(dataDir, rejectedRow.storage_path)), {
+    code: "ENOENT",
+  });
+
+  scannerMode = "error";
+  const scannerErrorBody = multipart(
+    "file",
+    "too-large-for-scanner.bin",
+    "application/octet-stream",
+    "scanner limit marker",
+  );
+  const scannerError = await app.inject({
+    method: "POST",
+    url: "/api/files",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${bootstrapToken}`,
+      "content-type": scannerErrorBody.contentType,
+    },
+    payload: scannerErrorBody.payload,
+  });
+  assert.equal(scannerError.statusCode, 202);
+  assert.equal((await processNextPendingScan()).status, "rejected");
+  const scannerErrorPage = await app.inject({
+    method: "GET",
+    url: new URL(scannerError.json().publicUrl).pathname,
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(scannerErrorPage.statusCode, 422);
+  assert.doesNotMatch(scannerErrorPage.body, /INSTREAM/);
   scannerMode = "ok";
 });
 
@@ -1251,13 +1631,13 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
   assert.ok(tokenRow.user_id);
 
   const page = await publishHtmlWithToken("account-owned-page", "<h1>Version one</h1>", token);
-  assert.equal(page.statusCode, 201);
+  assert.equal(page.statusCode, 202);
   const updatedPage = await publishHtmlWithToken(
     "account-owned-page",
     "<h1>Version two</h1>",
     token,
   );
-  assert.equal(updatedPage.statusCode, 200);
+  assert.equal(updatedPage.statusCode, 202);
   const fileBody = multipart("file", "account-note.txt", "text/plain", "account file");
   const file = await app.inject({
     method: "POST",
@@ -1269,7 +1649,7 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
     },
     payload: fileBody.payload,
   });
-  assert.equal(file.statusCode, 201);
+  assert.equal(file.statusCode, 202);
   const fileId = file.json().id as string;
 
   const populatedAccount = await app.inject({
@@ -1438,7 +1818,8 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
     },
     payload: body.payload,
   });
-  assert.equal(published.statusCode, 201);
+  assert.equal(published.statusCode, 202);
+  await finishPendingScans();
   assert.equal(published.json().kind, "interactive");
 
   const warning = await app.inject({
@@ -1613,7 +1994,7 @@ test("enforces a persistent per-token upload rate limit", async () => {
       `<h1>Rate page ${index}</h1>`,
       limited.token,
     );
-    assert.equal(response.statusCode, 201);
+    assert.equal(response.statusCode, 202);
   }
   const rejected = await publishHtmlWithToken("rate-page-over", "<h1>Over</h1>", limited.token);
   assert.equal(rejected.statusCode, 429);
@@ -1638,7 +2019,7 @@ test("enforces the global storage quota and removes rejected uploads", async () 
     },
     payload: firstBody.payload,
   });
-  assert.equal(first.statusCode, 201);
+  assert.equal(first.statusCode, 202);
 
   const secondBody = multipart(
     "file",
@@ -1777,6 +2158,12 @@ function responseCookie(
 }
 
 async function publishHtmlWithToken(slug: string, html: string, token: string) {
+  const response = await queueHtmlWithToken(slug, html, token);
+  if (response.statusCode === 202) await finishPendingScans();
+  return response;
+}
+
+async function queueHtmlWithToken(slug: string, html: string, token: string) {
   const body = multipart("html", "page.html", "text/html", html);
   return app.inject({
     method: "PUT",
@@ -1788,6 +2175,22 @@ async function publishHtmlWithToken(slug: string, html: string, token: string) {
     },
     payload: body.payload,
   });
+}
+
+async function finishPendingScans(): Promise<void> {
+  while (pendingScanCount() > 0) {
+    const result = await processNextPendingScan();
+    assert.equal(result.processed, true);
+    if (result.status === "pending") return;
+  }
+}
+
+async function waitForStalledScanner(): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (stalledScannerSockets.size > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Scanner request did not reach the stalled test server.");
 }
 
 function multipart(field: string, filename: string, mediaType: string, content: string | Buffer) {

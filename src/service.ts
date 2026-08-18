@@ -16,18 +16,17 @@ import {
 import { AppError } from "./errors.js";
 import { validateHtml } from "./html-policy.js";
 import { isFileId, randomFileId, randomPageSlug } from "./ids.js";
-import { cleanImage, isLikelyImage, withImageProcessingPermit } from "./image-cleaner.js";
+import { isLikelyImage } from "./image-cleaner.js";
 import {
   readStoredFile,
   removePage,
   removeStoredFile,
   removeUpload,
   sha256,
-  storePage,
-  storeUpload,
+  storeQuarantinedPage,
+  storeQuarantinedUpload,
   validateSlug,
 } from "./storage.js";
-import { scanStoredUpload, scanUpload } from "./virus-scanner.js";
 
 export interface PageSummary extends PageRow {
   version_count: number;
@@ -55,15 +54,19 @@ export interface PublishedPage {
   expiresAt: string | null;
   purgeAt: string | null;
   kind: PageKind;
+  scanStatus: "pending";
+  statusUrl: string;
 }
 
 export interface PublishedFile {
   id: string;
   filename: string;
   mediaType: string;
-  bytes: number;
-  sha256: string;
+  bytes: number | null;
+  sha256: string | null;
   publicUrl: string;
+  scanStatus: "pending";
+  statusUrl: string;
 }
 
 let metadataWriteQueue = Promise.resolve();
@@ -108,6 +111,7 @@ async function publishPageLocked(input: {
   isAdmin?: boolean;
   kind?: PageKind;
 }): Promise<PublishedPage> {
+  requireVirusScannerConfiguration();
   const slug = validateSlug(input.slug);
   if (input.html.length === 0) throw new AppError("HTML file is empty.", 422, "empty_file");
   if (input.html.length > config.maxPageBytes) {
@@ -159,17 +163,18 @@ async function publishPageLocked(input: {
   const prunable = existing
     ? (db()
         .prepare(
-          `SELECT storage_path, bytes FROM page_versions
-           WHERE page_id = ? ORDER BY version ASC
+          `SELECT id, storage_path, bytes FROM page_versions
+           WHERE page_id = ? AND scan_status != 'scanning' ORDER BY version ASC
            LIMIT MAX(0, (SELECT COUNT(*) + 1 - ? FROM page_versions WHERE page_id = ?))`,
         )
         .all(pageId, config.maxPageVersions, pageId) as unknown as Array<{
+        id: string;
         storage_path: string;
         bytes: number;
       }>)
     : [];
   assertStorageCapacity(input.html.length - prunable.reduce((total, row) => total + row.bytes, 0));
-  const storagePath = await storePage(slug, version, input.html);
+  const storagePath = await storeQuarantinedPage(slug, version, versionId, input.html);
   if (kind === "interactive" && !interactivePublisherActive(input.tokenId)) {
     await removeStoredFile(storagePath);
     throw new AppError(
@@ -201,21 +206,12 @@ async function publishPageLocked(input: {
     db()
       .prepare(
         `INSERT INTO page_versions
-         (id, page_id, version, storage_path, bytes, sha256, created_by_token_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (id, page_id, version, storage_path, bytes, sha256, created_by_token_id, scan_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
       )
       .run(versionId, pageId, version, storagePath, input.html.length, digest, input.tokenId);
-    if (prunable.length > 0) {
-      db()
-        .prepare(
-          `DELETE FROM page_versions
-           WHERE page_id = ? AND id IN (
-             SELECT id FROM page_versions WHERE page_id = ?
-             ORDER BY version ASC LIMIT ?
-           )`,
-        )
-        .run(pageId, pageId, prunable.length);
-    }
+    const removeVersion = db().prepare("DELETE FROM page_versions WHERE page_id = ? AND id = ?");
+    for (const row of prunable) removeVersion.run(pageId, row.id);
     db().exec("COMMIT");
   } catch (error) {
     db().exec("ROLLBACK");
@@ -237,6 +233,8 @@ async function publishPageLocked(input: {
     expiresAt,
     purgeAt,
     kind,
+    scanStatus: "pending",
+    statusUrl: `${config.baseUrl}/p/${slug}/${version}/status`,
   };
 }
 
@@ -264,10 +262,13 @@ export async function publishFile(
   tokenId: string,
   requestBytes?: number,
 ): Promise<PublishedFile> {
+  requireVirusScannerConfiguration();
   const id = randomFileId();
   const likelyImage = isLikelyImage(part.filename, part.mimetype);
   const reservationBytes = likelyImage
-    ? Math.min(config.maxFileBytes, config.maxPublishedImageBytes)
+    ? requestBytes && requestBytes > 0
+      ? Math.min(config.maxFileBytes, config.maxImageInputBytes, requestBytes)
+      : Math.min(config.maxFileBytes, config.maxImageInputBytes)
     : requestBytes && requestBytes > 0
       ? Math.min(config.maxFileBytes, requestBytes)
       : config.maxFileBytes;
@@ -280,45 +281,35 @@ export async function publishFile(
     | {
         filename: string;
         mediaType: string;
-        stored: Awaited<ReturnType<typeof storeUpload>>;
+        stored: Awaited<ReturnType<typeof storeQuarantinedUpload>>;
+        processAsImage: boolean;
       }
     | undefined;
 
   try {
     if (likelyImage) {
-      prepared = await withImageProcessingPermit(async () => {
-        const input = await readUploadBuffer(part.file, config.maxImageInputBytes);
-        await scanUpload(input);
-        const cleaned = await cleanImage(input);
-        if (cleaned.data.length > config.maxFileBytes) {
-          throw new AppError(
-            "Cleaned image exceeds the configured size limit.",
-            413,
-            "file_too_large",
-          );
-        }
-        const filename = `${id}.${cleaned.extension}`;
-        return {
-          filename,
-          mediaType: cleaned.mediaType,
-          stored: await storeUpload(id, filename, Readable.from([cleaned.data])),
-        };
-      });
+      const input = await readUploadBuffer(part.file, config.maxImageInputBytes);
+      const filename = `${id}.webp`;
+      prepared = {
+        filename,
+        mediaType: "image/webp",
+        stored: await storeQuarantinedUpload(id, filename, Readable.from([input])),
+        processAsImage: true,
+      };
     } else {
       const extension = neutralExtension(part.filename, part.mimetype);
       const filename = `${id}.${extension}`;
       const mediaType =
         (part.mimetype === "application/octet-stream" ? lookup(filename) : part.mimetype) ||
         "application/octet-stream";
-      const stored = await storeUpload(id, filename, part.file);
-      prepared = { filename, mediaType, stored };
+      const stored = await storeQuarantinedUpload(id, filename, part.file);
+      prepared = { filename, mediaType, stored, processAsImage: false };
       if (part.file.truncated) {
         throw new AppError("File exceeds the configured size limit.", 413, "file_too_large");
       }
-      await scanStoredUpload(stored.storagePath);
     }
 
-    const { filename, mediaType, stored } = prepared;
+    const { filename, mediaType, stored, processAsImage } = prepared;
     await serializeMetadataWrite(async () => {
       reservedStorageBytes -= reservationBytes;
       reservationActive = false;
@@ -326,10 +317,20 @@ export async function publishFile(
       db()
         .prepare(
           `INSERT INTO files
-           (id, filename, storage_path, media_type, bytes, sha256, created_by_token_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (id, filename, storage_path, media_type, bytes, sha256, created_by_token_id,
+            scan_status, process_as_image)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         )
-        .run(id, filename, stored.storagePath, mediaType, stored.bytes, stored.sha256, tokenId);
+        .run(
+          id,
+          filename,
+          stored.storagePath,
+          mediaType,
+          stored.bytes,
+          stored.sha256,
+          tokenId,
+          Number(processAsImage),
+        );
     });
   } catch (error) {
     if (reservationActive) {
@@ -347,9 +348,11 @@ export async function publishFile(
     id,
     filename,
     mediaType,
-    bytes: stored.bytes,
-    sha256: stored.sha256,
+    bytes: likelyImage ? null : stored.bytes,
+    sha256: likelyImage ? null : stored.sha256,
     publicUrl: filePublicUrl(filename),
+    scanStatus: "pending",
+    statusUrl: `${filePublicUrl(filename)}/status`,
   };
 }
 
@@ -584,7 +587,7 @@ async function deleteFileLocked(id: string): Promise<void> {
 export async function getPageVersion(
   slugValue: string,
   version?: number,
-): Promise<{ page: PageRow; version: PageVersionRow; html: Buffer } | null> {
+): Promise<{ page: PageRow; version: PageVersionRow; html: Buffer | null } | null> {
   const slug = validateSlug(slugValue);
   const page = db()
     .prepare(
@@ -600,6 +603,7 @@ export async function getPageVersion(
     .prepare("SELECT * FROM page_versions WHERE page_id = ? AND version = ?")
     .get(page.id, selectedVersion) as unknown as PageVersionRow | undefined;
   if (!row) return null;
+  if (row.scan_status !== "clean") return { page, version: row, html: null };
   try {
     return { page, version: row, html: await readStoredFile(row.storage_path) };
   } catch (error) {
@@ -745,4 +749,14 @@ function sqliteTimestamp(timestamp: number): string {
     .toISOString()
     .replace("T", " ")
     .replace(/\.\d{3}Z$/, "");
+}
+
+function requireVirusScannerConfiguration(): void {
+  if (!config.clamavHost) {
+    throw new AppError(
+      "Uploads are unavailable because the virus scanner is not configured.",
+      503,
+      "scanner_unavailable",
+    );
+  }
 }
