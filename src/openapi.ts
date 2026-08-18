@@ -29,12 +29,14 @@ export function openApiDocument() {
           parameters: [titleParameter, pageTypeParameter],
           requestBody: multipartBody("html", "text/html"),
           responses: {
-            "201": jsonResponse("Page published", { $ref: "#/components/schemas/PagePublication" }),
+            "202": jsonResponse("Page accepted for virus scanning", {
+              $ref: "#/components/schemas/PagePublication",
+            }),
             "401": errorResponse("Invalid upload token"),
             "413": errorResponse("HTML exceeds the configured size limit"),
             "429": errorResponse("Upload rate limit exceeded"),
             "422": errorResponse("Rejected HTML or invalid multipart input"),
-            "503": errorResponse("Publishing is locked or malware scanning is unavailable"),
+            "503": errorResponse("Publishing is locked or virus scanning is not configured"),
           },
         },
       },
@@ -49,10 +51,7 @@ export function openApiDocument() {
           parameters: [slugParameter, titleParameter, pageTypeParameter],
           requestBody: multipartBody("html", "text/html"),
           responses: {
-            "200": jsonResponse("New version published", {
-              $ref: "#/components/schemas/PagePublication",
-            }),
-            "201": jsonResponse("Page created at the requested slug", {
+            "202": jsonResponse("Page version accepted for virus scanning", {
               $ref: "#/components/schemas/PagePublication",
             }),
             "401": errorResponse("Missing or invalid upload token"),
@@ -61,7 +60,7 @@ export function openApiDocument() {
             "413": errorResponse("HTML exceeds the configured size limit"),
             "429": errorResponse("Upload rate limit exceeded"),
             "422": errorResponse("Rejected HTML, slug, title, or multipart input"),
-            "503": errorResponse("Publishing is locked or malware scanning is unavailable"),
+            "503": errorResponse("Publishing is locked or virus scanning is not configured"),
           },
         },
       },
@@ -70,6 +69,18 @@ export function openApiDocument() {
         slugParameter,
         versionParameter,
       ]),
+      "/p/{slug}/status": scanStatusRead(
+        "Pages",
+        "Read the latest page scan status",
+        "getPageStatus",
+        [slugParameter],
+      ),
+      "/p/{slug}/{version}/status": scanStatusRead(
+        "Pages",
+        "Read a page version scan status",
+        "getPageVersionStatus",
+        [slugParameter, versionParameter],
+      ),
       "/p/{slug}/raw": pageRead("Read the latest page source", "getLatestPageSource", [
         slugParameter,
       ]),
@@ -96,12 +107,14 @@ export function openApiDocument() {
           security: [{ bearerAuth: [] }],
           requestBody: multipartBody("file", "application/octet-stream"),
           responses: {
-            "201": jsonResponse("File published", { $ref: "#/components/schemas/FilePublication" }),
+            "202": jsonResponse("File accepted for virus scanning", {
+              $ref: "#/components/schemas/FilePublication",
+            }),
             "401": errorResponse("Missing or invalid upload token"),
             "413": errorResponse("File exceeds the configured size limit"),
             "429": errorResponse("Upload rate limit exceeded"),
             "422": errorResponse("Invalid multipart input"),
-            "503": errorResponse("Publishing is locked or malware scanning is unavailable"),
+            "503": errorResponse("Publishing is locked or virus scanning is not configured"),
           },
         },
       },
@@ -126,12 +139,17 @@ export function openApiDocument() {
           ],
           responses: {
             "200": binaryResponse("Published file"),
+            "202": htmlResponse("Virus scan in progress"),
             "206": binaryResponse("Requested byte range"),
+            "422": htmlResponse("Upload rejected by the virus scanner"),
             "404": errorResponse("File not found"),
             "416": errorResponse("Invalid or unsatisfiable range"),
           },
         },
       },
+      "/f/{filename}/status": scanStatusRead("Files", "Read a file scan status", "getFileStatus", [
+        filenameParameter,
+      ]),
       "/api/guides": {
         post: {
           tags: ["Guides"],
@@ -148,6 +166,12 @@ export function openApiDocument() {
                   properties: {
                     title: { type: "string", maxLength: 160 },
                     description: { type: "string", maxLength: 4000 },
+                    targetUrl: {
+                      type: "string",
+                      format: "uri",
+                      maxLength: 2000,
+                      description: "Destination linked from the published guide.",
+                    },
                     language: { type: "string" },
                   },
                 },
@@ -331,6 +355,8 @@ export function openApiDocument() {
               type: ["string", "null"],
               description: "UTC SQLite timestamp for anonymous-page retention, otherwise null.",
             },
+            scanStatus: { const: "pending" },
+            statusUrl: { type: "string", format: "uri" },
           },
           [
             "slug",
@@ -345,6 +371,8 @@ export function openApiDocument() {
             "versionRawUrl",
             "expiresAt",
             "purgeAt",
+            "scanStatus",
+            "statusUrl",
           ],
         ),
         FilePublication: objectSchema(
@@ -352,17 +380,44 @@ export function openApiDocument() {
             id: { type: "string" },
             filename: { type: "string" },
             mediaType: { type: "string" },
-            bytes: { type: "integer", minimum: 0 },
-            sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+            bytes: {
+              type: ["integer", "null"],
+              minimum: 0,
+              description: "Null while an image is awaiting conversion.",
+            },
+            sha256: {
+              type: ["string", "null"],
+              pattern: "^[a-f0-9]{64}$",
+              description: "Null while an image is awaiting conversion.",
+            },
             publicUrl: { type: "string", format: "uri" },
+            scanStatus: { const: "pending" },
+            statusUrl: { type: "string", format: "uri" },
           },
-          ["id", "filename", "mediaType", "bytes", "sha256", "publicUrl"],
+          [
+            "id",
+            "filename",
+            "mediaType",
+            "bytes",
+            "sha256",
+            "publicUrl",
+            "scanStatus",
+            "statusUrl",
+          ],
+        ),
+        ScanStatus: objectSchema(
+          {
+            scanStatus: { enum: ["pending", "scanning", "clean", "rejected"] },
+            message: { type: "string" },
+          },
+          ["scanStatus"],
         ),
         Guide: objectSchema(
           {
             schemaVersion: { const: 1 },
             slug: { type: "string", pattern: "^[a-z2-7]{12}$" },
             title: { type: "string" },
+            targetUrl: { type: ["string", "null"], format: "uri" },
             status: { enum: ["recording", "draft", "published"] },
             revision: { type: "integer", minimum: 0 },
             editRevision: { type: "integer", minimum: 1 },
@@ -399,6 +454,13 @@ const versionParameter = {
   in: "path",
   required: true,
   schema: { type: "integer", minimum: 1 },
+} as const;
+
+const filenameParameter = {
+  name: "filename",
+  in: "path",
+  required: true,
+  schema: { type: "string" },
 } as const;
 
 const stepIdParameter = {
@@ -467,6 +529,13 @@ function binaryResponse(description: string) {
   };
 }
 
+function htmlResponse(description: string) {
+  return {
+    description,
+    content: { "text/html": { schema: { type: "string" } } },
+  };
+}
+
 function pageRead(summary: string, operationId: string, parameters: readonly object[]) {
   return {
     get: {
@@ -479,10 +548,34 @@ function pageRead(summary: string, operationId: string, parameters: readonly obj
           description: "Published HTML",
           content: { "text/html": { schema: { type: "string" } } },
         },
+        "202": htmlResponse("Virus scan in progress"),
+        "422": htmlResponse("Upload rejected by the virus scanner"),
         "404": {
           description: "Page not found or no longer public",
           content: { "text/html": { schema: { type: "string" } } },
         },
+      },
+    },
+  };
+}
+
+function scanStatusRead(
+  tag: "Pages" | "Files",
+  summary: string,
+  operationId: string,
+  parameters: readonly object[],
+) {
+  return {
+    get: {
+      tags: [tag],
+      summary,
+      operationId,
+      parameters,
+      responses: {
+        "200": jsonResponse("Scan completed", { $ref: "#/components/schemas/ScanStatus" }),
+        "202": jsonResponse("Scan pending", { $ref: "#/components/schemas/ScanStatus" }),
+        "404": errorResponse("Publication not found"),
+        "422": jsonResponse("Upload rejected", { $ref: "#/components/schemas/ScanStatus" }),
       },
     },
   };

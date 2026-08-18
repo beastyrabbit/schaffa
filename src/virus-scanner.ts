@@ -1,4 +1,3 @@
-import { once } from "node:events";
 import net from "node:net";
 import type { Readable } from "node:stream";
 import { config } from "./config.js";
@@ -6,13 +5,50 @@ import { AppError } from "./errors.js";
 import { openStoredFile } from "./storage.js";
 
 const chunkBytes = 64 * 1024;
+let synchronousScanDemands = 0;
 
 export async function scanUpload(data: Buffer): Promise<void> {
-  await scan(data);
+  if (!config.clamavHost) {
+    throw new AppError(
+      "Uploads are unavailable because the virus scanner is not configured.",
+      503,
+      "scanner_unavailable",
+    );
+  }
+  synchronousScanDemands += 1;
+  const deadline = Date.now() + config.clamavWakeTimeoutMs;
+  try {
+    while (true) {
+      try {
+        await scan(data);
+        return;
+      } catch (error) {
+        if (
+          !(error instanceof AppError) ||
+          error.code !== "scanner_unavailable" ||
+          Date.now() >= deadline
+        ) {
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
+    }
+  } finally {
+    synchronousScanDemands -= 1;
+  }
+}
+
+export function synchronousScanDemandCount(): number {
+  return synchronousScanDemands;
 }
 
 export async function scanStoredUpload(storagePath: string): Promise<void> {
-  await scan(openStoredFile(storagePath));
+  const input = openStoredFile(storagePath);
+  try {
+    await scan(input);
+  } finally {
+    input.destroy();
+  }
 }
 
 async function scan(data: Buffer | Readable): Promise<void> {
@@ -32,7 +68,19 @@ async function scan(data: Buffer | Readable): Promise<void> {
     );
   });
   if (/\bFOUND\b/.test(response)) {
-    throw new AppError("The upload was rejected by the virus scanner.", 422, "malware_detected");
+    const signature = malwareSignature(response);
+    throw new AppError(
+      signature ? `Rejected by the virus scanner: ${signature}.` : "Rejected by the virus scanner.",
+      422,
+      "malware_detected",
+    );
+  }
+  if (/\bERROR\b/.test(response)) {
+    throw new AppError(
+      "Rejected because the virus scanner could not safely scan this upload.",
+      422,
+      "scan_rejected",
+    );
   }
   if (!/\bOK\b/.test(response)) {
     throw new AppError(
@@ -41,6 +89,11 @@ async function scan(data: Buffer | Readable): Promise<void> {
       "scanner_unavailable",
     );
   }
+}
+
+function malwareSignature(response: string): string | null {
+  const match = /:\s*([A-Za-z0-9._-]{1,120})\s+FOUND\b/.exec(response);
+  return match?.[1] || null;
 }
 
 function sendInstream(data: Buffer | Readable): Promise<string> {
@@ -90,5 +143,28 @@ async function writeInstream(socket: net.Socket, data: Buffer | Readable): Promi
 }
 
 async function writeChunk(socket: net.Socket, chunk: Buffer): Promise<void> {
-  if (!socket.write(chunk)) await once(socket, "drain");
+  if (socket.destroyed) throw new Error("Virus scanner connection closed.");
+  if (socket.write(chunk)) return;
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      socket.off("drain", onDrain);
+      socket.off("close", onClose);
+      socket.off("error", onError);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error("Virus scanner connection closed."));
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    socket.once("drain", onDrain);
+    socket.once("close", onClose);
+    socket.once("error", onError);
+  });
 }

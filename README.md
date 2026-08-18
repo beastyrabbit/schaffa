@@ -20,7 +20,7 @@ Schaffa is heavily inspired by [PostPlan](https://postplan.dev) and [UploadThing
 - Accepts new anonymous HTML pages for one hour; tokens make pages permanent and enable files or updates.
 - Lets users sign in through Shoo and issue revocable upload tokens for their own agents.
 - Lets administrators enable sandboxed interactive pages only for explicitly trusted users.
-- Scans every upload with an isolated ClamAV service and never executes uploaded content.
+- Returns a stable URL immediately, scans page/file uploads asynchronously, and never exposes unscanned bytes.
 
 ## Pangolin access model
 
@@ -30,9 +30,10 @@ Everything is served from one origin and one container on port `3000`:
 | --- | --- |
 | `https://schaffa.dev/admin` | Pangolin login, then a Schaffa admin token |
 | `https://schaffa.dev/api/*` | Direct access; writes and management require bearer tokens |
+| `https://schaffa.dev/skills`, `/skills/*/SKILL.md`, `/llm.txt`, and `/llms.txt` | Direct public access for agent examples and discovery |
 | `https://schaffa.dev/p/*` and `/f/*` | Direct public access |
 
-Configure Pangolin path rules to bypass its login for the supported `/api/*`, `/p/*`, and `/f/*` routes. All paths use the same hostname; Schaffa rejects application traffic sent with a different host.
+Configure Pangolin path rules to bypass its login for the supported `/api/*`, `/skills`, `/skills/*/*`, `/llm.txt`, `/llms.txt`, `/p/*`, and `/f/*` routes. All paths use the same hostname; Schaffa rejects application traffic sent with a different host.
 
 See [Deployment](docs/deployment.md) for the complete routing and runtime configuration.
 
@@ -69,7 +70,7 @@ npx schaffa upload ./plan.html
 Record a workflow while it happens:
 
 ```sh
-npx schaffa guide start --title "Create a project"
+npx schaffa guide start --title "Create a project" --url "https://app.example.com/projects"
 npx schaffa guide step --title "Open projects" --text "Open the project list."
 npx schaffa guide finish
 npx schaffa guide publish

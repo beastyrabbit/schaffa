@@ -4,7 +4,7 @@ Schaffa treats a guide as a server-side recording and a presentation as a render
 
 ## Guide lifecycle
 
-1. `POST /api/guides` allocates a random 12-character slug in `recording` state.
+1. `POST /api/guides` allocates a random 12-character slug in `recording` state. Its optional `targetUrl` becomes the “Ziel öffnen” link in the published guide.
 2. `POST /api/guides/:slug/steps` appends JSON and an optional screenshot immediately.
 3. Mutations use the current `editRevision` in `If-Match`; stale writes return `409 edit_conflict`.
 4. Step creation accepts an `Idempotency-Key` and replays its original response on retry.

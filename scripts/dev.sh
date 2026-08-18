@@ -19,7 +19,6 @@ command -v node >/dev/null 2>&1 || {
 }
 
 export SCHAFFA_DATA_DIR="${SCHAFFA_DATA_DIR:-./data/local}"
-export SCHAFFA_BASE_URL="${SCHAFFA_BASE_URL:-http://schaffa.localhost:1355}"
 export SCHAFFA_TOKEN_PEPPER="${SCHAFFA_TOKEN_PEPPER:-$(openssl rand -hex 32)}"
 export SCHAFFA_BOOTSTRAP_TOKEN="${SCHAFFA_BOOTSTRAP_TOKEN:-sfa_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')}"
 export CLAMAV_HOST="${CLAMAV_HOST:-127.0.0.1}"
@@ -29,13 +28,21 @@ if [ -z "${CLAMAV_DEV_PORT:-}" ]; then
 fi
 export CLAMAV_PORT="${CLAMAV_PORT:-$CLAMAV_DEV_PORT}"
 
+dev_compose() {
+  # Compose interpolates every service before selecting clamav. Keep its
+  # production-only requirements scoped away from the local application.
+  SCHAFFA_IMAGE="${SCHAFFA_IMAGE:-schaffa-local-dev}" \
+    SCHAFFA_BASE_URL="${SCHAFFA_BASE_URL:-http://schaffa.localhost:1355}" \
+    docker compose -p schaffa-dev "$@"
+}
+
 cleanup() {
-  docker compose -p schaffa-dev stop clamav >/dev/null 2>&1 || true
+  dev_compose stop clamav >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
-docker compose -p schaffa-dev up -d clamav
-scanner_id="$(docker compose -p schaffa-dev ps -q clamav)"
+dev_compose up -d clamav
+scanner_id="$(dev_compose ps -q clamav)"
 attempt=0
 while [ "$(docker inspect --format '{{.State.Health.Status}}' "$scanner_id" 2>/dev/null || true)" != "healthy" ]; do
   attempt=$((attempt + 1))
@@ -49,6 +56,6 @@ done
 echo "Local Schaffa admin token (valid for this run):"
 echo "$SCHAFFA_BOOTSTRAP_TOKEN"
 echo
-echo "Open http://schaffa.localhost:1355/admin and sign in with this token."
+echo "Open the /admin path of the Portless URL printed below and sign in with this token."
 
 portless

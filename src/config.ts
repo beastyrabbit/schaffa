@@ -77,6 +77,7 @@ export const config = {
   clamavHost: process.env.CLAMAV_HOST || "",
   clamavPort: boundedInteger("CLAMAV_PORT", 3310, 1, 65535),
   clamavTimeoutMs: boundedInteger("CLAMAV_TIMEOUT_MS", 15_000, 1000, 120_000),
+  clamavWakeTimeoutMs: boundedInteger("CLAMAV_WAKE_TIMEOUT_MS", 120_000, 1000, 600_000),
   logLevel: process.env.LOG_LEVEL || "info",
   cookieSecure: new URL(baseUrl).protocol === "https:",
 };

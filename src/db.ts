@@ -5,6 +5,7 @@ import { config } from "./config.js";
 
 export type TokenScope = "upload" | "interactive" | "admin";
 export type PageKind = "static" | "interactive";
+export type ScanStatus = "pending" | "scanning" | "clean" | "rejected";
 
 export interface TokenRow {
   id: string;
@@ -50,6 +51,10 @@ export interface PageVersionRow {
   sha256: string;
   created_by_token_id: string;
   created_at: string;
+  scan_status: ScanStatus;
+  scan_message: string | null;
+  scan_attempted_at: string | null;
+  scanned_at: string | null;
 }
 
 export interface FileRow {
@@ -61,6 +66,11 @@ export interface FileRow {
   sha256: string;
   created_by_token_id: string;
   created_at: string;
+  scan_status: ScanStatus;
+  scan_message: string | null;
+  scan_attempted_at: string | null;
+  scanned_at: string | null;
+  process_as_image: number;
 }
 
 export type GuideStatus = "recording" | "draft" | "published";
@@ -70,6 +80,7 @@ export interface GuideRow {
   slug: string;
   title: string;
   description: string | null;
+  target_url: string | null;
   language: string;
   status: GuideStatus;
   owner_token_id: string;
@@ -162,6 +173,11 @@ export function db(): DatabaseSync {
       sha256 TEXT NOT NULL,
       created_by_token_id TEXT NOT NULL REFERENCES tokens(id),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      scan_status TEXT NOT NULL DEFAULT 'clean'
+        CHECK(scan_status IN ('pending','scanning','clean','rejected')),
+      scan_message TEXT,
+      scan_attempted_at TEXT,
+      scanned_at TEXT,
       UNIQUE(page_id, version)
     ) STRICT;
 
@@ -173,7 +189,13 @@ export function db(): DatabaseSync {
       bytes INTEGER NOT NULL,
       sha256 TEXT NOT NULL,
       created_by_token_id TEXT NOT NULL REFERENCES tokens(id),
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      scan_status TEXT NOT NULL DEFAULT 'clean'
+        CHECK(scan_status IN ('pending','scanning','clean','rejected')),
+      scan_message TEXT,
+      scan_attempted_at TEXT,
+      scanned_at TEXT,
+      process_as_image INTEGER NOT NULL DEFAULT 0 CHECK(process_as_image IN (0,1))
     ) STRICT;
 
     CREATE TABLE IF NOT EXISTS instance_settings (
@@ -201,6 +223,7 @@ export function db(): DatabaseSync {
       slug TEXT NOT NULL UNIQUE,
       title TEXT NOT NULL,
       description TEXT,
+      target_url TEXT,
       language TEXT NOT NULL DEFAULT 'de',
       status TEXT NOT NULL DEFAULT 'recording' CHECK(status IN ('recording','draft','published')),
       owner_token_id TEXT NOT NULL REFERENCES tokens(id),
@@ -308,6 +331,59 @@ export function db(): DatabaseSync {
   }
   if (!pageColumns.some((column) => column.name === "kind")) {
     database.exec("ALTER TABLE pages ADD COLUMN kind TEXT NOT NULL DEFAULT 'static'");
+  }
+
+  const pageVersionColumns = database
+    .prepare("PRAGMA table_info(page_versions)")
+    .all() as unknown as Array<{ name: string }>;
+  if (!pageVersionColumns.some((column) => column.name === "scan_status")) {
+    database.exec(
+      "ALTER TABLE page_versions ADD COLUMN scan_status TEXT NOT NULL DEFAULT 'clean' CHECK(scan_status IN ('pending','scanning','clean','rejected'))",
+    );
+  }
+  if (!pageVersionColumns.some((column) => column.name === "scan_message")) {
+    database.exec("ALTER TABLE page_versions ADD COLUMN scan_message TEXT");
+  }
+  if (!pageVersionColumns.some((column) => column.name === "scan_attempted_at")) {
+    database.exec("ALTER TABLE page_versions ADD COLUMN scan_attempted_at TEXT");
+  }
+  if (!pageVersionColumns.some((column) => column.name === "scanned_at")) {
+    database.exec("ALTER TABLE page_versions ADD COLUMN scanned_at TEXT");
+  }
+
+  const fileColumns = database.prepare("PRAGMA table_info(files)").all() as unknown as Array<{
+    name: string;
+  }>;
+  if (!fileColumns.some((column) => column.name === "scan_status")) {
+    database.exec(
+      "ALTER TABLE files ADD COLUMN scan_status TEXT NOT NULL DEFAULT 'clean' CHECK(scan_status IN ('pending','scanning','clean','rejected'))",
+    );
+  }
+  if (!fileColumns.some((column) => column.name === "scan_message")) {
+    database.exec("ALTER TABLE files ADD COLUMN scan_message TEXT");
+  }
+  if (!fileColumns.some((column) => column.name === "scan_attempted_at")) {
+    database.exec("ALTER TABLE files ADD COLUMN scan_attempted_at TEXT");
+  }
+  if (!fileColumns.some((column) => column.name === "scanned_at")) {
+    database.exec("ALTER TABLE files ADD COLUMN scanned_at TEXT");
+  }
+  if (!fileColumns.some((column) => column.name === "process_as_image")) {
+    database.exec(
+      "ALTER TABLE files ADD COLUMN process_as_image INTEGER NOT NULL DEFAULT 0 CHECK(process_as_image IN (0,1))",
+    );
+  }
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS page_versions_scan_idx
+      ON page_versions(scan_status, created_at);
+    CREATE INDEX IF NOT EXISTS files_scan_idx ON files(scan_status, created_at);
+  `);
+
+  const guideColumns = database.prepare("PRAGMA table_info(guides)").all() as unknown as Array<{
+    name: string;
+  }>;
+  if (!guideColumns.some((column) => column.name === "target_url")) {
+    database.exec("ALTER TABLE guides ADD COLUMN target_url TEXT");
   }
   database.exec(`
     UPDATE pages

@@ -202,7 +202,12 @@ test("drives the incremental guide API with revisions and authorization", async 
       200,
     );
   };
-  const started = await startGuide({ title: "Guide", token, fetch: fakeFetch });
+  const started = await startGuide({
+    title: "Guide",
+    targetUrl: "https://app.example.com/projects",
+    token,
+    fetch: fakeFetch,
+  });
   const stepped = await addGuideStep({
     slug: started.slug,
     editRevision: started.editRevision,
@@ -225,6 +230,7 @@ test("drives the incremental guide API with revisions and authorization", async 
   });
   assert.equal(requests.length, 4);
   assert.equal(requests[0].init.headers.get("Authorization"), `Bearer ${token}`);
+  assert.equal(JSON.parse(requests[0].init.body).targetUrl, "https://app.example.com/projects");
   assert.equal(requests[1].init.headers.get("If-Match"), "1");
   assert.match(requests[1].init.headers.get("Idempotency-Key"), /^cli-/);
   assert.equal(requests[2].url, "https://schaffa.dev/api/guides/abc234def567/finish");
