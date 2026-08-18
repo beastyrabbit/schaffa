@@ -798,6 +798,11 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
     /class="target-link" href="https:\/\/app\.example\.com\/projects\?view=active&amp;sort=name"/,
   );
   assert.match(publicGuide.body, /Ziel öffnen/);
+  assert.match(
+    publicGuide.body,
+    /class="step-action-link" href="https:\/\/app\.example\.com\/projects" target="_blank" rel="noopener noreferrer" aria-label="Seite öffnen \(neuer Tab\)">Seite öffnen/,
+  );
+  assert.doesNotMatch(publicGuide.body, /<code>navigate<\/code>/);
   assert.doesNotMatch(publicGuide.body, /<script|<form|onclick=/i);
   assert.match(String(publicGuide.headers["content-security-policy"]), /script-src 'none'/);
   const publicImage = await app.inject({
