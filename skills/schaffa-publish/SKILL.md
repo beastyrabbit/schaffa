@@ -31,6 +31,8 @@ Use Marp Markdown as the canonical source. The CLI renders the `bare` template, 
 npx schaffa publish deck.md --kind presentation --export pdf --export pptx --json
 ```
 
+Requested PDF and PowerPoint files are linked directly from the published presentation.
+
 Keep images local to the deck and do not reference CDNs or external fonts. The HTML page remains usable through CSS scroll snap with Schaffa's `script-src 'none'` policy.
 
 ## Publish a page

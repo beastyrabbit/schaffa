@@ -17,7 +17,7 @@ The preflight blocks empty guides, incomplete visible steps, and likely tokens, 
 
 ## Presentation pipeline
 
-`schaffa publish deck.md --kind presentation` uses Marp's `bare` renderer. Marp currently emits a small auto-scaling runtime even for this template, so the CLI removes all scripts and rejects active or external content before uploading the HTML through the existing page validator. CSS scroll snap preserves native slide-by-slide navigation without weakening Schaffa's CSP. The Markdown source remains canonical, while PDF and PPTX are optional immutable file uploads.
+`schaffa publish deck.md --kind presentation` uses Marp's `bare` renderer. Marp currently emits a small auto-scaling runtime even for this template, so the CLI removes all scripts and rejects active or external content before uploading the HTML through the existing page validator. CSS scroll snap preserves native slide-by-slide navigation without weakening Schaffa's CSP. The Markdown source remains canonical, while PDF and PPTX are optional immutable file uploads. When either format is requested with `--export`, the CLI adds same-origin download links for the generated files to the published deck. The links need no JavaScript and are omitted from printing.
 
 Local images are allowed during rendering. Do not put remote fonts, CDNs, or external image URLs in a deck; the CLI rejects the resulting HTML. PDF/PPTX exports require a supported local Chromium installation used by Marp.
 

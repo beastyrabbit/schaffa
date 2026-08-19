@@ -53,6 +53,7 @@ const mediaTypes = new Map([
   [".mp4", "video/mp4"],
   [".pdf", "application/pdf"],
   [".png", "image/png"],
+  [".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
   [".svg", "image/svg+xml"],
   [".txt", "text/plain"],
   [".webm", "video/webm"],

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { parseCliArgs } from "../dist/cli.js";
+import { addPresentationDownloads, parseCliArgs } from "../dist/cli.js";
 import { addGuideStep, finishGuide, publishGuide, startGuide, upload } from "../dist/client.js";
 
 const token = `sfa_${"a".repeat(43)}`;
@@ -74,6 +74,44 @@ test("runs when the package binary points to the CLI through a symlink", async (
   assert.equal(stderr, "");
 });
 
+test("adds same-origin PDF and PowerPoint downloads to a presentation", () => {
+  const html =
+    "<!doctype html><html><head><title>Deck</title></head><body><main>Slides</main></body></html>";
+  const published = addPresentationDownloads(
+    html,
+    {
+      pdf: "https://schaffa.dev/f/deck.pdf",
+      pptx: "https://schaffa.dev/f/deck.pptx",
+      source: "https://schaffa.dev/f/deck.md",
+    },
+    "https://schaffa.dev",
+  );
+
+  assert.match(published, /id="schaffa-presentation-download-styles"/);
+  assert.match(published, /aria-label="Download presentation"/);
+  assert.match(published, /href="\/f\/deck\.pdf" download/);
+  assert.match(published, /href="\/f\/deck\.pptx" download/);
+  assert.doesNotMatch(published, /href="https:\/\//);
+  assert.doesNotMatch(published, /deck\.md/);
+  assert.ok(published.indexOf("<style") < published.indexOf("</head>"));
+  assert.ok(published.indexOf("<nav") < published.indexOf("</body>"));
+});
+
+test("leaves presentations without PDF or PowerPoint exports unchanged", () => {
+  const html = "<!doctype html><html><head></head><body>Slides</body></html>";
+  assert.equal(addPresentationDownloads(html, { source: "https://schaffa.dev/f/deck.md" }), html);
+});
+
+test("rejects presentation download links from another origin", () => {
+  assert.throws(
+    () =>
+      addPresentationDownloads("<!doctype html><html><head></head><body>Slides</body></html>", {
+        pdf: "https://files.example.com/deck.pdf",
+      }),
+    /another origin/,
+  );
+});
+
 test("rejects the removed slug option and always creates through the random-ID endpoint", async () => {
   assert.throws(
     () => parseCliArgs(["upload", "plan.html", "--slug", "readable-name"]),
@@ -133,6 +171,25 @@ test("uploads non-HTML content through the file endpoint", async () => {
 
   assert.equal(requests[0].url, "https://schaffa.dev/api/files");
   assert.equal(requests[0].init.body.get("file").type, "image/png");
+});
+
+test("uploads PowerPoint exports with the official media type", async () => {
+  const filePath = path.join(directory, "presentation.pptx");
+  await writeFile(filePath, Buffer.from([1, 2, 3]));
+  const requests = [];
+  await upload({
+    filePath,
+    token,
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return jsonResponse({ publicUrl: "https://schaffa.dev/f/random.pptx" }, 201);
+    },
+  });
+
+  assert.equal(
+    requests[0].init.body.get("file").type,
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  );
 });
 
 test("reports API errors without exposing the bearer token", async () => {

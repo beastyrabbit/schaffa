@@ -186,6 +186,12 @@ async function runPresentation(args: string[]): Promise<void> {
   }
   const token = values.token || process.env.SCHAFFA_TOKEN;
   if (!token) throw new Error("SCHAFFA_TOKEN is required for presentation publishing.");
+  const exportKinds = [...new Set(values.export || [])];
+  for (const kind of exportKinds) {
+    if (!new Set(["pdf", "pptx"]).has(kind)) {
+      throw new Error(`Unsupported presentation export: ${kind}.`);
+    }
+  }
   const output = await mkdtemp(path.join(os.tmpdir(), "schaffa-presentation-"));
   try {
     const html = path.join(output, "presentation.html");
@@ -204,16 +210,13 @@ async function runPresentation(args: string[]): Promise<void> {
     if (/<script\b|<form\b|\son[a-z]+\s*=|(?:src|href)\s*=\s*["']https?:\/\//i.test(staticHtml)) {
       throw new Error("Rendered presentation contains active or external content.");
     }
-    await writeFile(html, staticHtml);
+    const baseUrl = process.env.SCHAFFA_URL || "https://schaffa.dev";
     const uploadCommon = {
       token,
       ...(process.env.SCHAFFA_URL ? { baseUrl: process.env.SCHAFFA_URL } : {}),
     };
-    const page = await upload({ filePath: html, ...uploadCommon });
     const exports: Record<string, string> = {};
-    for (const kind of values.export || []) {
-      if (!new Set(["pdf", "pptx"]).has(kind))
-        throw new Error(`Unsupported presentation export: ${kind}.`);
+    for (const kind of exportKinds) {
       const artifact = path.join(output, `presentation.${kind}`);
       await execFileAsync(process.execPath, [
         marp,
@@ -227,11 +230,100 @@ async function runPresentation(args: string[]): Promise<void> {
       exports[kind] = (await upload({ filePath: artifact, ...uploadCommon })).publicUrl;
     }
     exports.source = (await upload({ filePath: source, ...uploadCommon })).publicUrl;
+    const publishedHtml = addPresentationDownloads(staticHtml, exports, baseUrl);
+    if (
+      /<script\b|<form\b|\son[a-z]+\s*=|(?:src|href)\s*=\s*["']https?:\/\//i.test(publishedHtml)
+    ) {
+      throw new Error("Rendered presentation contains active or external content.");
+    }
+    await writeFile(html, publishedHtml);
+    const page = await upload({ filePath: html, ...uploadCommon });
     const result = { ...page, kind: "presentation", exports };
     process.stdout.write(values.json ? `${JSON.stringify(result)}\n` : `${result.publicUrl}\n`);
   } finally {
     await rm(output, { recursive: true, force: true });
   }
+}
+
+export function addPresentationDownloads(
+  html: string,
+  exports: Record<string, string>,
+  baseUrl = "https://schaffa.dev",
+): string {
+  const formats = [
+    { key: "pdf", label: "PDF" },
+    { key: "pptx", label: "PowerPoint" },
+  ].filter(({ key }) => typeof exports[key] === "string");
+  if (formats.length === 0) return html;
+
+  const origin = presentationOrigin(baseUrl);
+  const links = formats
+    .map(({ key, label }) => {
+      const href = presentationExportPath(exports[key] as string, origin);
+      return `<a href="${escapeHtmlAttribute(href)}" download aria-label="Download ${label}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1v9m0 0 3-3m-3 3L5 7M3 13h10"/></svg><span>${label}</span></a>`;
+    })
+    .join("");
+  const style = `<style id="schaffa-presentation-download-styles">
+.schaffa-presentation-downloads{position:fixed;z-index:2147483647;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));display:flex;gap:2px;padding:4px;border:1px solid rgba(255,255,255,.2);border-radius:9px;background:#24231f;color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.24);font:600 12px/1 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;opacity:.82;transition:opacity 120ms ease}
+.schaffa-presentation-downloads:hover,.schaffa-presentation-downloads:focus-within{opacity:1}
+.schaffa-presentation-downloads a{display:flex;min-height:30px;align-items:center;gap:6px;padding:0 9px;border-radius:6px;color:inherit;text-decoration:none;white-space:nowrap}
+.schaffa-presentation-downloads a:hover{background:rgba(255,255,255,.12)}
+.schaffa-presentation-downloads a:focus-visible{outline:2px solid #fff;outline-offset:1px}
+.schaffa-presentation-downloads svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.6}
+@media(max-width:480px){.schaffa-presentation-downloads{top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right))}.schaffa-presentation-downloads a{padding:0 7px}}
+@media print{.schaffa-presentation-downloads{display:none}}
+</style>`;
+  const navigation = `<nav class="schaffa-presentation-downloads" aria-label="Download presentation">${links}</nav>`;
+  if (!/<\/head>/i.test(html) || !/<\/body>/i.test(html)) {
+    throw new Error("Rendered presentation is missing a complete HTML document.");
+  }
+  return html.replace(/<\/head>/i, `${style}</head>`).replace(/<\/body>/i, `${navigation}</body>`);
+}
+
+function presentationOrigin(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("SCHAFFA_URL must be a valid HTTP or HTTPS origin.");
+  }
+  if (
+    !["http:", "https:"].includes(parsed.protocol) ||
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== "/" ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error("SCHAFFA_URL must be an HTTP or HTTPS origin without a path or credentials.");
+  }
+  return parsed.origin;
+}
+
+function presentationExportPath(value: string, origin: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("Schaffa returned an invalid presentation export URL.");
+  }
+  if (parsed.origin !== origin) {
+    throw new Error("Schaffa returned a presentation export URL from another origin.");
+  }
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character] as string;
+  });
 }
 
 const sessionPath = () => path.resolve(".schaffa/guide-session.json");

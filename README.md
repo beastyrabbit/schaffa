@@ -82,6 +82,9 @@ Publish a Marp presentation and its export artifacts:
 npx schaffa publish deck.md --kind presentation --export pdf --export pptx
 ```
 
+Requested PDF and PowerPoint exports appear as download links in the published presentation.
+Omit either `--export` option when that format should not be generated.
+
 The CLI defaults to `https://schaffa.dev`. Every new HTML page receives a random, non-semantic ID. New HTML pages work without a token and disappear after one hour. For permanent pages, files, presentations, and guides, set `SCHAFFA_TOKEN` or pass `--token <token>` directly.
 
 Trusted users can create a separate Interactive token in their account and publish inline JavaScript with `npx schaffa upload ./plan.html --interactive`. Visitors see a warning before the code runs in a sandbox without network, storage, forms, pop-ups, or navigation.
