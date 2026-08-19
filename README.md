@@ -70,9 +70,34 @@ npx schaffa upload ./plan.html
 Record a workflow while it happens:
 
 ```sh
+npx schaffa record --title "Create a project" --browser "https://app.example.com/projects"
+npx schaffa record --title "Configure Calculator" --desktop --app com.apple.calculator
+```
+
+Browser mode opens a dedicated Chrome, Edge, or Chromium window. Desktop mode
+records only the native macOS app selected by bundle ID and needs one-time
+Accessibility and Screen Recording permission. Every primary click is captured before the UI changes,
+highlighted, saved locally under `.schaffa/recordings/<slug>/`, and uploaded
+immediately as an incremental guide step. Close the browser or press Ctrl+C to
+stop. `Alt+Shift+R` pauses capture for private screens. If the network fails,
+the local manifest remains recoverable with `npx schaffa guide sync`.
+
+Manual recording remains available for terminal, API, and mixed workflows:
+
+```sh
 npx schaffa guide start --title "Create a project" --url "https://app.example.com/projects"
 npx schaffa guide step --title "Open projects" --text "Open the project list."
 npx schaffa guide finish
+npx schaffa guide publish
+```
+
+Inspect and correct the active recording before publication:
+
+```sh
+npx schaffa guide status --json
+npx schaffa guide edit-step --step 2 --title "Choose New project" --text "Select New project."
+npx schaffa guide replace-screenshot --step 2 --screenshot ./correct-step.png
+npx schaffa guide delete-step --step 3
 npx schaffa guide publish
 ```
 

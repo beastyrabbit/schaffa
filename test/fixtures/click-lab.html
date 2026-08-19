@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Schaffa Click Lab</title>
+    <style>
+      :root {
+        --paper: #f4f0e7;
+        --ink: #1d211d;
+        --muted: #65695f;
+        --line: #b9b6aa;
+        --signal: #d8422f;
+        --signal-dark: #9c2d20;
+        --panel: #fffdf7;
+        --green: #1e6748;
+        font-family: Avenir Next, Avenir, Gill Sans, sans-serif;
+        color: var(--ink);
+        background: var(--paper);
+      }
+
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; }
+      button, input, select { font: inherit; }
+      button, select, input { min-height: 42px; border: 1px solid var(--ink); border-radius: 7px; }
+      button { padding: 9px 14px; background: var(--panel); color: var(--ink); cursor: pointer; }
+      button:hover { border-color: var(--signal); }
+      button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #e9ae31; outline-offset: 2px; }
+      button.primary { background: var(--signal); border-color: var(--signal-dark); color: white; font-weight: 700; }
+
+      header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+        gap: 24px;
+        padding: 32px clamp(20px, 5vw, 72px) 25px;
+        border-bottom: 3px solid var(--ink);
+        background: var(--panel);
+      }
+      h1 { margin: 0; font: 800 clamp(34px, 5vw, 62px)/0.95 Georgia, serif; letter-spacing: -0.045em; }
+      header p { max-width: 520px; margin: 12px 0 0; color: var(--muted); }
+      .run-id { font: 700 12px/1.4 ui-monospace, monospace; text-align: right; }
+
+      main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: calc(100vh - 151px); }
+      .bench { padding: 34px clamp(20px, 5vw, 72px) 120px; }
+      .log { border-left: 1px solid var(--line); padding: 28px 22px; background: #e8e4da; }
+      #events { margin: 0; padding-left: 22px; font: 12px/1.7 ui-monospace, monospace; }
+      #events li:first-child { color: var(--green); font-weight: 800; }
+
+      section { padding: 28px 0 34px; border-bottom: 1px solid var(--line); }
+      section h2 { margin: 0 0 8px; font: 700 25px/1.1 Georgia, serif; }
+      section > p { margin: 0 0 18px; color: var(--muted); }
+      .log h2 { margin-top: 0; font: 800 13px ui-monospace, monospace; text-transform: uppercase; }
+      .row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+      .counter { min-width: 34px; font: 800 18px ui-monospace, monospace; text-align: center; }
+
+      .menu-wrap { position: relative; }
+      .menu {
+        position: absolute;
+        z-index: 5;
+        top: calc(100% + 6px);
+        left: 0;
+        width: 210px;
+        padding: 6px;
+        border: 2px solid var(--ink);
+        background: var(--panel);
+        box-shadow: 5px 5px 0 #e9ae31;
+      }
+      .menu button { display: block; width: 100%; border: 0; text-align: left; }
+      .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--ink); }
+      .tabs button { border-radius: 0; border-bottom: 0; }
+      .tabs button[aria-selected="true"] { background: var(--ink); color: white; }
+      .tab-panel { padding: 18px; border: 1px solid var(--ink); border-top: 0; background: var(--panel); }
+
+      details { max-width: 620px; padding: 13px 15px; border: 1px solid var(--ink); background: var(--panel); }
+      summary { cursor: pointer; font-weight: 700; }
+      label { display: grid; gap: 5px; color: var(--muted); font-size: 13px; }
+      input, select { padding: 8px 10px; background: var(--panel); color: var(--ink); }
+
+      .long-space { height: 58vh; min-height: 360px; display: grid; place-items: center; color: var(--muted); border-left: 1px dashed var(--line); }
+      .scroll-target { padding: 25px; border: 2px solid var(--ink); background: #e8efdc; }
+
+      dialog { width: min(520px, calc(100vw - 32px)); padding: 0; border: 3px solid var(--ink); border-radius: 9px; background: var(--panel); }
+      dialog::backdrop { background: rgba(29, 33, 29, 0.66); }
+      .dialog-copy { padding: 28px; }
+      .dialog-copy h2 { margin-top: 0; font: 700 30px Georgia, serif; }
+      .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 16px; border-top: 1px solid var(--line); }
+
+      .screen { padding: 22px; border: 2px solid var(--ink); background: var(--panel); }
+      .screen strong { display: block; margin-bottom: 12px; font: 700 22px Georgia, serif; }
+
+      @media (max-width: 820px) {
+        header { grid-template-columns: 1fr; }
+        .run-id { text-align: left; }
+        main { display: block; }
+        .log { border: 0; border-top: 3px solid var(--ink); }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Click Lab</h1>
+        <p>A deterministic interaction bench for verifying ordered, pre-click guide screenshots.</p>
+      </div>
+      <div class="run-id">SCHAFFA / RECORDER-QA<br /><span id="clock">READY</span></div>
+    </header>
+
+    <main>
+      <div class="bench">
+        <section aria-labelledby="basic-title">
+          <h2 id="basic-title">01 · Basic controls</h2>
+          <p>Stable labels, changing state, and a native selection control.</p>
+          <div class="row">
+            <button type="button" class="primary" id="count-button">Add one</button>
+            <output class="counter" id="count" aria-live="polite">0</output>
+            <select id="priority" aria-label="Priority">
+              <option>Normal priority</option>
+              <option>High priority</option>
+              <option>Critical priority</option>
+            </select>
+          </div>
+        </section>
+
+        <section aria-labelledby="layer-title">
+          <h2 id="layer-title">02 · Layered controls</h2>
+          <p>The second click must capture the open menu; the modal confirmation must capture the open dialog.</p>
+          <div class="row">
+            <div class="menu-wrap">
+              <button type="button" id="menu-button" aria-haspopup="menu" aria-expanded="false">Open action menu</button>
+              <div class="menu" id="action-menu" role="menu" hidden>
+                <button type="button" role="menuitem" id="archive-action">Archive test item</button>
+                <button type="button" role="menuitem" id="duplicate-action">Duplicate test item</button>
+              </div>
+            </div>
+            <button type="button" id="modal-button">Open confirmation</button>
+          </div>
+        </section>
+
+        <section aria-labelledby="state-title">
+          <h2 id="state-title">03 · Stateful content</h2>
+          <p>Tabs, disclosure state, and in-place navigation without a network dependency.</p>
+          <div class="tabs" role="tablist" aria-label="Test panels">
+            <button type="button" role="tab" aria-selected="true" aria-controls="panel-alpha" id="tab-alpha">Alpha</button>
+            <button type="button" role="tab" aria-selected="false" aria-controls="panel-beta" id="tab-beta">Beta</button>
+          </div>
+          <div class="tab-panel" id="panel-alpha" role="tabpanel" aria-labelledby="tab-alpha">Alpha is visible before the tab click.</div>
+          <div class="tab-panel" id="panel-beta" role="tabpanel" aria-labelledby="tab-beta" hidden>Beta became visible after the tab click.</div>
+          <br />
+          <details>
+            <summary>Reveal diagnostic details</summary>
+            <p>The disclosure was closed in the pre-click frame and open afterward.</p>
+          </details>
+          <br />
+          <div class="screen" id="screen-one">
+            <strong>Workspace overview</strong>
+            <button type="button" id="next-screen">Continue to review</button>
+          </div>
+          <div class="screen" id="screen-two" hidden>
+            <strong>Review screen</strong>
+            <button type="button" id="back-screen">Back to overview</button>
+          </div>
+        </section>
+
+        <section aria-labelledby="privacy-title">
+          <h2 id="privacy-title">04 · Privacy suppression</h2>
+          <p>The password click must create an ordered text step without a screenshot.</p>
+          <div class="row">
+            <label>Test account <input id="account" autocomplete="username" value="demo-user" /></label>
+            <label>Password <input id="password" type="password" autocomplete="current-password" value="not-a-secret" /></label>
+          </div>
+        </section>
+
+        <div class="long-space" aria-hidden="true">SCROLL DISTANCE / 58 VH</div>
+
+        <section class="scroll-target" aria-labelledby="scroll-title">
+          <h2 id="scroll-title">05 · Below the fold</h2>
+          <p>The viewport and target coordinates must remain correct after scrolling.</p>
+          <button type="button" class="primary" id="finish-button">Complete click run</button>
+        </section>
+      </div>
+
+      <aside class="log" aria-label="Interaction log">
+        <h2>Observed events</h2>
+        <ol id="events"><li>Lab initialized</li></ol>
+      </aside>
+    </main>
+
+    <dialog id="confirm-dialog" aria-labelledby="dialog-title">
+      <div class="dialog-copy">
+        <h2 id="dialog-title">Confirm test action</h2>
+        <p>This dialog has no external side effect. It exists only to verify the pre-click frame.</p>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="cancel-dialog">Cancel</button>
+        <button type="button" class="primary" id="confirm-action">Confirm action</button>
+      </div>
+    </dialog>
+
+    <script>
+      const events = document.querySelector("#events");
+      const log = (message) => {
+        const item = document.createElement("li");
+        item.textContent = message;
+        events.prepend(item);
+      };
+
+      let count = 0;
+      document.querySelector("#count-button").addEventListener("click", () => {
+        count += 1;
+        document.querySelector("#count").textContent = String(count);
+        log(`Counter changed to ${count}`);
+      });
+      document.querySelector("#priority").addEventListener("change", (event) => log(`Selected ${event.target.value}`));
+
+      const menuButton = document.querySelector("#menu-button");
+      const menu = document.querySelector("#action-menu");
+      menuButton.addEventListener("click", () => {
+        menu.hidden = !menu.hidden;
+        menuButton.setAttribute("aria-expanded", String(!menu.hidden));
+        log(menu.hidden ? "Action menu closed" : "Action menu opened");
+      });
+      document.querySelectorAll("[role=menuitem]").forEach((button) => {
+        button.addEventListener("click", () => {
+          log(`${button.textContent} selected`);
+          menu.hidden = true;
+          menuButton.setAttribute("aria-expanded", "false");
+        });
+      });
+
+      const dialog = document.querySelector("#confirm-dialog");
+      document.querySelector("#modal-button").addEventListener("click", () => { dialog.showModal(); log("Dialog opened"); });
+      document.querySelector("#cancel-dialog").addEventListener("click", () => { dialog.close(); log("Dialog cancelled"); });
+      document.querySelector("#confirm-action").addEventListener("click", () => { dialog.close(); log("Dialog confirmed"); });
+
+      document.querySelectorAll("[role=tab]").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          document.querySelectorAll("[role=tab]").forEach((candidate) => {
+            candidate.setAttribute("aria-selected", String(candidate === tab));
+          });
+          document.querySelectorAll("[role=tabpanel]").forEach((panel) => {
+            panel.hidden = panel.id !== tab.getAttribute("aria-controls");
+          });
+          log(`${tab.textContent} tab selected`);
+        });
+      });
+
+      document.querySelector("details").addEventListener("toggle", (event) => log(event.target.open ? "Details revealed" : "Details hidden"));
+      document.querySelector("#next-screen").addEventListener("click", () => {
+        document.querySelector("#screen-one").hidden = true;
+        document.querySelector("#screen-two").hidden = false;
+        log("Navigated to review screen");
+      });
+      document.querySelector("#back-screen").addEventListener("click", () => {
+        document.querySelector("#screen-one").hidden = false;
+        document.querySelector("#screen-two").hidden = true;
+        log("Returned to overview");
+      });
+      document.querySelector("#finish-button").addEventListener("click", () => {
+        document.querySelector("#clock").textContent = "RUN COMPLETE";
+        log("Click run completed");
+      });
+    </script>
+  </body>
+</html>

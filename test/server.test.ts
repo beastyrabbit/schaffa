@@ -744,7 +744,7 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   assert.equal(replay.json().steps[0].id, firstStepId);
 
   const screenshot = await sharp({
-    create: { width: 640, height: 360, channels: 4, background: "#a43f24" },
+    create: { width: 3000, height: 2000, channels: 4, background: "#a43f24" },
   })
     .png()
     .toBuffer();
@@ -755,6 +755,13 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
         description: "New project auswählen.",
         action: { type: "click", target: "New project" },
         verification: "Das Formular ist sichtbar.",
+        clickMarker: {
+          x: 1500,
+          y: 1000,
+          viewportWidth: 3000,
+          viewportHeight: 2000,
+          box: { left: 1400, top: 900, width: 200, height: 200 },
+        },
       }),
     },
     "screenshot",
@@ -783,6 +790,14 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   const ownerImage = await app.inject({ method: "GET", url: imagePath, headers: auth });
   assert.equal(ownerImage.statusCode, 200);
   assert.equal((await sharp(ownerImage.rawPayload).metadata()).format, "webp");
+  const marked = await sharp(ownerImage.rawPayload).raw().toBuffer({ resolveWithObject: true });
+  assert.equal(Math.max(marked.info.width, marked.info.height), 2560);
+  const markerX = Math.round(marked.info.width / 2);
+  const markerY = Math.round(marked.info.height / 2);
+  const markerOffset = (markerY * marked.info.width + markerX) * marked.info.channels;
+  assert.ok((marked.data[markerOffset] ?? 0) > 180);
+  assert.ok((marked.data[markerOffset + 1] ?? 255) < 130);
+  assert.ok((marked.data[markerOffset + 2] ?? 255) < 150);
 
   const stale = await app.inject({
     method: "PATCH",
@@ -855,6 +870,13 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
     /class="step-action-link" href="https:\/\/app\.example\.com\/projects" target="_blank" rel="noopener noreferrer" aria-label="Seite öffnen \(neuer Tab\)">Seite öffnen/,
   );
   assert.doesNotMatch(publicGuide.body, /<code>navigate<\/code>/);
+  assert.match(
+    publicGuide.body,
+    /class="screenshot-link" href="#image-1" aria-label="Screenshot zu Schritt 1 vergrößern"/,
+  );
+  assert.match(publicGuide.body, /class="zoom-hint"[^>]*>Bild vergrößern/);
+  assert.match(publicGuide.body, /class="lightbox" id="image-1" role="dialog"/);
+  assert.match(publicGuide.body, /target="_blank" rel="noopener noreferrer">Original öffnen/);
   assert.doesNotMatch(publicGuide.body, /<script|<form|onclick=/i);
   assert.match(String(publicGuide.headers["content-security-policy"]), /script-src 'none'/);
   const publicImage = await app.inject({

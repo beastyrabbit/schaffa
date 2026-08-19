@@ -12,7 +12,12 @@ import {
 } from "./db.js";
 import { AppError } from "./errors.js";
 import { randomFileId, randomGuideSlug } from "./ids.js";
-import { cleanImage, isLikelyImage, withImageProcessingPermit } from "./image-cleaner.js";
+import {
+  cleanImage,
+  type ImageClickMarker,
+  isLikelyImage,
+  withImageProcessingPermit,
+} from "./image-cleaner.js";
 import { removeGuide, removeStoredFile, sha256, storeGuideImage } from "./storage.js";
 import { scanUpload } from "./virus-scanner.js";
 
@@ -48,6 +53,7 @@ export interface GuideStepInput {
   visible?: unknown;
   capture?: unknown;
   screenshotCaption?: unknown;
+  clickMarker?: unknown;
 }
 
 export interface GuideStepView {
@@ -179,7 +185,7 @@ export async function addGuideStep(
   if (replay) return replay;
   assertEditRevision(guide, expectedRevision);
   const parsed = parseStep(input, false);
-  const image = screenshot ? await prepareGuideImage(guide, screenshot) : null;
+  const image = screenshot ? await prepareGuideImage(guide, screenshot, parsed.clickMarker) : null;
   const stepId = randomUUID();
   const row = db()
     .prepare(
@@ -601,7 +607,7 @@ export function renderGuideHtml(guide: GuideView): string {
         <p>${paragraphs(step.description)}</p>
         ${action}
         ${step.verification ? `<dl><dt>Prüfung</dt><dd>${escapeHtml(step.verification)}</dd></dl>` : ""}</div>
-        ${step.screenshotUrl ? `<figure><img src="${escapeHtml(step.screenshotUrl)}" alt="${escapeHtml(step.screenshotCaption || step.title)}" loading="lazy"><figcaption>${escapeHtml(step.screenshotCaption || step.title)}</figcaption></figure>` : `<aside class="text-step">Textschritt · kein Bild erforderlich</aside>`}
+        ${renderGuideScreenshot(step, index)}
       </section>`;
     })
     .join("");
@@ -616,6 +622,33 @@ export function renderGuideHtml(guide: GuideView): string {
   <header><div><a class="brand" href="/">Schaffa</a><span>Guide · Revision ${guide.revision}</span></div><h1>${escapeHtml(guide.title)}</h1>${guide.description ? `<p>${escapeHtml(guide.description)}</p>` : ""}<nav aria-label="Guide-Aktionen">${guide.targetUrl ? `<a class="target-link" href="${escapeHtml(guide.targetUrl)}">Ziel öffnen <span aria-hidden="true">↗</span></a>` : ""}<a href="${escapeHtml(guide.jsonUrl)}">JSON</a><a href="${escapeHtml(guide.markdownUrl)}">Markdown</a></nav></header>
   <main><nav class="toc" aria-label="Schritte">${toc}</nav><article>${steps}</article></main>
   <footer>Veröffentlicht mit Schaffa · ${guide.steps.filter((step) => step.visible).length} Schritte</footer></body></html>`;
+}
+
+function renderGuideScreenshot(step: GuideStepView, index: number): string {
+  if (!step.screenshotUrl)
+    return `<aside class="text-step">Textschritt · kein Bild erforderlich</aside>`;
+  const number = index + 1;
+  const paddedNumber = String(number).padStart(2, "0");
+  const imageUrl = escapeHtml(step.screenshotUrl);
+  const caption = escapeHtml(step.screenshotCaption || step.title);
+  const title = escapeHtml(step.title);
+  return `<figure>
+    <a class="screenshot-link" href="#image-${number}" aria-label="Screenshot zu Schritt ${number} vergrößern" aria-describedby="image-caption-${number}">
+      <img src="${imageUrl}" alt="${caption}" loading="lazy">
+      <span class="zoom-hint" aria-hidden="true">Bild vergrößern <span>↗</span></span>
+    </a>
+    <figcaption id="image-caption-${number}">${caption}</figcaption>
+  </figure>
+  <div class="lightbox" id="image-${number}" role="dialog" aria-modal="true" aria-labelledby="image-title-${number}" tabindex="-1">
+    <a class="lightbox-dismiss" href="#step-${number}" aria-label="Große Bildansicht schließen"></a>
+    <div class="lightbox-panel">
+      <div class="lightbox-toolbar">
+        <p id="image-title-${number}"><span>Schritt ${paddedNumber}</span>${title}</p>
+        <div><a href="${imageUrl}" target="_blank" rel="noopener noreferrer">Original öffnen ↗</a><a class="lightbox-close" href="#step-${number}" aria-label="Große Bildansicht schließen">Schließen ×</a></div>
+      </div>
+      <div class="lightbox-image"><img src="${imageUrl}" alt="${caption}" loading="lazy"></div>
+    </div>
+  </div>`;
 }
 
 function guideView(guide: GuideRow, steps: GuideStepRow[]): GuideView {
@@ -663,6 +696,7 @@ function parseStep(input: GuideStepInput, partial: boolean) {
   const screenshotCaption = optionalText(input.screenshotCaption, "screenshotCaption", 500);
   const visible = booleanValue(input.visible, true, "visible");
   const capture = booleanValue(input.capture, true, "capture");
+  const clickMarker = parseClickMarker(input.clickMarker);
   let action: GuideAction | null = null;
   if (input.action !== undefined && input.action !== null) {
     if (!input.action || typeof input.action !== "object" || Array.isArray(input.action)) {
@@ -675,17 +709,79 @@ function parseStep(input: GuideStepInput, partial: boolean) {
     action = { type, ...(target ? { target } : {}) };
   }
   void partial;
-  return { title, description, action, verification, visible, capture, screenshotCaption };
+  return {
+    title,
+    description,
+    action,
+    verification,
+    visible,
+    capture,
+    screenshotCaption,
+    clickMarker,
+  };
 }
 
-async function prepareGuideImage(guide: GuideRow, part: MultipartFile): Promise<GuideImageRow> {
+function parseClickMarker(value: unknown): ImageClickMarker | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new AppError("clickMarker must be an object.", 422);
+  }
+  const marker = value as Record<string, unknown>;
+  const x = finiteNumber(marker.x, "clickMarker.x");
+  const y = finiteNumber(marker.y, "clickMarker.y");
+  const viewportWidth = positiveNumber(marker.viewportWidth, "clickMarker.viewportWidth");
+  const viewportHeight = positiveNumber(marker.viewportHeight, "clickMarker.viewportHeight");
+  let box: ImageClickMarker["box"];
+  if (marker.box !== undefined && marker.box !== null) {
+    if (!marker.box || typeof marker.box !== "object" || Array.isArray(marker.box)) {
+      throw new AppError("clickMarker.box must be an object.", 422);
+    }
+    const input = marker.box as Record<string, unknown>;
+    const width = nonNegativeNumber(input.width, "clickMarker.box.width");
+    const height = nonNegativeNumber(input.height, "clickMarker.box.height");
+    if (width > 0 && height > 0) {
+      box = {
+        left: finiteNumber(input.left, "clickMarker.box.left"),
+        top: finiteNumber(input.top, "clickMarker.box.top"),
+        width,
+        height,
+      };
+    }
+  }
+  return { x, y, viewportWidth, viewportHeight, ...(box ? { box } : {}) };
+}
+
+function finiteNumber(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > 100_000) {
+    throw new AppError(`${field} must be a finite coordinate.`, 422);
+  }
+  return value;
+}
+
+function positiveNumber(value: unknown, field: string): number {
+  const number = finiteNumber(value, field);
+  if (number <= 0) throw new AppError(`${field} must be positive.`, 422);
+  return number;
+}
+
+function nonNegativeNumber(value: unknown, field: string): number {
+  const number = finiteNumber(value, field);
+  if (number < 0) throw new AppError(`${field} must not be negative.`, 422);
+  return number;
+}
+
+async function prepareGuideImage(
+  guide: GuideRow,
+  part: MultipartFile,
+  clickMarker?: ImageClickMarker,
+): Promise<GuideImageRow> {
   if (!isLikelyImage(part.filename, part.mimetype)) {
     throw new AppError("Screenshot must be a recognized image.", 422, "invalid_image");
   }
   return withImageProcessingPermit(async () => {
     const data = await readLimited(part, config.maxImageInputBytes);
     await scanUpload(data);
-    const cleaned = await cleanImage(data);
+    const cleaned = await cleanImage(data, clickMarker);
     const metadata = await sharp(cleaned.data).metadata();
     const id = randomFileId();
     return {
@@ -976,5 +1072,5 @@ function guideNavigationUrl(action: GuideAction | null, targetUrl: string | null
 }
 
 const guideCss = `
-:root{--paper:#f3f0e8;--surface:#fffdf8;--ink:#20211e;--muted:#696961;--line:#cbc5b8;--accent:#a43f24;--gold:#d8b64b;font-family:"Avenir Next","Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;line-height:1.62}header{padding:52px max(24px,calc((100vw - 1120px)/2));border-bottom:2px solid var(--ink);background:var(--surface)}header>div{display:flex;justify-content:space-between;color:var(--muted);font-size:13px}.brand{font:700 22px Georgia,serif;color:var(--ink);text-decoration:none}h1,h2{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.035em}h1{max-width:920px;margin:50px 0 18px;font-size:clamp(44px,7vw,78px);line-height:.98}header>p{max-width:720px;color:#4b4c45;font-size:19px}header nav{display:flex;align-items:center;gap:18px;margin-top:28px}header nav a{color:var(--accent);font-weight:700;text-underline-offset:4px}.target-link,.step-action-link{display:inline-flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:var(--surface);font-weight:700;text-decoration:none}.target-link:focus-visible,.step-action-link:focus-visible{outline:3px solid var(--gold);outline-offset:3px}.step-action-link:hover{background:#7f2f1b;border-color:#7f2f1b}main{display:grid;grid-template-columns:240px minmax(0,820px);gap:56px;max-width:1120px;margin:auto;padding:52px 24px 100px}.toc{position:sticky;top:24px;align-self:start;border-top:3px solid var(--ink)}.toc a{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px;text-decoration:none}.toc span{font-family:ui-monospace,monospace;color:var(--accent)}.step{padding:0 0 64px;margin:0 0 60px;border-bottom:2px solid var(--ink)}.number{display:block;color:var(--accent);font:700 13px ui-monospace,monospace}.step h2{margin:8px 0 18px;font-size:36px;line-height:1.08}.step-copy>p{max-width:720px;font-size:17px}.step dl{display:grid;grid-template-columns:90px 1fr;margin:18px 0}.step dt{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}.step dd{margin:0}.step code{padding:3px 6px;background:#e4ded1;font-family:ui-monospace,monospace}figure{margin:30px 0 0}img{display:block;width:100%;height:auto;border:2px solid var(--ink);background:#ddd;box-shadow:8px 8px 0 var(--gold)}figcaption{margin-top:13px;color:var(--muted);font-size:13px}.text-step{margin-top:28px;padding:18px;border-left:4px solid var(--gold);background:var(--surface);color:var(--muted)}footer{padding:25px;border-top:2px solid var(--ink);text-align:center;color:var(--muted);font-size:13px}@media(max-width:760px){header{padding:34px 20px}header>div{align-items:center}.brand{font-size:20px}h1{margin-top:38px;font-size:46px}header nav{align-items:flex-start;flex-wrap:wrap}main{display:block;padding:34px 20px 70px}.toc{position:static;margin-bottom:50px}.step h2{font-size:31px}.step dl{grid-template-columns:1fr;gap:3px}img{box-shadow:5px 5px 0 var(--gold)}}@media print{header{padding:0 0 24px}.toc,header nav,footer{display:none}main{display:block;padding:20px 0}.step{break-inside:avoid}img{box-shadow:none}body{background:#fff;font-size:11pt}}
+:root{--paper:#f3f0e8;--surface:#fffdf8;--ink:#20211e;--muted:#696961;--line:#cbc5b8;--accent:#a43f24;--gold:#d8b64b;font-family:"Avenir Next","Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;line-height:1.62}body:has(.lightbox:target){overflow:hidden}header{padding:52px max(24px,calc((100vw - 1120px)/2));border-bottom:2px solid var(--ink);background:var(--surface)}header>div{display:flex;justify-content:space-between;color:var(--muted);font-size:13px}.brand{font:700 22px Georgia,serif;color:var(--ink);text-decoration:none}h1,h2{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.035em}h1{max-width:920px;margin:50px 0 18px;font-size:clamp(44px,7vw,78px);line-height:.98}header>p{max-width:720px;color:#4b4c45;font-size:19px}header nav{display:flex;align-items:center;gap:18px;margin-top:28px}header nav a{color:var(--accent);font-weight:700;text-underline-offset:4px}.target-link,.step-action-link{display:inline-flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:var(--surface);font-weight:700;text-decoration:none}.target-link:focus-visible,.step-action-link:focus-visible{outline:3px solid var(--gold);outline-offset:3px}.step-action-link:hover{background:#7f2f1b;border-color:#7f2f1b}main{display:grid;grid-template-columns:240px minmax(0,820px);gap:56px;max-width:1120px;margin:auto;padding:52px 24px 100px}.toc{position:sticky;top:24px;align-self:start;border-top:3px solid var(--ink)}.toc a{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px;text-decoration:none}.toc span{font-family:ui-monospace,monospace;color:var(--accent)}.step{padding:0 0 64px;margin:0 0 60px;border-bottom:2px solid var(--ink)}.number{display:block;color:var(--accent);font:700 13px ui-monospace,monospace}.step h2{margin:8px 0 18px;font-size:36px;line-height:1.08}.step-copy>p{max-width:720px;font-size:17px}.step dl{display:grid;grid-template-columns:90px 1fr;margin:18px 0}.step dt{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}.step dd{margin:0}.step code{padding:3px 6px;background:#e4ded1;font-family:ui-monospace,monospace}figure{margin:30px 0 0}.screenshot-link{position:relative;display:block;color:inherit;text-decoration:none}.screenshot-link>img{display:block;width:100%;height:auto;border:2px solid var(--ink);background:#ddd;box-shadow:8px 8px 0 var(--gold)}.screenshot-link:focus-visible{outline:4px solid var(--accent);outline-offset:5px}.zoom-hint{position:absolute;right:14px;bottom:14px;display:inline-flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--surface);border-radius:7px;background:var(--ink);color:var(--surface);font-size:13px;font-weight:700;box-shadow:3px 3px 0 var(--gold)}.screenshot-link:hover .zoom-hint,.screenshot-link:focus-visible .zoom-hint{background:var(--accent)}figcaption{margin-top:13px;color:var(--muted);font-size:13px}.lightbox{position:fixed;inset:0;z-index:1000;display:none;padding:24px}.lightbox:target{display:grid;place-items:center}.lightbox-dismiss{position:absolute;inset:0;background:rgba(20,21,19,.9)}.lightbox-panel{position:relative;z-index:1;display:grid;grid-template-rows:auto minmax(0,1fr);width:min(96vw,1680px);height:min(94vh,1120px);border:2px solid var(--surface);background:#11120f;box-shadow:12px 12px 0 var(--gold)}.lightbox-toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:62px;padding:10px 14px;border-bottom:1px solid #44443f;background:var(--ink);color:var(--surface)}.lightbox-toolbar p{display:flex;gap:12px;margin:0;min-width:0;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lightbox-toolbar p span{color:var(--gold);font-family:ui-monospace,monospace}.lightbox-toolbar>div{display:flex;align-items:center;gap:14px;flex-shrink:0}.lightbox-toolbar a{color:var(--surface);font-size:13px;font-weight:700;text-underline-offset:4px}.lightbox-close{padding:7px 9px;border:1px solid #77776f;border-radius:7px;text-decoration:none}.lightbox-toolbar a:focus-visible{outline:3px solid var(--gold);outline-offset:3px}.lightbox-image{display:grid;place-items:center;overflow:auto;padding:18px}.lightbox-image img{display:block;width:auto;max-width:100%;height:auto;max-height:calc(94vh - 102px);background:#ddd}.text-step{margin-top:28px;padding:18px;border-left:4px solid var(--gold);background:var(--surface);color:var(--muted)}footer{padding:25px;border-top:2px solid var(--ink);text-align:center;color:var(--muted);font-size:13px}@media(max-width:760px){header{padding:34px 20px}header>div{align-items:center}.brand{font-size:20px}h1{margin-top:38px;font-size:46px}header nav{align-items:flex-start;flex-wrap:wrap}main{display:block;padding:34px 20px 70px}.toc{position:static;margin-bottom:50px}.step h2{font-size:31px}.step dl{grid-template-columns:1fr;gap:3px}.screenshot-link>img{box-shadow:5px 5px 0 var(--gold)}.zoom-hint{right:9px;bottom:9px}.lightbox{padding:8px}.lightbox-panel{width:100%;height:calc(100dvh - 16px);box-shadow:none}.lightbox-toolbar{align-items:flex-start}.lightbox-toolbar p{display:block;white-space:normal}.lightbox-toolbar p span{display:block}.lightbox-toolbar>div{gap:8px}.lightbox-toolbar>div>a:first-child{display:none}.lightbox-image{padding:8px}.lightbox-image img{max-height:calc(100dvh - 94px)}}@media print{header{padding:0 0 24px}.toc,header nav,footer,.zoom-hint,.lightbox{display:none}main{display:block;padding:20px 0}.step{break-inside:avoid}.screenshot-link>img{box-shadow:none}body{background:#fff;font-size:11pt}}
 `;

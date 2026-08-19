@@ -13,6 +13,18 @@ npx schaffa upload ./plan.html
 ## Guides and presentations
 
 ```sh
+# Automatic browser or macOS desktop capture
+schaffa record --title "Create a project" --browser "https://app.example.com/projects"
+schaffa record --title "Configure Calculator" --desktop --app com.apple.calculator
+
+# Inspect and correct the draft
+schaffa guide status --json
+schaffa guide edit-step --step 2 --title "Choose New project"
+schaffa guide replace-screenshot --step 2 --screenshot ./correct-step.png
+schaffa guide delete-step --step 3
+schaffa guide publish
+
+# Manual capture remains useful for mixed terminal/browser workflows
 schaffa guide start --title "Create a project" --url "https://app.example.com/projects"
 schaffa guide step --title "Open projects" --text "Open the project list."
 schaffa guide finish
@@ -24,7 +36,23 @@ schaffa publish deck.md --kind presentation --export pdf --export pptx
 Each requested PDF or PowerPoint export is linked from a compact download bar in the published
 presentation. The bar is hidden when no export format is requested.
 
-The optional `--url` adds a prominent “Ziel öffnen” link to the published guide so readers can jump directly to the guided application. Guide commands persist the active random slug and edit revision under `.schaffa/guide-session.json`. Keep this working file out of source control. The bearer token remains in `SCHAFFA_TOKEN` and is never written to the session file.
+Browser mode opens an isolated Chrome, Edge, or Chromium window whose profile is
+reused across recordings. Desktop mode records native macOS windows without
+opening a browser tab, is restricted to the application selected by `--app`,
+and requires one-time Accessibility and Screen Recording permission. Typed
+values and keystrokes are excluded from event metadata, but
+visible form contents can still appear in screenshots.
+Every primary click gets a visible target outline and click dot. Original JPEG
+or PNG captures and an upload manifest are retained under
+`.schaffa/recordings/<slug>/`; run
+`schaffa guide sync` after a network failure. Close the browser or press Ctrl+C
+to stop, and use `Alt+Shift+R` to pause capture on private screens.
+
+The earlier `schaffa guide record --title ... --url ...` form remains supported.
+The short command is `npx schaffa record`, not literal `npx record`: the latter
+would require a separate generic npm package named `record`.
+
+The optional `--url` adds a prominent “Ziel öffnen” link to the published guide so readers can jump directly to the guided application. Guide commands persist the active random slug and edit revision under `.schaffa/guide-session.json`. Keep these working files out of source control. The bearer token remains in `SCHAFFA_TOKEN` and is never written to the session file.
 
 The command prints the stable public URL immediately. Until the asynchronous virus scan completes, that URL shows a self-refreshing status page; clean content appears at the same URL. New HTML pages can be published without an account; anonymous pages remain public for one hour and are deleted after 30 days.
 

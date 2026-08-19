@@ -10,12 +10,23 @@ import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
 import {
   addGuideStep,
+  deleteGuideStep,
   finishGuide,
   type GuideResult,
+  getGuide,
   publishGuide,
+  replaceGuideScreenshot,
   startGuide,
+  updateGuideStep,
   upload,
 } from "./client.js";
+import { prepareDesktopRecorder, recordDesktopGuide } from "./desktop-recorder.js";
+import {
+  findBrowserExecutable,
+  readRecordingSlug,
+  recordBrowserGuide,
+  syncRecording,
+} from "./recorder.js";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -24,8 +35,16 @@ const help = `Schaffa publishes pages, presentations, files, and incrementally r
 Usage:
   schaffa upload <file> [--token <token>] [--interactive] [--json]
   schaffa publish <deck.md> --kind presentation [--export pdf] [--export pptx] [--json]
+  schaffa record --title <title> --browser <url> [--browser-executable <path>] [--json]
+  schaffa record --title <title> --desktop --app <bundle-id> [--json]
   schaffa guide start --title <title> [--description <text>] [--url <url>] [--language <tag>] [--json]
+  schaffa guide record --title <title> --url <url> [--browser <path>] [--json]
   schaffa guide step --title <title> --text <text> [--screenshot <path>] [--action <type>] [--target <text>] [--verification <text>] [--json]
+  schaffa guide status [--json]
+  schaffa guide edit-step --step <number|id> [--title <title>] [--text <text>] [--verification <text>] [--json]
+  schaffa guide delete-step --step <number|id> [--json]
+  schaffa guide replace-screenshot --step <number|id> --screenshot <path> [--json]
+  schaffa guide sync [--manifest <path>] [--json]
   schaffa guide finish [--json]
   schaffa guide publish [--json]
 
@@ -35,6 +54,8 @@ Environment:
 
 The guide commands persist the active random slug and edit revision in
 .schaffa/guide-session.json so an interrupted recording can be resumed.
+Automatic recordings also keep every original screenshot and a manifest under
+.schaffa/recordings/<slug>/ before uploading each captured click immediately.
 
 Options:
   --token <token>  Use this bearer token instead of SCHAFFA_TOKEN.
@@ -85,13 +106,110 @@ export function parseCliArgs(
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  if (args[0] === "guide") return runGuide(args.slice(1));
+  if (args[0] === "record") return runAutomaticRecorder(args.slice(1), false);
+  if (args[0] === "guide") {
+    if (args[1] === "record") return runAutomaticRecorder(args.slice(2), true);
+    return runGuide(args.slice(1));
+  }
   if (args[0] === "publish") return runPresentation(args.slice(1));
   const options = parseCliArgs(args);
   if ("help" in options) return void process.stdout.write(help);
   const { json, command: _command, ...uploadOptions } = options;
   const result = await upload(uploadOptions);
   process.stdout.write(json ? `${JSON.stringify(result)}\n` : `${result.publicUrl}\n`);
+}
+
+async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<void> {
+  const { values } = parseArgs({
+    args,
+    strict: true,
+    options: {
+      help: { type: "boolean", short: "h" },
+      json: { type: "boolean" },
+      title: { type: "string" },
+      description: { type: "string" },
+      url: { type: "string" },
+      language: { type: "string" },
+      desktop: { type: "boolean" },
+      app: { type: "string" },
+      browser: { type: "string" },
+      "browser-executable": { type: "string" },
+      token: { type: "string" },
+    },
+  });
+  if (values.help) return void process.stdout.write(help);
+  if (!values.title) throw new Error("record requires --title.");
+  const selectedToken = values.token || process.env.SCHAFFA_TOKEN;
+  if (!selectedToken) throw new Error("SCHAFFA_TOKEN is required for guide operations.");
+  const browserUrl = legacy ? values.url : values.browser || values.url;
+  if (values.desktop && browserUrl) {
+    throw new Error("Choose either --desktop or --browser <url>, not both.");
+  }
+  if (values.desktop && !values.app) {
+    throw new Error("Desktop recording requires --app <bundle-id>.");
+  }
+  if (!values.desktop && values.app) {
+    throw new Error("--app can only be used together with --desktop.");
+  }
+  if (!values.desktop && !browserUrl) {
+    throw new Error(
+      legacy
+        ? "guide record requires --url (or use --desktop)."
+        : "record requires --desktop or --browser <url>.",
+    );
+  }
+  const common = {
+    token: selectedToken,
+    ...(process.env.SCHAFFA_URL ? { baseUrl: process.env.SCHAFFA_URL } : {}),
+  };
+  const helper = values.desktop
+    ? await prepareDesktopRecorder({ promptForPermissions: true })
+    : undefined;
+  const browserExecutable = !values.desktop
+    ? findBrowserExecutable(legacy ? values.browser : values["browser-executable"])
+    : undefined;
+  let result = await startGuide({
+    ...common,
+    title: values.title,
+    ...(values.description ? { description: values.description } : {}),
+    ...(browserUrl ? { targetUrl: browserUrl } : {}),
+    ...(values.language ? { language: values.language } : {}),
+  });
+  await writeSession(result);
+  const recording = values.desktop
+    ? await recordDesktopGuide({
+        guide: result,
+        appBundleId: values.app as string,
+        token: selectedToken,
+        ...(common.baseUrl ? { baseUrl: common.baseUrl } : {}),
+        ...(values.language ? { language: values.language } : {}),
+        ...(helper ? { helperExecutable: helper } : {}),
+        onMessage: (message) => process.stderr.write(`${message}\n`),
+      })
+    : await recordBrowserGuide({
+        guide: result,
+        url: browserUrl as string,
+        token: selectedToken,
+        ...(common.baseUrl ? { baseUrl: common.baseUrl } : {}),
+        ...(values.language ? { language: values.language } : {}),
+        ...(browserExecutable ? { browserExecutable } : {}),
+        onMessage: (message) => process.stderr.write(`${message}\n`),
+      });
+  result = recording.guide;
+  let output: unknown = {
+    guide: result,
+    manifestPath: recording.manifestPath,
+    failedUploads: recording.failedUploads,
+  };
+  if (recording.failedUploads === 0) {
+    const finished = await finishGuide({ ...common, ...result });
+    result = finished.guide;
+    output = { ...finished, manifestPath: recording.manifestPath };
+  } else {
+    process.exitCode = 1;
+  }
+  await writeSession(result);
+  process.stdout.write(values.json ? `${JSON.stringify(output)}\n` : `${result.publicUrl}\n`);
 }
 
 async function runGuide(args: string[]): Promise<void> {
@@ -111,6 +229,9 @@ async function runGuide(args: string[]): Promise<void> {
       action: { type: "string" },
       target: { type: "string" },
       verification: { type: "string" },
+      step: { type: "string" },
+      browser: { type: "string" },
+      manifest: { type: "string" },
       token: { type: "string" },
     },
   });
@@ -152,6 +273,63 @@ async function runGuide(args: string[]): Promise<void> {
         idempotencyKey,
       });
       output = result;
+    } else if (command === "status") {
+      result = await getGuide({ ...common, slug: session.slug });
+      output = result;
+    } else if (command === "edit-step") {
+      if (!values.step) throw new Error("guide edit-step requires --step.");
+      if (!values.title && !values.text && !values.verification) {
+        throw new Error("guide edit-step requires --title, --text, or --verification.");
+      }
+      const current = await getGuide({ ...common, slug: session.slug });
+      const stepId = resolveStepId(current, values.step);
+      result = await updateGuideStep({
+        ...common,
+        slug: current.slug,
+        editRevision: current.editRevision,
+        stepId,
+        ...(values.title ? { title: values.title } : {}),
+        ...(values.text ? { description: values.text } : {}),
+        ...(values.verification ? { verification: values.verification } : {}),
+      });
+      output = result;
+    } else if (command === "delete-step") {
+      if (!values.step) throw new Error("guide delete-step requires --step.");
+      const current = await getGuide({ ...common, slug: session.slug });
+      result = await deleteGuideStep({
+        ...common,
+        slug: current.slug,
+        editRevision: current.editRevision,
+        stepId: resolveStepId(current, values.step),
+      });
+      output = result;
+    } else if (command === "replace-screenshot") {
+      if (!values.step || !values.screenshot) {
+        throw new Error("guide replace-screenshot requires --step and --screenshot.");
+      }
+      const current = await getGuide({ ...common, slug: session.slug });
+      result = await replaceGuideScreenshot({
+        ...common,
+        slug: current.slug,
+        editRevision: current.editRevision,
+        stepId: resolveStepId(current, values.step),
+        screenshot: values.screenshot,
+      });
+      output = result;
+    } else if (command === "sync") {
+      if (!selectedToken) throw new Error("SCHAFFA_TOKEN is required for guide operations.");
+      const slug = values.manifest ? await readRecordingSlug(values.manifest) : session.slug;
+      const current = await getGuide({ ...common, slug });
+      const synced = await syncRecording({
+        guide: current,
+        token: selectedToken,
+        ...(common.baseUrl ? { baseUrl: common.baseUrl } : {}),
+        ...(values.manifest ? { manifestPath: values.manifest } : {}),
+        onMessage: (message) => process.stderr.write(`${message}\n`),
+      });
+      result = synced.guide;
+      output = synced;
+      if (synced.failedUploads > 0) process.exitCode = 1;
     } else if (command === "finish") {
       const operation = await finishGuide({ ...common, ...session });
       result = operation.guide;
@@ -353,6 +531,18 @@ async function writeSession(guide: GuideResult | GuideSession): Promise<void> {
     `${JSON.stringify({ slug: guide.slug, editRevision: guide.editRevision, ...("idempotencyKey" in guide && guide.idempotencyKey ? { idempotencyKey: guide.idempotencyKey } : {}) })}\n`,
     { mode: 0o600 },
   );
+}
+
+function resolveStepId(guide: GuideResult, value: string): string {
+  const numeric = Number(value);
+  if (Number.isSafeInteger(numeric) && numeric >= 1) {
+    const step = guide.steps[numeric - 1];
+    if (!step) throw new Error(`Guide step ${numeric} does not exist.`);
+    return step.id;
+  }
+  const step = guide.steps.find((candidate) => candidate.id === value);
+  if (!step) throw new Error(`Guide step ${value} does not exist.`);
+  return step.id;
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

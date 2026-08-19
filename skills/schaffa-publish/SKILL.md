@@ -11,6 +11,27 @@ Publish through the bundled curl wrapper. Never print, echo, or pass `SCHAFFA_TO
 
 When a user asks for a guide or wants a workflow documented, start the guide before the first relevant action. Do not wait until the task is finished. Keep `.schaffa/guide-session.json` local and out of source control; it contains the random slug and current edit revision, not the bearer token.
 
+Prefer the automatic recorder when the agent can operate a dedicated browser or
+native macOS app through desktop control:
+
+```sh
+npx schaffa record --title "Project setup" --browser "https://app.example.com/projects"
+npx schaffa record --title "Desktop setup" --desktop --app com.example.desktopapp
+```
+
+Every trusted primary click is highlighted, saved locally, and uploaded before
+publication. Desktop mode ignores clicks outside the bundle ID passed to
+`--app`, never reads editable accessibility values, and omits
+screenshots for secure controls. Closing the browser or pressing Ctrl+C drains
+the capture queue and finishes the guide as a draft. `Alt+Shift+R` pauses private screens. If any
+upload fails, run `npx schaffa guide sync`; do not recreate or reorder the local
+screenshots manually.
+
+Inspect the complete server-side step list with `npx schaffa guide status
+--json`. Correct it with `guide edit-step`, `guide replace-screenshot`, and
+`guide delete-step`, using a one-based step number or exact step ID, before
+`guide publish`.
+
 ```sh
 npx schaffa guide start --title "Project setup"
 npx schaffa guide step --title "Open projects" --text "Open the project list." --action navigate --target /projects

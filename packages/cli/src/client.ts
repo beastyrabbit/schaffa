@@ -16,6 +16,16 @@ export interface UploadResult {
   [key: string]: unknown;
 }
 
+export class SchaffaRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "SchaffaRequestError";
+    this.status = status;
+  }
+}
+
 export interface GuideResult {
   slug: string;
   targetUrl: string | null;
@@ -24,7 +34,14 @@ export interface GuideResult {
   editRevision: number;
   publicUrl: string;
   apiUrl: string;
-  steps: Array<{ id: string; title: string }>;
+  steps: Array<{
+    id: string;
+    position: number;
+    title: string;
+    description?: string;
+    screenshotUrl?: string | null;
+    [key: string]: unknown;
+  }>;
   [key: string]: unknown;
 }
 
@@ -40,6 +57,14 @@ export interface GuideOperationResult {
   guide: GuideResult;
   preflight: GuidePreflightResult;
   revisionUrl?: string;
+}
+
+export interface GuideClickMarker {
+  x: number;
+  y: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  box?: { left: number; top: number; width: number; height: number };
 }
 
 const mediaTypes = new Map([
@@ -105,7 +130,10 @@ export async function upload(options: UploadOptions): Promise<UploadResult> {
   const result = parseResponse(body);
   if (!response.ok) {
     const detail = typeof result.message === "string" ? ` ${result.message}` : "";
-    throw new Error(`Schaffa request failed with HTTP ${response.status}.${detail}`);
+    throw new SchaffaRequestError(
+      response.status,
+      `Schaffa request failed with HTTP ${response.status}.${detail}`,
+    );
   }
   if (typeof result.publicUrl !== "string") {
     throw new Error("Schaffa returned a response without a public URL.");
@@ -143,6 +171,7 @@ export async function addGuideStep(options: {
   actionTarget?: string;
   verification?: string;
   screenshot?: string;
+  clickMarker?: GuideClickMarker;
   capture?: boolean;
   token?: string;
   baseUrl?: string;
@@ -161,6 +190,7 @@ export async function addGuideStep(options: {
         }
       : {}),
     ...(options.verification ? { verification: options.verification } : {}),
+    ...(options.clickMarker ? { clickMarker: options.clickMarker } : {}),
     capture: options.capture ?? Boolean(options.screenshot),
   };
   const headers: Record<string, string> = {
@@ -192,6 +222,86 @@ export async function addGuideStep(options: {
     headers,
     body,
   });
+}
+
+export async function getGuide(options: {
+  slug: string;
+  token?: string;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+}): Promise<GuideResult> {
+  return guideRequest(options, `/api/guides/${encodeURIComponent(options.slug)}`, {
+    method: "GET",
+  });
+}
+
+export async function updateGuideStep(
+  options: GuideMutationOptions & {
+    stepId: string;
+    title?: string;
+    description?: string;
+    verification?: string;
+  },
+): Promise<GuideResult> {
+  return guideRequest(
+    options,
+    `/api/guides/${encodeURIComponent(options.slug)}/steps/${encodeURIComponent(options.stepId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "If-Match": String(options.editRevision),
+      },
+      body: JSON.stringify({
+        ...(options.title !== undefined ? { title: options.title } : {}),
+        ...(options.description !== undefined ? { description: options.description } : {}),
+        ...(options.verification !== undefined ? { verification: options.verification } : {}),
+      }),
+    },
+  );
+}
+
+export async function deleteGuideStep(
+  options: GuideMutationOptions & {
+    stepId: string;
+  },
+): Promise<GuideResult> {
+  return guideRequest(
+    options,
+    `/api/guides/${encodeURIComponent(options.slug)}/steps/${encodeURIComponent(options.stepId)}`,
+    {
+      method: "DELETE",
+      headers: { "If-Match": String(options.editRevision) },
+    },
+  );
+}
+
+export async function replaceGuideScreenshot(
+  options: GuideMutationOptions & {
+    stepId: string;
+    screenshot: string;
+  },
+): Promise<GuideResult> {
+  const file = await readFile(options.screenshot);
+  const form = new FormData();
+  form.append(
+    "screenshot",
+    new Blob([file], {
+      type:
+        mediaTypes.get(path.extname(options.screenshot).toLowerCase()) ||
+        "application/octet-stream",
+    }),
+    path.basename(options.screenshot),
+  );
+  return guideRequest(
+    options,
+    `/api/guides/${encodeURIComponent(options.slug)}/steps/${encodeURIComponent(options.stepId)}/screenshot`,
+    {
+      method: "PUT",
+      headers: { "If-Match": String(options.editRevision) },
+      body: form,
+    },
+  );
 }
 
 export async function finishGuide(options: GuideMutationOptions): Promise<GuideOperationResult> {
@@ -240,7 +350,10 @@ async function guideRequest<T = GuideResult>(
   const result = parseResponse(body);
   if (!response.ok) {
     const detail = typeof result.message === "string" ? ` ${result.message}` : "";
-    throw new Error(`Schaffa request failed with HTTP ${response.status}.${detail}`);
+    throw new SchaffaRequestError(
+      response.status,
+      `Schaffa request failed with HTTP ${response.status}.${detail}`,
+    );
   }
   return result as T;
 }
