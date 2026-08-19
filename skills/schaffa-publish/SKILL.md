@@ -28,9 +28,15 @@ upload fails, run `npx schaffa guide sync`; do not recreate or reorder the local
 screenshots manually.
 
 Inspect the complete server-side step list with `npx schaffa guide status
---json`. Correct it with `guide edit-step`, `guide replace-screenshot`, and
-`guide delete-step`, using a one-based step number or exact step ID, before
-`guide publish`.
+--json`. Correct it with the full commands below, using a one-based step number
+or exact step ID, before publishing:
+
+```sh
+npx schaffa guide edit-step --step 2 --title "Choose New project" --text "Select New project."
+npx schaffa guide replace-screenshot --step 2 --screenshot ./correct-step.png
+npx schaffa guide delete-step --step 3
+npx schaffa guide publish --json
+```
 
 ```sh
 npx schaffa guide start --title "Project setup"

@@ -93,27 +93,33 @@ description: Use when the user asks for a step-by-step guide.
 
 # Schaffa Guide
 
-Keep \`SCHAFFA_TOKEN\` in the environment. Start recording before the first relevant action, not after the workflow is complete.
+Keep \`SCHAFFA_TOKEN\` in the environment. Start before the first relevant action. Keep \`.schaffa/guide-session.json\` and \`.schaffa/recordings/\` local and uncommitted; neither stores the token.
 
 Prefer the automatic recorder when the agent can operate a dedicated browser or native macOS app:
 
-\`npx schaffa record --title "<title>" --browser "<url>"\`
+- Browser: \`npx schaffa record --title "<title>" --browser "<url>"\`
+- Desktop: \`npx schaffa record --title "<title>" --desktop --app <bundle-id>\`
 
-\`npx schaffa record --title "<title>" --desktop --app <bundle-id>\`
+Primary clicks are highlighted, saved locally, and uploaded in order. Close the browser or press Ctrl+C to drain captures and create the draft. Use Alt+Shift+R to pause on private screens. After an upload failure, run \`npx schaffa guide sync\`; do not reorder screenshots manually.
 
-Every trusted primary click is highlighted, saved under \`.schaffa/recordings/<slug>/\`, and uploaded in order. Close the recording browser or press Ctrl+C to drain the capture queue and finish the guide as a draft. Use Alt+Shift+R to pause on private screens. If an upload fails, run \`npx schaffa guide sync\`; do not recreate or reorder the local screenshots manually.
+Inspect and correct the complete server-side draft before publishing. Use a one-based step number or exact step ID:
 
-Inspect the draft with \`npx schaffa guide status --json\`. Correct it with \`guide edit-step\`, \`guide replace-screenshot\`, and \`guide delete-step\`, using a one-based step number or exact step ID, then run \`npx schaffa guide publish --json\`.
+- Inspect: \`npx schaffa guide status --json\`
+- Edit: \`npx schaffa guide edit-step --step <number-or-id> --title "<title>" --text "<instruction>"\`
+- Replace an image: \`npx schaffa guide replace-screenshot --step <number-or-id> --screenshot <path>\`
+- Delete: \`npx schaffa guide delete-step --step <number-or-id>\`
 
 For mixed terminal, API, file, and browser workflows, use the manual lifecycle:
 
-\`npx schaffa guide start --title "<title>"\`
-
-\`npx schaffa guide step --title "<step>" --text "<instruction>" --action <type> --target "<target>" --verification "<expected-result>"\`
+- Start: \`npx schaffa guide start --title "<title>"\`
+- Add a step: \`npx schaffa guide step --title "<step>" --text "<instruction>" --action <type> --target "<target>" --verification "<expected-result>"\`
+- Finish: \`npx schaffa guide finish --json\`
 
 Record semantic state changes, not every technical click. Add \`--screenshot <path>\` only when visible state helps the reader. Never capture passwords, authentication, payments, private data, or secret-manager screens. Desktop mode ignores clicks outside the selected bundle ID, never reads editable accessibility values, and omits screenshots for secure controls. Visible form contents can still appear in screenshots, so review every step before publishing.
 
-For a manual recording, finish with \`npx schaffa guide finish --json\`. Inspect and fix preflight errors or possible secret findings before publishing. Return the published public URL.`,
+Writes use the persisted edit revision. On conflict, load and reconcile the current guide. Retry steps through their original idempotent manifest entry.
+
+Inspect and fix preflight errors or possible secret findings, then run \`npx schaffa guide publish --json\`. Return the published public URL.`,
   },
   {
     slug: "presentation",

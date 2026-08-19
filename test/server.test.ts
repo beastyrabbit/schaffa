@@ -376,6 +376,12 @@ test("serves one general read skill and focused writing skills", async () => {
   assert.match(fileSkill.markdown, /\$SCHAFFA_URL\/api\/files/);
   assert.doesNotMatch(htmlSkill.markdown, /npx schaffa upload/);
   assert.doesNotMatch(fileSkill.markdown, /npx schaffa upload/);
+  assert.match(guideSkill.markdown, /npx schaffa record --title "<title>" --browser/);
+  assert.match(guideSkill.markdown, /npx schaffa record --title "<title>" --desktop/);
+  assert.match(guideSkill.markdown, /npx schaffa guide sync/);
+  assert.match(guideSkill.markdown, /npx schaffa guide edit-step --step <number-or-id>/);
+  assert.match(guideSkill.markdown, /npx schaffa guide replace-screenshot/);
+  assert.match(guideSkill.markdown, /npx schaffa guide delete-step/);
   assert.match(guideSkill.markdown, /npx schaffa guide publish/);
   assert.match(presentationSkill.markdown, /npx schaffa publish/);
 
