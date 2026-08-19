@@ -83,6 +83,7 @@ function serializeMetadataWrite<T>(operation: () => Promise<T>): Promise<T> {
 
 export async function publishPage(input: {
   slug: string;
+  operation: "create" | "update";
   title?: string;
   html: Buffer;
   tokenId: string;
@@ -104,6 +105,7 @@ export function newPageSlug(): string {
 
 async function publishPageLocked(input: {
   slug: string;
+  operation: "create" | "update";
   title?: string;
   html: Buffer;
   tokenId: string;
@@ -133,6 +135,12 @@ async function publishPageLocked(input: {
   const existing = db().prepare("SELECT * FROM pages WHERE slug = ?").get(slug) as unknown as
     | PageRow
     | undefined;
+  if (input.operation === "update" && !existing) {
+    throw new AppError("Page not found.", 404, "not_found");
+  }
+  if (input.operation === "create" && existing) {
+    throw new AppError("Could not allocate a unique page slug.", 409, "slug_conflict");
+  }
   if (existing?.owner_token_id === anonymousActorId || existing?.expires_at) {
     throw new AppError("Anonymous pages cannot be updated.", 409, "anonymous_page");
   }

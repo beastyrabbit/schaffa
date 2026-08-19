@@ -22,7 +22,7 @@ const require = createRequire(import.meta.url);
 const help = `Schaffa publishes pages, presentations, files, and incrementally recorded guides.
 
 Usage:
-  schaffa upload <file> [--token <token>] [--slug <slug>] [--interactive] [--json]
+  schaffa upload <file> [--token <token>] [--interactive] [--json]
   schaffa publish <deck.md> --kind presentation [--export pdf] [--export pptx] [--json]
   schaffa guide start --title <title> [--description <text>] [--url <url>] [--language <tag>] [--json]
   schaffa guide step --title <title> --text <text> [--screenshot <path>] [--action <type>] [--target <text>] [--verification <text>] [--json]
@@ -39,7 +39,6 @@ The guide commands persist the active random slug and edit revision in
 Options:
   --token <token>  Use this bearer token instead of SCHAFFA_TOKEN.
                    Command-line tokens may be stored in shell history.
-  --slug <slug>    Publish at a chosen slug; reuse it to create the next version.
   --interactive    Run inline JavaScript in Schaffa's restricted sandbox.
   --json           Print the complete JSON response.
   -h, --help       Show this help.
@@ -50,7 +49,6 @@ export interface CliOptions {
   filePath: string;
   token?: string;
   baseUrl?: string;
-  slug?: string;
   interactive: boolean;
   json: boolean;
 }
@@ -66,7 +64,6 @@ export function parseCliArgs(
     options: {
       help: { type: "boolean", short: "h" },
       json: { type: "boolean" },
-      slug: { type: "string" },
       interactive: { type: "boolean" },
       token: { type: "string" },
     },
@@ -81,7 +78,6 @@ export function parseCliArgs(
     filePath: positionals[1],
     ...(token !== undefined ? { token } : {}),
     ...(environment.SCHAFFA_URL ? { baseUrl: environment.SCHAFFA_URL } : {}),
-    ...(values.slug ? { slug: values.slug } : {}),
     interactive: values.interactive || false,
     json: values.json || false,
   };

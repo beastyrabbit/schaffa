@@ -50,28 +50,20 @@ test("uploads a new HTML page anonymously without an authorization header", asyn
   assert.equal(requests[0].init.headers, undefined);
 });
 
-test("requires a token for files and page updates", async () => {
+test("requires a token for files", async () => {
   const filePath = path.join(directory, "private.png");
-  const htmlPath = path.join(directory, "update-without-token.html");
   await writeFile(filePath, Buffer.from([1, 2, 3]));
-  await writeFile(htmlPath, "<h1>Update</h1>");
 
   await assert.rejects(upload({ filePath }), /SCHAFFA_TOKEN is required to upload files/);
-  await assert.rejects(
-    upload({ filePath: htmlPath, slug: "abc234def567" }),
-    /SCHAFFA_TOKEN is required to publish at a chosen slug/,
-  );
 });
 
 test("accepts a command-line token and gives it precedence over the environment", () => {
   const commandToken = `sfa_${"b".repeat(43)}`;
-  const options = parseCliArgs(
-    ["upload", "plan.html", "--token", commandToken, "--slug", "abc234def567"],
-    { SCHAFFA_TOKEN: token },
-  );
+  const options = parseCliArgs(["upload", "plan.html", "--token", commandToken], {
+    SCHAFFA_TOKEN: token,
+  });
   assert.equal("help" in options, false);
   assert.equal(options.token, commandToken);
-  assert.equal(options.slug, "abc234def567");
 });
 
 test("runs when the package binary points to the CLI through a symlink", async () => {
@@ -82,23 +74,28 @@ test("runs when the package binary points to the CLI through a symlink", async (
   assert.equal(stderr, "");
 });
 
-test("updates an HTML page when a slug is supplied", async () => {
-  const filePath = path.join(directory, "update.html");
-  await writeFile(filePath, "<h1>Updated</h1>");
+test("rejects the removed slug option and always creates through the random-ID endpoint", async () => {
+  assert.throws(
+    () => parseCliArgs(["upload", "plan.html", "--slug", "readable-name"]),
+    /Unknown option '--slug'/,
+  );
+
+  const filePath = path.join(directory, "legacy-client.html");
+  await writeFile(filePath, "<h1>New page</h1>");
   const requests = [];
   await upload({
     filePath,
     token,
-    slug: "abc234def567",
+    slug: "readable-name",
     baseUrl: "http://schaffa.localhost:1355",
     fetch: async (url, init) => {
       requests.push({ url: String(url), init });
-      return jsonResponse({ publicUrl: "http://schaffa.localhost:1355/p/abc234def567" }, 200);
+      return jsonResponse({ publicUrl: "http://schaffa.localhost:1355/p/4z9nm23wk1qp8r7t" }, 201);
     },
   });
 
-  assert.equal(requests[0].url, "http://schaffa.localhost:1355/api/pages/abc234def567");
-  assert.equal(requests[0].init.method, "PUT");
+  assert.equal(requests[0].url, "http://schaffa.localhost:1355/api/pages");
+  assert.equal(requests[0].init.method, "POST");
 });
 
 test("publishes interactive HTML only with a token and explicit query type", async () => {

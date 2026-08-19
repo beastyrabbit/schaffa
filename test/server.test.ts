@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -328,7 +328,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.equal(specification.json().paths["/api/settings"], undefined);
   const pagePut = specification.json().paths["/api/pages/{slug}"].put;
   assert.ok(pagePut.responses["202"]);
-  assert.equal(pagePut.responses["404"], undefined);
+  assert.ok(pagePut.responses["404"]);
   assert.ok(pagePut.responses["413"]);
   assert.ok(pagePut.responses["429"]);
   assert.ok(pagePut.responses["503"]);
@@ -474,17 +474,12 @@ test("publishes immutable page versions under a stable slug", async () => {
 });
 
 test("retains a page title when an update omits it", async () => {
-  const firstBody = multipart("html", "titled.html", "text/html", "<h1>Version one</h1>");
-  const first = await app.inject({
-    method: "PUT",
-    url: "/api/pages/titled-page?title=Release%20plan",
-    headers: {
-      host: "schaffa.test",
-      authorization: `Bearer ${bootstrapToken}`,
-      "content-type": firstBody.contentType,
-    },
-    payload: firstBody.payload,
-  });
+  const first = await publishHtmlWithToken(
+    "titled-page",
+    "<h1>Version one</h1>",
+    bootstrapToken,
+    "Release plan",
+  );
   assert.equal(first.statusCode, 202);
   assert.equal(first.json().title, "Release plan");
 
@@ -576,16 +571,34 @@ test("rejects repeated page query parameters as a client error", async () => {
   assert.equal(response.json().error, "invalid_query");
 });
 
-test("allows custom slugs that only overlap top-level routes", async () => {
-  const created = await publishHtml("api", "<h1>Namespaced page</h1>");
+test("keeps legacy readable slugs but rejects new caller-chosen slugs", async () => {
+  const created = await publishHtml("legacy-readable-page", "<h1>Existing page</h1>");
   assert.equal(created.statusCode, 202);
-  const page = await app.inject({
+  const existing = await app.inject({
     method: "GET",
-    url: "/p/api",
+    url: "/p/legacy-readable-page",
     headers: { host: "schaffa.test" },
   });
-  assert.equal(page.statusCode, 200);
-  assert.equal(page.body, "<h1>Namespaced page</h1>");
+  assert.equal(existing.statusCode, 200);
+  assert.equal(existing.body, "<h1>Existing page</h1>");
+
+  const body = multipart("html", "named.html", "text/html", "<h1>New named page</h1>");
+  const rejected = await app.inject({
+    method: "PUT",
+    url: "/api/pages/new-readable-page",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${bootstrapToken}`,
+      "content-type": body.contentType,
+    },
+    payload: body.payload,
+  });
+  assert.equal(rejected.statusCode, 404);
+  assert.equal(rejected.json().error, "not_found");
+  assert.equal(
+    db().prepare("SELECT 1 FROM pages WHERE slug = ?").get("new-readable-page"),
+    undefined,
+  );
 });
 
 test("returns 404 when page metadata outlives its stored content", async () => {
@@ -1814,8 +1827,8 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
 
   const body = multipart("html", "interactive.html", "text/html", interactiveHtml);
   const published = await app.inject({
-    method: "PUT",
-    url: "/api/pages/trusted-interactive?type=interactive",
+    method: "POST",
+    url: "/api/pages?type=interactive",
     headers: {
       host: "schaffa.test",
       authorization: `Bearer ${token}`,
@@ -1826,20 +1839,22 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
   assert.equal(published.statusCode, 202);
   await finishPendingScans();
   assert.equal(published.json().kind, "interactive");
+  const pageSlug = published.json().slug as string;
+  assert.match(pageSlug, /^[a-z0-9]{16}$/);
 
   const warning = await app.inject({
     method: "GET",
-    url: "/p/trusted-interactive",
+    url: `/p/${pageSlug}`,
     headers: { host: "schaffa.test" },
   });
   assert.equal(warning.statusCode, 200);
   assert.match(warning.body, /Diese Seite führt Code aus/);
   assert.doesNotMatch(warning.body, /document\.body\.dataset/);
-  assert.match(warning.body, /\/p\/trusted-interactive\/run/);
+  assert.match(warning.body, new RegExp(`/p/${pageSlug}/run`));
 
   const run = await app.inject({
     method: "GET",
-    url: "/p/trusted-interactive/run",
+    url: `/p/${pageSlug}/run`,
     headers: { host: "schaffa.test" },
   });
   assert.equal(run.statusCode, 200);
@@ -1853,7 +1868,7 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
 
   const raw = await app.inject({
     method: "GET",
-    url: "/p/trusted-interactive/raw",
+    url: `/p/${pageSlug}/raw`,
     headers: { host: "schaffa.test" },
   });
   assert.match(raw.headers["content-type"] || "", /^text\/plain/);
@@ -1881,7 +1896,7 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
   const staticBody = multipart("html", "static.html", "text/html", "<h1>Static now</h1>");
   const kindChange = await app.inject({
     method: "PUT",
-    url: "/api/pages/trusted-interactive",
+    url: `/api/pages/${pageSlug}`,
     headers: {
       host: "schaffa.test",
       authorization: `Bearer ${bootstrapToken}`,
@@ -1895,14 +1910,14 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
   await updateSettings({ interactivePublishingEnabled: false });
   const globallyStoppedRun = await app.inject({
     method: "GET",
-    url: "/p/trusted-interactive/run",
+    url: `/p/${pageSlug}/run`,
     headers: { host: "schaffa.test" },
   });
   assert.equal(globallyStoppedRun.statusCode, 503);
   assert.equal(globallyStoppedRun.json().error, "interactive_disabled");
   const globallyStoppedWarning = await app.inject({
     method: "GET",
-    url: "/p/trusted-interactive",
+    url: `/p/${pageSlug}`,
     headers: { host: "schaffa.test" },
   });
   assert.doesNotMatch(globallyStoppedWarning.body, /Seite isoliert starten/);
@@ -1920,14 +1935,14 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
   });
   const stoppedRun = await app.inject({
     method: "GET",
-    url: "/p/trusted-interactive/run",
+    url: `/p/${pageSlug}/run`,
     headers: { host: "schaffa.test" },
   });
   assert.equal(stoppedRun.statusCode, 503);
   assert.equal(stoppedRun.json().error, "interactive_disabled");
   const stoppedWarning = await app.inject({
     method: "GET",
-    url: "/p/trusted-interactive",
+    url: `/p/${pageSlug}`,
     headers: { host: "schaffa.test" },
   });
   assert.match(stoppedWarning.body, /Ausführung wurde.+deaktiviert/);
@@ -2162,23 +2177,49 @@ function responseCookie(
   return cookie || "";
 }
 
-async function publishHtmlWithToken(slug: string, html: string, token: string) {
-  const response = await queueHtmlWithToken(slug, html, token);
+async function publishHtmlWithToken(slug: string, html: string, token: string, title?: string) {
+  const response = await queueHtmlWithToken(slug, html, token, title);
   if (response.statusCode === 202) await finishPendingScans();
   return response;
 }
 
-async function queueHtmlWithToken(slug: string, html: string, token: string) {
+async function queueHtmlWithToken(slug: string, html: string, token: string, title?: string) {
+  const exists = Boolean(db().prepare("SELECT 1 FROM pages WHERE slug = ?").get(slug));
   const body = multipart("html", "page.html", "text/html", html);
-  return app.inject({
-    method: "PUT",
-    url: `/api/pages/${slug}`,
+  const response = await app.inject({
+    method: exists ? "PUT" : "POST",
+    url: `${exists ? `/api/pages/${slug}` : "/api/pages"}${title ? `?title=${encodeURIComponent(title)}` : ""}`,
     headers: {
       host: "schaffa.test",
       authorization: `Bearer ${token}`,
       "content-type": body.contentType,
     },
     payload: body.payload,
+  });
+  if (exists || response.statusCode !== 202) return response;
+
+  const result = response.json() as Record<string, unknown>;
+  const randomSlug = String(result.slug);
+  await rename(
+    path.join(dataDir, "quarantine", "pages", randomSlug),
+    path.join(dataDir, "quarantine", "pages", slug),
+  );
+  db()
+    .prepare(
+      "UPDATE page_versions SET storage_path = replace(storage_path, ?, ?) WHERE page_id = (SELECT id FROM pages WHERE slug = ?)",
+    )
+    .run(`/pages/${randomSlug}/`, `/pages/${slug}/`, randomSlug);
+  db().prepare("UPDATE pages SET slug = ? WHERE slug = ?").run(slug, randomSlug);
+  const aliased = JSON.parse(JSON.stringify(result).replaceAll(randomSlug, slug)) as Record<
+    string,
+    unknown
+  >;
+  return new Proxy(response, {
+    get(target, property, receiver) {
+      if (property === "body") return JSON.stringify(aliased);
+      if (property === "json") return () => aliased;
+      return Reflect.get(target, property, receiver);
+    },
   });
 }
 

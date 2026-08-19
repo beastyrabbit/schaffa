@@ -218,7 +218,7 @@ npx schaffa upload /tmp/schaffa-smoke.html
 
 Open the returned URL, then remove the smoke page through the admin UI. Also
 verify a user can sign in at `/account`, create a dedicated agent token, upload
-a permanent page, update it with `--slug`, and revoke the token. If Interactive
+a permanent page with a random ID, and revoke the token. If Interactive
 Publishing is enabled, also verify an unapproved user is denied, an approved
 user can create an interactive-only token, and `/run` returns the restrictive
 sandbox CSP before disabling the feature again.

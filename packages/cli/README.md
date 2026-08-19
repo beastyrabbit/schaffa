@@ -33,7 +33,7 @@ npx schaffa upload ./diagram.png --token "sfa_…"
 
 ## Use a token
 
-A token is required for permanent HTML pages, file uploads, and updates to an existing page.
+A token is required for permanent HTML pages and file uploads.
 
 ```sh
 # Automatically read from the environment
@@ -46,13 +46,7 @@ npx schaffa upload ./plan.html --token "sfa_…"
 
 `--token` takes precedence when both methods are used. Command-line arguments may be retained in shell history, so prefer `SCHAFFA_TOKEN` when that is a concern.
 
-To publish a permanent HTML page at a chosen slug, pass `--slug`. Reusing that slug later creates a new immutable version:
-
-```sh
-npx schaffa upload ./plan.html --slug abc234def567
-```
-
-Add `--json` to print the complete API response instead of only the public URL.
+Every new page receives a random, non-semantic ID. Add `--json` to print the complete API response instead of only the public URL.
 
 ## Publish trusted interactive HTML
 

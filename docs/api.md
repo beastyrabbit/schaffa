@@ -31,17 +31,17 @@ curl --fail-with-body --silent --show-error \
 
 Add `-H "Authorization: Bearer $SCHAFFA_TOKEN"` to make the new page permanent. Page and file writes return `202 Accepted` with `publicUrl`, `scanStatus: "pending"`, and `statusUrl`. The stable public URL displays a self-refreshing status page while the payload remains quarantined. Clean content replaces that page at the same URL. If ClamAV is unavailable, the worker keeps retrying; unscanned bytes are never public. Malware deletes the payload and leaves a rejection tombstone with a sanitized signature.
 
-Create a permanent page at a chosen slug, or update it later by reusing that slug:
+Update an existing permanent page by using its server-generated ID:
 
 ```sh
 curl --fail-with-body --silent --show-error \
   -X PUT \
   -H "Authorization: Bearer $SCHAFFA_TOKEN" \
   -F "html=@plan.html;type=text/html" \
-  "$SCHAFFA_URL/api/pages/$SLUG"
+  "$SCHAFFA_URL/api/pages/$ID"
 ```
 
-An unused slug creates version 1. Only the token that created a permanent page may update it; admin tokens may update any permanent page. Anonymous pages cannot be claimed or updated, and their expiration is never cleared. Each update creates the next immutable version. The oldest version is deleted when the configured per-page version cap is exceeded:
+An unknown ID returns `404` and never creates a page. Only the token that created a permanent page may update it; admin tokens may update any permanent page. Anonymous pages cannot be claimed or updated, and their expiration is never cleared. Each update creates the next immutable version. The oldest version is deleted when the configured per-page version cap is exceeded.
 
 Both page endpoints accept an optional `?title=` query parameter of up to 160 characters. Omitting it during an update retains the existing title.
 
@@ -64,7 +64,7 @@ The public page URL shows a warning screen. Continuing to `/run` executes only i
 | `/p/:slug/status` | Latest version scan status as JSON |
 | `/p/:slug/:version/status` | Specific version scan status as JSON |
 
-Server-generated page slugs contain approximately 83 random bits; caller-chosen slugs have only the entropy supplied by the caller. Page URLs are public identifiers—not access control. Treat them the same way as file URLs and use admin takedown when a URL or its content is exposed unintentionally.
+Server-generated page IDs contain approximately 83 random bits. Existing pages with legacy readable slugs remain valid, but new readable slugs cannot be created. Page URLs are public identifiers—not access control. Treat them the same way as file URLs and use admin takedown when a URL or its content is exposed unintentionally.
 
 Schaffa does not inject CSS into uploaded content. Upload one complete UTF-8 HTML file, including its own `<style>` block when needed. Static pages reject scripts, forms, frames, event handlers, JavaScript URLs, and meta refresh.
 

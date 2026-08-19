@@ -43,9 +43,9 @@ export function openApiDocument() {
       "/api/pages/{slug}": {
         put: {
           tags: ["Pages"],
-          summary: "Publish a page at a chosen slug",
+          summary: "Publish a new version of an existing page",
           description:
-            "Creates a permanent page at an unused slug or publishes the next immutable version of a page owned by the bearer token.",
+            "Publishes the next immutable version of an existing permanent page owned by the bearer token. New pages are created only through POST /api/pages with a server-generated random identifier.",
           operationId: "updatePage",
           security: [{ bearerAuth: [] }],
           parameters: [slugParameter, titleParameter, pageTypeParameter],
@@ -56,6 +56,7 @@ export function openApiDocument() {
             }),
             "401": errorResponse("Missing or invalid upload token"),
             "403": errorResponse("The token does not own this page"),
+            "404": errorResponse("Page not found"),
             "409": errorResponse("Anonymous pages cannot be updated"),
             "413": errorResponse("HTML exceeds the configured size limit"),
             "429": errorResponse("Upload rate limit exceeded"),

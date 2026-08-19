@@ -5,7 +5,6 @@ export interface UploadOptions {
   filePath: string;
   token?: string;
   baseUrl?: string;
-  slug?: string;
   interactive?: boolean;
   fetch?: typeof fetch;
 }
@@ -75,9 +74,6 @@ export async function upload(options: UploadOptions): Promise<UploadResult> {
   const origin = canonicalOrigin(options.baseUrl || "https://schaffa.dev");
   const extension = path.extname(options.filePath).toLowerCase();
   const isHtml = extension === ".html" || extension === ".htm";
-  if (options.slug && !isHtml) {
-    throw new Error("--slug can only be used with an HTML file.");
-  }
   if (options.interactive && !isHtml) {
     throw new Error("--interactive can only be used with an HTML file.");
   }
@@ -89,29 +85,18 @@ export async function upload(options: UploadOptions): Promise<UploadResult> {
       "SCHAFFA_TOKEN is required to upload files. Anonymous uploads accept HTML only.",
     );
   }
-  if (!options.token && options.slug) {
-    throw new Error("SCHAFFA_TOKEN is required to publish at a chosen slug.");
-  }
-  if (options.slug && !isValidSlug(options.slug)) {
-    throw new Error("--slug must contain 1-63 lowercase letters, numbers, or hyphens.");
-  }
-
   const form = new FormData();
   const data = await readFile(options.filePath);
   const mediaType = isHtml ? "text/html" : mediaTypes.get(extension) || "application/octet-stream";
   const field = isHtml ? "html" : "file";
   form.append(field, new Blob([data], { type: mediaType }), path.basename(options.filePath));
 
-  const endpoint = isHtml
-    ? options.slug
-      ? `/api/pages/${encodeURIComponent(options.slug)}`
-      : "/api/pages"
-    : "/api/files";
+  const endpoint = isHtml ? "/api/pages" : "/api/files";
   const headers = options.token ? { Authorization: `Bearer ${options.token}` } : undefined;
   const target = new URL(endpoint, origin);
   if (options.interactive) target.searchParams.set("type", "interactive");
   const response = await (options.fetch || fetch)(target, {
-    method: options.slug ? "PUT" : "POST",
+    method: "POST",
     ...(headers ? { headers } : {}),
     body: form,
   });
@@ -277,10 +262,6 @@ function canonicalOrigin(value: string): string {
     throw new Error("SCHAFFA_URL must be an HTTP or HTTPS origin without a path or credentials.");
   }
   return parsed.origin;
-}
-
-function isValidSlug(value: string): boolean {
-  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value);
 }
 
 function parseResponse(body: string): Record<string, unknown> {

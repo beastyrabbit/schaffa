@@ -82,7 +82,7 @@ Publish a Marp presentation and its export artifacts:
 npx schaffa publish deck.md --kind presentation --export pdf --export pptx
 ```
 
-The CLI defaults to `https://schaffa.dev`. New HTML pages work without a token and disappear after one hour. For permanent pages, files, presentations, guides, and publishing at a chosen `--slug <slug>`, set `SCHAFFA_TOKEN` or pass `--token <token>` directly. Reusing a chosen slug creates the next immutable version.
+The CLI defaults to `https://schaffa.dev`. Every new HTML page receives a random, non-semantic ID. New HTML pages work without a token and disappear after one hour. For permanent pages, files, presentations, and guides, set `SCHAFFA_TOKEN` or pass `--token <token>` directly.
 
 Trusted users can create a separate Interactive token in their account and publish inline JavaScript with `npx schaffa upload ./plan.html --interactive`. Visitors see a warning before the code runs in a sandbox without network, storage, forms, pop-ups, or navigation.
 

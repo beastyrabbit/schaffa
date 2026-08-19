@@ -438,6 +438,7 @@ export function buildServer(
     const html = await part.toBuffer();
     const result = await publishPage({
       slug: request.params.slug,
+      operation: "update",
       ...optionalTitle(request.query.title),
       html,
       tokenId: auth.id,
@@ -464,6 +465,7 @@ export function buildServer(
       const html = await part.toBuffer();
       const result = await publishPage({
         slug: newPageSlug(),
+        operation: "create",
         ...optionalTitle(request.query.title),
         html,
         tokenId: auth?.id || anonymousActorId,
