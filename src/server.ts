@@ -20,7 +20,7 @@ import { config } from "./config.js";
 import type { PageKind, TokenScope } from "./db.js";
 import { closeDb, db } from "./db.js";
 import { AppError } from "./errors.js";
-import { findExampleSkill, llmText } from "./example-skills.js";
+import { allSkillsMarkdown, findExampleSkill, llmText } from "./example-skills.js";
 import {
   addGuideStep,
   createGuide,
@@ -252,6 +252,10 @@ export function buildServer(
   app.get("/skills", async (_request, reply) => {
     publicSiteHeaders(reply);
     return reply.type("text/html; charset=utf-8").send(renderSkills());
+  });
+  app.get("/skills/all.md", async (_request, reply) => {
+    publicTextHeaders(reply);
+    return reply.type("text/markdown; charset=utf-8").send(allSkillsMarkdown());
   });
   app.get<{ Params: { slug: string } }>("/skills/:slug/SKILL.md", async (request, reply) => {
     const skill = findExampleSkill(request.params.slug);

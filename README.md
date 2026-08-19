@@ -107,6 +107,7 @@ Production deployments should pin the digest recorded in the Forgejo release.
 - [Deployment and Pangolin](docs/deployment.md)
 - [Detailed self-hosting with Docker Compose and Infisical](docs/self-hosting.md)
 - [HTTP API and URL model](docs/api.md)
+- [Website skill design and extension guide](docs/skills.md)
 - [Codex publishing skill](skills/schaffa-publish/SKILL.md)
 
 Run all project checks with `pnpm check`.

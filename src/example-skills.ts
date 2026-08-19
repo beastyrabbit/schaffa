@@ -9,32 +9,152 @@ export interface ExampleSkill {
 export const exampleSkills: ExampleSkill[] = [
   {
     slug: "read",
-    title: "Read",
+    title: "Read Schaffa",
     markdown: `---
 name: schaffa-read
-description: This skill should be used to read any Schaffa URL.
+description: Use when the user provides a Schaffa URL to read.
 ---
 
-# Read
+# Schaffa Read
 
-Run \`curl -fsSL "<url>"\`. Works for \`/p/\`, \`/f/\`, and \`/g/\`.`,
+Fetch the supplied URL with the shell. Do not use web search or a browser to retrieve it.
+
+\`curl --fail --silent --show-error --location "<url>"\`
+
+- Page URLs use \`/p/<slug>\`; append \`/raw\` when exact HTML source is needed.
+- File URLs use \`/f/<id>.<ext>\`; save binary files with \`--output <temporary-file>\` before inspecting them.
+- Guide URLs use \`/g/<slug>\`; use \`.md\` or \`.json\` when structured guide content is easier to process.
+
+If curl fails, report its HTTP or network error. Do not substitute search results.`,
   },
   {
-    slug: "write",
-    title: "Write",
+    slug: "html",
+    title: "Write HTML",
     markdown: `---
-name: schaffa-write
-description: This skill should be used to publish a page or file to Schaffa.
+name: schaffa-html
+description: Use when the user asks to communicate through an HTML document, or if they mention "HTML" with no additional context.
 ---
 
-# Write
+# Schaffa HTML
 
-Keep \`SCHAFFA_TOKEN\` in the environment. Run \`npx schaffa upload <file>\`; return the public URL.`,
+Use this skill for a readable plan, spec, write-up, findings, summary, report, comparison, or set of UI mocks. Do not use it for HTML that ships as part of a product.
+
+Create one complete, self-contained HTML file capped at 512 KB.
+
+- Write it like a spec, not a landing page: dense, scannable, and without hero copy or decorative chrome.
+- Make it mobile-readable with a responsive viewport and no fixed-width layout.
+- Use semantic HTML, inline CSS, inline SVG, and data-URL images.
+- For UI mocks, render real styled variants, label them A, B, C, and so on, and arrange them for direct comparison.
+- Do not include scripts, forms, frames, event handlers, JavaScript URLs, meta refresh, external stylesheets, or external assets.
+- Never include secrets, private URLs, or local filesystem paths.
+
+Set \`SCHAFFA_URL\` to the Schaffa instance origin, then publish the finished file directly:
+
+\`\`\`sh
+curl --fail-with-body --silent --show-error \\
+  -F "html=@<html-file>;type=text/html" \\
+  "$SCHAFFA_URL/api/pages"
+\`\`\`
+
+Add \`-H "Authorization: Bearer $SCHAFFA_TOKEN"\` for a permanent page. Without it, the page expires after one hour. Keep one local file across revisions; for a permanent page, upload later versions with \`PUT /api/pages/<slug>\` so its public URL stays stable.
+
+Read \`publicUrl\` from the JSON response and return it with the local path. Never claim the document is hosted before the upload succeeds, and do not verify it in a browser unless the user asks.`,
+  },
+  {
+    slug: "file",
+    title: "Upload File",
+    markdown: `---
+name: schaffa-file
+description: Use when the user asks to upload or share a file, or a public file URL is needed.
+---
+
+# Schaffa File
+
+Set \`SCHAFFA_URL\` to the Schaffa instance origin and require \`SCHAFFA_TOKEN\` in the environment. If the token is unset, tell the user instead of guessing.
+
+\`\`\`sh
+curl --fail-with-body --silent --show-error \\
+  -H "Authorization: Bearer $SCHAFFA_TOKEN" \\
+  -F "file=@<file>" \\
+  "$SCHAFFA_URL/api/files"
+\`\`\`
+
+Read \`publicUrl\` from the JSON response and return it. On HTTP 401, report that the token is missing or invalid and do not retry.
+
+Use only files the user placed in scope. Treat the URL as public. Schaffa removes the original filename; recognized images are stripped of metadata, resized when needed, converted to WebP, and the original image is discarded. Never write the token value literally or expose request headers.`,
+  },
+  {
+    slug: "guide",
+    title: "Write Guide",
+    markdown: `---
+name: schaffa-guide
+description: Use when the user asks for a step-by-step guide.
+---
+
+# Schaffa Guide
+
+Keep \`SCHAFFA_TOKEN\` in the environment. Start recording before the first relevant action, not after the workflow is complete.
+
+Prefer the automatic recorder when the agent can operate a dedicated browser or native macOS app:
+
+\`npx schaffa record --title "<title>" --browser "<url>"\`
+
+\`npx schaffa record --title "<title>" --desktop --app <bundle-id>\`
+
+Every trusted primary click is highlighted, saved under \`.schaffa/recordings/<slug>/\`, and uploaded in order. Close the recording browser or press Ctrl+C to drain the capture queue and finish the guide as a draft. Use Alt+Shift+R to pause on private screens. If an upload fails, run \`npx schaffa guide sync\`; do not recreate or reorder the local screenshots manually.
+
+Inspect the draft with \`npx schaffa guide status --json\`. Correct it with \`guide edit-step\`, \`guide replace-screenshot\`, and \`guide delete-step\`, using a one-based step number or exact step ID, then run \`npx schaffa guide publish --json\`.
+
+For mixed terminal, API, file, and browser workflows, use the manual lifecycle:
+
+\`npx schaffa guide start --title "<title>"\`
+
+\`npx schaffa guide step --title "<step>" --text "<instruction>" --action <type> --target "<target>" --verification "<expected-result>"\`
+
+Record semantic state changes, not every technical click. Add \`--screenshot <path>\` only when visible state helps the reader. Never capture passwords, authentication, payments, private data, or secret-manager screens. Desktop mode ignores clicks outside the selected bundle ID, never reads editable accessibility values, and omits screenshots for secure controls. Visible form contents can still appear in screenshots, so review every step before publishing.
+
+For a manual recording, finish with \`npx schaffa guide finish --json\`. Inspect and fix preflight errors or possible secret findings before publishing. Return the published public URL.`,
+  },
+  {
+    slug: "presentation",
+    title: "Write Presentation",
+    markdown: `---
+name: schaffa-presentation
+description: Use when the user asks for a presentation, slide deck, or slides.
+---
+
+# Schaffa Presentation
+
+Keep \`SCHAFFA_TOKEN\` in the environment and create the deck as Marp Markdown. Keep images local; do not use remote fonts, CDNs, or external image URLs.
+
+Publish the HTML deck and its Markdown source:
+
+\`npx schaffa publish <deck.md> --kind presentation --json\`
+
+Add \`--export pdf\`, \`--export pptx\`, or both when the user wants downloadable exports. Return the presentation's public URL and any requested export URLs from the JSON response.`,
   },
 ];
 
 export function findExampleSkill(slug: string): ExampleSkill | undefined {
   return exampleSkills.find((skill) => skill.slug === slug);
+}
+
+export function allSkillsMarkdown(): string {
+  const sections = exampleSkills.flatMap((skill) => [
+    `## ${skill.title}`,
+    "",
+    "````markdown",
+    skill.markdown,
+    "````",
+    "",
+  ]);
+  return [
+    "# Schaffa skills",
+    "",
+    "Each section contains one complete SKILL.md file.",
+    "",
+    ...sections,
+  ].join("\n");
 }
 
 export function llmText(): string {
@@ -52,19 +172,33 @@ All returned publication URLs are public. Read any of them with:
 
 \`curl -fsSL "<url>"\`
 
-## Tools
+## Skills
 
-### Read skill
+Install the general read skill and only the writing skills needed for the task.
 
-Use when a Schaffa URL is provided. It fetches the URL with curl and works for pages, files, and guides.
+### Read Schaffa
+
+Use for every Schaffa URL, including pages, files, guides, and presentations.
 
 ${config.baseUrl}/skills/read/SKILL.md
 
-### Write skill
+### Write HTML
 
-Use to publish a local page or file. It runs \`npx schaffa upload <file>\` and returns the public URL. Keep \`SCHAFFA_TOKEN\` in the environment.
+Use for readable plans, specs, reports, comparisons, and UI mocks.
 
-${config.baseUrl}/skills/write/SKILL.md
+${config.baseUrl}/skills/html/SKILL.md
+
+### Upload a file
+
+${config.baseUrl}/skills/file/SKILL.md
+
+### Write a guide
+
+${config.baseUrl}/skills/guide/SKILL.md
+
+### Write a presentation
+
+${config.baseUrl}/skills/presentation/SKILL.md
 
 ### HTTP API
 
@@ -83,7 +217,8 @@ ${config.baseUrl}/metadata/openapi.json
 
 ## Resources
 
-- Example skills: ${config.baseUrl}/skills
+- Schaffa skills: ${config.baseUrl}/skills
+- All skills as Markdown: ${config.baseUrl}/skills/all.md
 - API reference: ${config.baseUrl}/api
 `;
 }

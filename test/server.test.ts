@@ -97,7 +97,7 @@ const { buildServer } = await import("../src/server.js");
 const { config } = await import("../src/config.js");
 const { db } = await import("../src/db.js");
 const { createToken, seedBootstrapToken } = await import("../src/auth.js");
-const { exampleSkills } = await import("../src/example-skills.js");
+const { allSkillsMarkdown, exampleSkills } = await import("../src/example-skills.js");
 const { purgeRetainedAnonymousPages } = await import("../src/service.js");
 const { pendingScanCount, processNextPendingScan } = await import("../src/scan-worker.js");
 const app = buildServer({
@@ -352,15 +352,32 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.ok(specification.json().components.schemas.FilePublication.required.includes("sha256"));
 });
 
-test("serves concise example skills and LLM discovery text", async () => {
-  assert.equal(exampleSkills.length, 2);
+test("serves one general read skill and focused writing skills", async () => {
+  assert.equal(exampleSkills.length, 5);
   const readSkill = exampleSkills.find((skill) => skill.slug === "read");
-  const writeSkill = exampleSkills.find((skill) => skill.slug === "write");
+  const htmlSkill = exampleSkills.find((skill) => skill.slug === "html");
+  const fileSkill = exampleSkills.find((skill) => skill.slug === "file");
+  const guideSkill = exampleSkills.find((skill) => skill.slug === "guide");
+  const presentationSkill = exampleSkills.find((skill) => skill.slug === "presentation");
   assert.ok(readSkill);
-  assert.ok(writeSkill);
-  assert.match(readSkill.markdown, /curl -fsSL/);
+  assert.ok(htmlSkill);
+  assert.ok(fileSkill);
+  assert.ok(guideSkill);
+  assert.ok(presentationSkill);
+  assert.match(readSkill.markdown, /curl --fail --silent --show-error --location/);
   for (const route of ["/p/", "/f/", "/g/"]) assert.match(readSkill.markdown, new RegExp(route));
-  assert.match(writeSkill.markdown, /npx schaffa upload/);
+  assert.match(
+    htmlSkill.markdown,
+    /description: Use when the user asks to communicate through an HTML document, or if they mention "HTML" with no additional context\./,
+  );
+  assert.match(htmlSkill.markdown, /-F "html=@<html-file>;type=text\/html"/);
+  assert.match(htmlSkill.markdown, /\$SCHAFFA_URL\/api\/pages/);
+  assert.match(fileSkill.markdown, /-F "file=@<file>"/);
+  assert.match(fileSkill.markdown, /\$SCHAFFA_URL\/api\/files/);
+  assert.doesNotMatch(htmlSkill.markdown, /npx schaffa upload/);
+  assert.doesNotMatch(fileSkill.markdown, /npx schaffa upload/);
+  assert.match(guideSkill.markdown, /npx schaffa guide publish/);
+  assert.match(presentationSkill.markdown, /npx schaffa publish/);
 
   const page = await app.inject({
     method: "GET",
@@ -370,13 +387,18 @@ test("serves concise example skills and LLM discovery text", async () => {
   assert.equal(page.statusCode, 200);
   assert.match(page.headers["content-type"] || "", /^text\/html/);
   assert.match(page.body, /<html lang="en">/);
-  assert.match(page.body, /Copy one complete/);
-  assert.match(page.body, /curl -fsSL "&lt;schaffa-url&gt;"/);
+  assert.match(page.body, /general read skill/);
+  assert.match(page.body, /curl --fail --silent --show-error --location/);
+  assert.match(page.body, /href="\/skills\/all\.md"/);
 
   for (const skill of exampleSkills) {
-    assert.ok(skill.markdown.trim().split("\n").length <= 12);
-    assert.ok(skill.markdown.length < 400);
+    assert.ok(skill.markdown.trim().split("\n").length <= 40);
+    assert.ok(skill.markdown.length < 2_500);
     assert.match(skill.markdown, /^---\nname: schaffa-/);
+    assert.match(skill.markdown, /^---\nname: schaffa-[^\n]+\ndescription: Use when /);
+    const description = skill.markdown.match(/^description: (.+)$/m)?.[1];
+    assert.ok(description);
+    assert.ok(description.length <= 140);
     assert.match(page.body, new RegExp(`href="/skills/${skill.slug}/SKILL\\.md"`));
     const raw = await app.inject({
       method: "GET",
@@ -396,6 +418,17 @@ test("serves concise example skills and LLM discovery text", async () => {
   });
   assert.equal(missing.statusCode, 404);
 
+  const allSkills = await app.inject({
+    method: "GET",
+    url: "/skills/all.md",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(allSkills.statusCode, 200);
+  assert.match(allSkills.headers["content-type"] || "", /^text\/markdown/);
+  assert.match(String(allSkills.headers["content-security-policy"]), /default-src 'none'/);
+  assert.equal(allSkills.body, allSkillsMarkdown());
+  for (const skill of exampleSkills) assert.ok(allSkills.body.includes(skill.markdown));
+
   const llm = await app.inject({
     method: "GET",
     url: "/llm.txt",
@@ -410,7 +443,7 @@ test("serves concise example skills and LLM discovery text", async () => {
   assert.match(llm.headers["content-type"] || "", /^text\/plain/);
   assert.match(String(llm.headers["content-security-policy"]), /default-src 'none'/);
   assert.equal(llm.body, llms.body);
-  assert.ok(llm.body.trim().split("\n").length <= 60);
+  assert.ok(llm.body.trim().split("\n").length <= 80);
   assert.match(llm.body, /\/p\/<slug>.*published HTML page/);
   assert.match(llm.body, /\/f\/<id>\.<ext>.*published file/);
   assert.match(llm.body, /\/g\/<slug>.*published step-by-step guide/);
@@ -418,8 +451,14 @@ test("serves concise example skills and LLM discovery text", async () => {
   assert.match(llm.body, /Writes require a bearer token/);
   assert.match(llm.body, /202 Accepted/);
   assert.match(llm.body, /https:\/\/schaffa\.test\/skills/);
+  assert.match(llm.body, /https:\/\/schaffa\.test\/skills\/all\.md/);
   assert.match(llm.body, /https:\/\/schaffa\.test\/skills\/read\/SKILL\.md/);
-  assert.match(llm.body, /https:\/\/schaffa\.test\/skills\/write\/SKILL\.md/);
+  for (const slug of ["html", "file", "guide", "presentation"]) {
+    assert.match(
+      llm.body,
+      new RegExp(`https:\\/\\/schaffa\\.test\\/skills\\/${slug}\\/SKILL\\.md`),
+    );
+  }
   assert.match(llm.body, /https:\/\/schaffa\.test\/metadata\/openapi\.json/);
 });
 

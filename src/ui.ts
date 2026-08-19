@@ -52,14 +52,14 @@ export function renderSkills(): string {
     )
     .join("");
   return layout(
-    "Example skills",
+    "Schaffa skills",
     `<div class="landing-page skills-page"><header class="landing-nav">
       <a class="wordmark" href="/">Schaffa</a>
       <nav aria-label="Primary navigation"><a href="/">Home</a><a href="/api">API</a><a class="nav-action" href="/account">Sign in</a></nav>
     </header>
     <main class="skill-docs">
-      <header><h1>Example skills.</h1><p>Copy one complete <code>SKILL.md</code>.</p></header>
-      <section class="skill-install" aria-labelledby="use-skill"><h2 id="use-skill">Read a URL</h2><pre><code>curl -fsSL "&lt;schaffa-url&gt;"</code></pre></section>
+      <header><h1>Schaffa skills.</h1><p>Use the general read skill, then add only the writing skills you need. <a href="/skills/all.md">Open every skill in one Markdown file.</a></p></header>
+      <section class="skill-install" aria-labelledby="use-skill"><h2 id="use-skill">Read any Schaffa URL</h2><pre><code>curl --fail --silent --show-error --location "&lt;schaffa-url&gt;"</code></pre></section>
       <div class="skill-grid">${skills}</div>
     </main>
     <footer class="landing-footer"><span><a href="/llm.txt">llm.txt</a></span><span><a href="/metadata/openapi.json">OpenAPI</a></span></footer></div>`,
