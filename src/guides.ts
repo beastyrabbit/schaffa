@@ -149,8 +149,8 @@ export function updateGuide(
 ): GuideView {
   const guide = requireOwnedGuide(slug, tokenId, isAdmin);
   assertEditRevision(guide, expectedRevision);
-  if (input.status !== undefined && input.status !== "recording" && input.status !== "draft") {
-    throw new AppError("Status may only be recording or draft; use publish for publication.", 422);
+  if (input.status !== undefined) {
+    throw new AppError("Guide status is managed automatically.", 422);
   }
   const title = input.title === undefined ? guide.title : requiredText(input.title, "title", 160);
   const description =
@@ -160,13 +160,12 @@ export function updateGuide(
   const targetUrl =
     input.targetUrl === undefined ? guide.target_url : validateTargetUrl(input.targetUrl);
   const language = input.language === undefined ? guide.language : validateLanguage(input.language);
-  const status = input.status === undefined ? mutableStatus(guide) : input.status;
   mutateGuide(
     guide.id,
     expectedRevision,
     `UPDATE guides SET title = ?, description = ?, target_url = ?, language = ?, status = ?,
      edit_revision = edit_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND edit_revision = ?`,
-    [title, description, targetUrl, language, status, guide.id, expectedRevision],
+    [title, description, targetUrl, language, guide.status, guide.id, expectedRevision],
   );
   return getOwnedGuide(slug, tokenId, isAdmin);
 }
@@ -216,7 +215,8 @@ export async function addGuideStep(
         image?.id || null,
         parsed.screenshotCaption,
       );
-    advanceGuideRevision(guide.id, expectedRevision, mutableStatus(guide));
+    advanceGuideRevision(guide.id, expectedRevision, guide.status);
+    if (guide.current_revision > 0) publishEditedGuide(guide.id, expectedRevision + 1);
     const result = guideView(loadGuide(guide.id), currentSteps(guide.id));
     writeIdempotent(guide.id, idempotencyKey, "add-step", result);
     db().exec("COMMIT");
@@ -301,7 +301,8 @@ export async function replaceGuideScreenshot(
         "UPDATE guide_steps SET screenshot_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       )
       .run(image.id, step.id);
-    advanceGuideRevision(guide.id, expectedRevision, mutableStatus(guide));
+    advanceGuideRevision(guide.id, expectedRevision, guide.status);
+    if (guide.current_revision > 0) publishEditedGuide(guide.id, expectedRevision + 1);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -339,7 +340,8 @@ export function reorderGuideSteps(
     );
     for (const id of order) update.run(-(order.indexOf(id) + 1), id, guide.id);
     for (const id of order) update.run(order.indexOf(id) + 1, id, guide.id);
-    advanceGuideRevision(guide.id, expectedRevision, mutableStatus(guide));
+    advanceGuideRevision(guide.id, expectedRevision, guide.status);
+    if (guide.current_revision > 0) publishEditedGuide(guide.id, expectedRevision + 1);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -366,7 +368,8 @@ export async function deleteGuideStep(
     remaining.forEach((row, index) => {
       update.run(index + 1, row.id);
     });
-    advanceGuideRevision(guide.id, expectedRevision, mutableStatus(guide));
+    advanceGuideRevision(guide.id, expectedRevision, guide.status);
+    if (guide.current_revision > 0) publishEditedGuide(guide.id, expectedRevision + 1);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -381,75 +384,21 @@ export function finishGuide(
   tokenId: string,
   isAdmin: boolean,
   expectedRevision: number,
-): { guide: GuideView; preflight: GuidePreflight } {
-  const guide = requireOwnedGuide(slug, tokenId, isAdmin);
-  assertEditRevision(guide, expectedRevision);
-  if (guide.status === "recording" || guide.status === "published") {
-    mutateGuide(
-      guide.id,
-      expectedRevision,
-      `UPDATE guides SET status = 'draft', edit_revision = edit_revision + 1,
-       updated_at = CURRENT_TIMESTAMP WHERE id = ? AND edit_revision = ?`,
-      [guide.id, expectedRevision],
-    );
-  } else {
-    throw new AppError("Guide is already a draft.", 409, "invalid_state");
-  }
-  const result = getOwnedGuide(slug, tokenId, isAdmin);
-  return { guide: result, preflight: guidePreflight(result) };
-}
-
-export function publishGuide(
-  slug: string,
-  tokenId: string,
-  isAdmin: boolean,
-  expectedRevision: number,
 ): { guide: GuideView; preflight: GuidePreflight; revisionUrl: string } {
   const guide = requireOwnedGuide(slug, tokenId, isAdmin);
   assertEditRevision(guide, expectedRevision);
-  if (guide.status !== "draft")
-    throw new AppError("Finish the guide before publishing.", 409, "invalid_state");
-  const steps = currentSteps(guide.id);
-  const preview = guideView(guide, steps);
-  const preflight = guidePreflight(preview);
-  if (!preflight.ready) {
-    throw new AppError(
-      `Guide is not ready: ${preflight.errors.join(" ")}`,
-      422,
-      "preflight_failed",
-    );
+  if (guide.status === "published") {
+    throw new AppError("Guide is already published.", 409, "invalid_state");
   }
-  const revision = guide.current_revision + 1;
-  const snapshot: GuideView = {
-    ...preview,
-    status: "published",
-    revision,
-    editRevision: expectedRevision + 1,
-    steps: preview.steps.filter((step) => step.visible),
-  };
-  const revisionId = randomUUID();
-  const markdown = renderGuideMarkdown(snapshot);
-  const html = renderGuideHtml(snapshot);
+  const steps = currentSteps(guide.id);
+  const { preflight, revision, snapshot } = preparePublishedRevision(
+    guide,
+    steps,
+    expectedRevision + 1,
+  );
   db().exec("BEGIN IMMEDIATE");
   try {
-    db()
-      .prepare(
-        `INSERT INTO guide_revisions
-         (id, guide_id, revision, json_snapshot, markdown_snapshot, html_snapshot)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(revisionId, guide.id, revision, JSON.stringify(snapshot), markdown, html);
-    const link = db().prepare(
-      "INSERT INTO guide_revision_images (revision_id, image_id) VALUES (?, ?)",
-    );
-    for (const imageId of new Set(
-      steps
-        .filter((step) => step.visible)
-        .map((step) => step.screenshot_id)
-        .filter(Boolean),
-    )) {
-      link.run(revisionId, imageId);
-    }
+    insertPublishedRevision(guide.id, steps, snapshot);
     const result = db()
       .prepare(
         `UPDATE guides SET status = 'published', current_revision = ?,
@@ -468,6 +417,85 @@ export function publishGuide(
     preflight,
     revisionUrl: `${config.baseUrl}/g/${slug}/${revision}`,
   };
+}
+
+function preparePublishedRevision(
+  guide: GuideRow,
+  steps: GuideStepRow[],
+  editRevision: number,
+): {
+  preflight: GuidePreflight;
+  revision: number;
+  snapshot: GuideView;
+} {
+  const preview = guideView(guide, steps);
+  const preflight = guidePreflight(preview);
+  if (!preflight.ready) {
+    throw new AppError(
+      `Guide is not ready: ${preflight.errors.join(" ")}`,
+      422,
+      "preflight_failed",
+    );
+  }
+  const revision = guide.current_revision + 1;
+  return {
+    preflight,
+    revision,
+    snapshot: {
+      ...preview,
+      status: "published",
+      revision,
+      editRevision,
+      steps: preview.steps.filter((step) => step.visible),
+    },
+  };
+}
+
+function insertPublishedRevision(
+  guideId: string,
+  steps: GuideStepRow[],
+  snapshot: GuideView,
+): void {
+  const revisionId = randomUUID();
+  db()
+    .prepare(
+      `INSERT INTO guide_revisions
+       (id, guide_id, revision, json_snapshot, markdown_snapshot, html_snapshot)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      revisionId,
+      guideId,
+      snapshot.revision,
+      JSON.stringify(snapshot),
+      renderGuideMarkdown(snapshot),
+      renderGuideHtml(snapshot),
+    );
+  const link = db().prepare(
+    "INSERT INTO guide_revision_images (revision_id, image_id) VALUES (?, ?)",
+  );
+  for (const imageId of new Set(
+    steps
+      .filter((step) => step.visible)
+      .map((step) => step.screenshot_id)
+      .filter(Boolean),
+  )) {
+    link.run(revisionId, imageId);
+  }
+}
+
+function publishEditedGuide(guideId: string, editRevision: number): void {
+  const guide = loadGuide(guideId);
+  const steps = currentSteps(guideId);
+  const { revision, snapshot } = preparePublishedRevision(guide, steps, editRevision);
+  insertPublishedRevision(guideId, steps, snapshot);
+  const result = db()
+    .prepare(
+      `UPDATE guides SET status = 'published', current_revision = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND edit_revision = ?`,
+    )
+    .run(revision, guideId, editRevision);
+  if (result.changes !== 1) throw conflict();
 }
 
 export function getPublishedGuide(
@@ -897,6 +925,7 @@ function mutateGuide(
 ): void {
   db().exec("BEGIN IMMEDIATE");
   try {
+    const guide = loadGuide(guideId);
     const stepMutation = !sql.trimStart().startsWith("UPDATE guides");
     if (stepMutation) {
       const stepResult = db()
@@ -911,11 +940,12 @@ function mutateGuide(
           .prepare(
             `UPDATE guides SET status = ?, edit_revision = edit_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND edit_revision = ?`,
           )
-          .run(mutableStatus(loadGuide(guideId)), guideId, expectedRevision)
+          .run(guide.status, guideId, expectedRevision)
       : db()
           .prepare(sql)
           .run(...(params as never[]));
     if (result.changes !== 1) throw conflict();
+    if (guide.current_revision > 0) publishEditedGuide(guideId, expectedRevision + 1);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -934,10 +964,6 @@ function advanceGuideRevision(
     )
     .run(status, guideId, expectedRevision);
   if (result.changes !== 1) throw conflict();
-}
-
-function mutableStatus(guide: GuideRow): GuideStatus {
-  return guide.status === "published" ? "draft" : guide.status;
 }
 
 function assertEditRevision(guide: GuideRow, expected: number): void {

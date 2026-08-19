@@ -100,9 +100,9 @@ Prefer the automatic recorder when the agent can operate a dedicated browser or 
 - Browser: \`npx schaffa record --title "<title>" --browser "<url>"\`
 - Desktop: \`npx schaffa record --title "<title>" --desktop --app <bundle-id>\`
 
-Primary clicks are highlighted, saved locally, and uploaded in order. Close the browser or press Ctrl+C to drain captures and create the draft. Use Alt+Shift+R to pause on private screens. After an upload failure, run \`npx schaffa guide sync\`; do not reorder screenshots manually.
+Clicks are highlighted and uploaded in order. Close the browser or press Ctrl+C to publish automatically. Use Alt+Shift+R to pause on private screens. After an upload failure, run \`npx schaffa guide sync\`; a clean sync also publishes automatically.
 
-Inspect and correct the complete server-side draft before publishing. Use a one-based step number or exact step ID:
+Inspect and correct the complete server-side recording before finishing it. Use a one-based step number or exact step ID. Corrections to an already published guide immediately create a new immutable revision:
 
 - Inspect: \`npx schaffa guide status --json\`
 - Edit: \`npx schaffa guide edit-step --step <number-or-id> --title "<title>" --text "<instruction>"\`
@@ -119,7 +119,7 @@ Record semantic state changes, not every technical click. Add \`--screenshot <pa
 
 Writes use the persisted edit revision. On conflict, load and reconcile the current guide. Retry steps through their original idempotent manifest entry.
 
-Inspect and fix preflight errors or possible secret findings, then run \`npx schaffa guide publish --json\`. Return the published public URL.`,
+Finishing a manual recording publishes it automatically. If preflight blocks publication, fix the reported content and run \`npx schaffa guide finish --json\` again. Return the published public URL.`,
   },
   {
     slug: "presentation",

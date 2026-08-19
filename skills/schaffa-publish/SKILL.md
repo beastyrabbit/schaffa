@@ -19,23 +19,24 @@ npx schaffa record --title "Project setup" --browser "https://app.example.com/pr
 npx schaffa record --title "Desktop setup" --desktop --app com.example.desktopapp
 ```
 
-Every trusted primary click is highlighted, saved locally, and uploaded before
-publication. Desktop mode ignores clicks outside the bundle ID passed to
+Every trusted primary click is highlighted, saved locally, and uploaded during
+the recording. Desktop mode ignores clicks outside the bundle ID passed to
 `--app`, never reads editable accessibility values, and omits
 screenshots for secure controls. Closing the browser or pressing Ctrl+C drains
-the capture queue and finishes the guide as a draft. `Alt+Shift+R` pauses private screens. If any
-upload fails, run `npx schaffa guide sync`; do not recreate or reorder the local
-screenshots manually.
+the capture queue, runs preflight, and publishes the guide automatically.
+`Alt+Shift+R` pauses private screens. If any upload fails, run `npx schaffa guide
+sync`; a clean sync publishes the recording automatically. Do not recreate or
+reorder the local screenshots manually.
 
 Inspect the complete server-side step list with `npx schaffa guide status
 --json`. Correct it with the full commands below, using a one-based step number
-or exact step ID, before publishing:
+or exact step ID. Corrections to an already published guide immediately create
+a new immutable public revision:
 
 ```sh
 npx schaffa guide edit-step --step 2 --title "Choose New project" --text "Select New project."
 npx schaffa guide replace-screenshot --step 2 --screenshot ./correct-step.png
 npx schaffa guide delete-step --step 3
-npx schaffa guide publish --json
 ```
 
 ```sh
@@ -43,10 +44,9 @@ npx schaffa guide start --title "Project setup"
 npx schaffa guide step --title "Open projects" --text "Open the project list." --action navigate --target /projects
 npx schaffa guide step --title "Create project" --text "Select New project." --screenshot step-002.png --action click --target "New project" --verification "The creation form is visible."
 npx schaffa guide finish
-npx schaffa guide publish
 ```
 
-Record semantic state changes, not every technical click. Terminal, API, and file actions may be text-only. Capture browser or desktop screenshots explicitly only when the visible state helps a reader. Set capture false for passwords, authentication, payments, private data, and secret-manager screens. Before publishing, inspect the returned preflight; possible secrets block publication and missing screenshots remain warnings.
+Record semantic state changes, not every technical click. Terminal, API, and file actions may be text-only. Capture browser or desktop screenshots explicitly only when the visible state helps a reader. Set capture false for passwords, authentication, payments, private data, and secret-manager screens. Preflight runs automatically when a recording finishes; possible secrets block publication and missing screenshots remain warnings. Fix blocking findings and run `npx schaffa guide finish` again.
 
 Each write sends the persisted `editRevision` as `If-Match`. A conflict means the guide changed elsewhere: load the current guide, reconcile intentionally, and retry. Step creation uses an idempotency key so retrying a timed-out request cannot duplicate it.
 

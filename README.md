@@ -88,18 +88,19 @@ Manual recording remains available for terminal, API, and mixed workflows:
 npx schaffa guide start --title "Create a project" --url "https://app.example.com/projects"
 npx schaffa guide step --title "Open projects" --text "Open the project list."
 npx schaffa guide finish
-npx schaffa guide publish
 ```
 
-Inspect and correct the active recording before publication:
+Inspect and correct an active recording before finishing it:
 
 ```sh
 npx schaffa guide status --json
 npx schaffa guide edit-step --step 2 --title "Choose New project" --text "Select New project."
 npx schaffa guide replace-screenshot --step 2 --screenshot ./correct-step.png
 npx schaffa guide delete-step --step 3
-npx schaffa guide publish
 ```
+
+Finishing a recording publishes it automatically. Corrections made after that
+point immediately create a new immutable public revision.
 
 Publish a Marp presentation and its export artifacts:
 

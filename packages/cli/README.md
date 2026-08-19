@@ -17,18 +17,16 @@ npx schaffa upload ./plan.html
 schaffa record --title "Create a project" --browser "https://app.example.com/projects"
 schaffa record --title "Configure Calculator" --desktop --app com.apple.calculator
 
-# Inspect and correct the draft
+# Inspect and correct an active recording
 schaffa guide status --json
 schaffa guide edit-step --step 2 --title "Choose New project"
 schaffa guide replace-screenshot --step 2 --screenshot ./correct-step.png
 schaffa guide delete-step --step 3
-schaffa guide publish
 
 # Manual capture remains useful for mixed terminal/browser workflows
 schaffa guide start --title "Create a project" --url "https://app.example.com/projects"
 schaffa guide step --title "Open projects" --text "Open the project list."
 schaffa guide finish
-schaffa guide publish
 
 schaffa publish deck.md --kind presentation --export pdf --export pptx
 ```
@@ -46,7 +44,9 @@ Every primary click gets a visible target outline and click dot. Original JPEG
 or PNG captures and an upload manifest are retained under
 `.schaffa/recordings/<slug>/`; run
 `schaffa guide sync` after a network failure. Close the browser or press Ctrl+C
-to stop, and use `Alt+Shift+R` to pause capture on private screens.
+to stop and publish automatically, and use `Alt+Shift+R` to pause capture on
+private screens. Edits to an already published guide automatically create a new
+immutable revision.
 
 The earlier `schaffa guide record --title ... --url ...` form remains supported.
 The short command is `npx schaffa record`, not literal `npx record`: the latter

@@ -41,8 +41,8 @@ legacyDb.exec(`
   VALUES ('legacy-token', 'Legacy token', 'system:legacy', 'upload');
   INSERT INTO pages (id, slug, current_version)
   VALUES ('legacy-page-id', 'legacy-page', 1);
-  INSERT INTO guides (id, slug, title, owner_token_id)
-  VALUES ('legacy-guide-id', 'abc234def567', 'Legacy guide', 'legacy-token');
+  INSERT INTO guides (id, slug, title, status, owner_token_id)
+  VALUES ('legacy-guide-id', 'abc234def567', 'Legacy guide', 'draft', 'legacy-token');
   INSERT INTO page_versions
     (id, page_id, version, storage_path, bytes, sha256, created_by_token_id)
   VALUES
@@ -143,10 +143,11 @@ test("migrates legacy ownership and token schemas in place", () => {
     name: string;
   }>;
   assert.ok(guideColumns.some((column) => column.name === "target_url"));
-  const guide = db().prepare("SELECT target_url FROM guides WHERE id = 'legacy-guide-id'").get() as
-    | { target_url: string | null }
-    | undefined;
+  const guide = db()
+    .prepare("SELECT target_url, status FROM guides WHERE id = 'legacy-guide-id'")
+    .get() as { target_url: string | null; status: string } | undefined;
   assert.equal(guide?.target_url, null);
+  assert.equal(guide?.status, "recording");
   db().prepare("DELETE FROM pages WHERE id = 'legacy-page-id'").run();
   db().prepare("DELETE FROM guides WHERE id = 'legacy-guide-id'").run();
   db().prepare("DELETE FROM tokens WHERE id = 'legacy-token'").run();
@@ -310,6 +311,12 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.ok(specification.json().paths["/api/files"].post);
   assert.ok(specification.json().paths["/api/guides"].post);
   assert.ok(specification.json().paths["/api/guides/{slug}/steps"].post);
+  assert.ok(specification.json().paths["/api/guides/{slug}/finish"].post);
+  assert.equal(specification.json().paths["/api/guides/{slug}/publish"], undefined);
+  assert.deepEqual(specification.json().components.schemas.Guide.properties.status.enum, [
+    "recording",
+    "published",
+  ]);
   assert.equal(
     specification.json().paths["/api/guides"].post.requestBody.content["application/json"].schema
       .properties.targetUrl.format,
@@ -382,7 +389,8 @@ test("serves one general read skill and focused writing skills", async () => {
   assert.match(guideSkill.markdown, /npx schaffa guide edit-step --step <number-or-id>/);
   assert.match(guideSkill.markdown, /npx schaffa guide replace-screenshot/);
   assert.match(guideSkill.markdown, /npx schaffa guide delete-step/);
-  assert.match(guideSkill.markdown, /npx schaffa guide publish/);
+  assert.match(guideSkill.markdown, /publishes it automatically/);
+  assert.doesNotMatch(guideSkill.markdown, /schaffa guide publish/);
   assert.match(presentationSkill.markdown, /npx schaffa publish/);
 
   const page = await app.inject({
@@ -846,17 +854,10 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
     url: `/api/guides/${slug}/finish`,
     headers: { ...auth, "if-match": '"5"' },
   });
-  assert.equal(finished.statusCode, 200);
-  assert.equal(finished.json().guide.status, "draft");
+  assert.equal(finished.statusCode, 201);
+  assert.equal(finished.json().guide.status, "published");
   assert.equal(finished.json().preflight.ready, true);
-
-  const published = await app.inject({
-    method: "POST",
-    url: `/api/guides/${slug}/publish`,
-    headers: { ...auth, "if-match": '"6"' },
-  });
-  assert.equal(published.statusCode, 201);
-  assert.equal(published.json().guide.revision, 1);
+  assert.equal(finished.json().guide.revision, 1);
 
   const publicGuide = await app.inject({
     method: "GET",
@@ -911,20 +912,44 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
     /\[Ziel öffnen\]\(<https:\/\/app\.example\.com\/projects\?view=active&sort=name>\)/,
   );
 
-  const newDraft = await app.inject({
+  const revised = await app.inject({
     method: "PATCH",
     url: `/api/guides/${slug}/steps/${firstStepId}`,
-    headers: { ...auth, "content-type": "application/json", "if-match": '"7"' },
+    headers: { ...auth, "content-type": "application/json", "if-match": '"6"' },
     payload: { title: "Revision zwei" },
   });
-  assert.equal(newDraft.statusCode, 200);
-  assert.equal(newDraft.json().status, "draft");
+  assert.equal(revised.statusCode, 200);
+  assert.equal(revised.json().status, "published");
+  assert.equal(revised.json().revision, 2);
   const immutableV1 = await app.inject({
     method: "GET",
     url: `/g/${slug}/1`,
     headers: { host: "schaffa.test" },
   });
   assert.doesNotMatch(immutableV1.body, /Revision zwei/);
+  const latest = await app.inject({
+    method: "GET",
+    url: `/g/${slug}`,
+    headers: { host: "schaffa.test" },
+  });
+  assert.match(latest.body, /Revision zwei/);
+
+  const blockedRevision = await app.inject({
+    method: "PATCH",
+    url: `/api/guides/${slug}/steps/${firstStepId}`,
+    headers: { ...auth, "content-type": "application/json", "if-match": '"7"' },
+    payload: { description: "password=must-not-become-public" },
+  });
+  assert.equal(blockedRevision.statusCode, 422);
+  assert.equal(blockedRevision.json().error, "preflight_failed");
+  const unchanged = await app.inject({
+    method: "GET",
+    url: `/api/guides/${slug}`,
+    headers: auth,
+  });
+  assert.equal(unchanged.json().editRevision, 7);
+  assert.equal(unchanged.json().revision, 2);
+  assert.doesNotMatch(JSON.stringify(unchanged.json()), /must-not-become-public/);
 });
 
 test("accepts only safe web destinations for guides", async () => {
@@ -1014,14 +1039,14 @@ test("rejects sensitive guide text during publication", async () => {
     url: `/api/guides/${slug}/finish`,
     headers: { ...auth, "if-match": '"2"' },
   });
-  assert.equal(finished.json().preflight.ready, false);
-  const published = await app.inject({
-    method: "POST",
-    url: `/api/guides/${slug}/publish`,
-    headers: { ...auth, "if-match": '"3"' },
+  assert.equal(finished.statusCode, 422);
+  assert.equal(finished.json().error, "preflight_failed");
+  const privateGuide = await app.inject({
+    method: "GET",
+    url: `/g/${slug}`,
+    headers: { host: "schaffa.test" },
   });
-  assert.equal(published.statusCode, 422);
-  assert.equal(published.json().error, "preflight_failed");
+  assert.equal(privateGuide.statusCode, 404);
 });
 
 test("keeps hidden-step screenshots private and maps multipart errors to 4xx", async () => {
@@ -1075,15 +1100,10 @@ test("keeps hidden-step screenshots private and maps multipart errors to 4xx", a
     payload: { title: "Visible", description: "Publishable text step", capture: false },
   });
   assert.equal(visible.statusCode, 201);
-  await app.inject({
+  const published = await app.inject({
     method: "POST",
     url: `/api/guides/${slug}/finish`,
     headers: { ...auth, "if-match": '"3"' },
-  });
-  const published = await app.inject({
-    method: "POST",
-    url: `/api/guides/${slug}/publish`,
-    headers: { ...auth, "if-match": '"4"' },
   });
   assert.equal(published.statusCode, 201);
   const hidden = await app.inject({

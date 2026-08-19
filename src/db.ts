@@ -73,7 +73,7 @@ export interface FileRow {
   process_as_image: number;
 }
 
-export type GuideStatus = "recording" | "draft" | "published";
+export type GuideStatus = "recording" | "published";
 
 export interface GuideRow {
   id: string;
@@ -411,6 +411,8 @@ export function db(): DatabaseSync {
     INSERT INTO instance_settings (key, value)
     VALUES ('interactive_publishing_enabled', 'false')
     ON CONFLICT(key) DO NOTHING;
+
+    UPDATE guides SET status = 'recording' WHERE status = 'draft';
   `);
 
   return database;

@@ -31,7 +31,6 @@ import {
   getOwnedGuide,
   getPublishedGuide,
   listGuides,
-  publishGuide,
   reorderGuideSteps,
   replaceGuideScreenshot,
   updateGuide,
@@ -630,25 +629,14 @@ export function buildServer(
       return guide;
     },
   );
-  app.post<{ Params: { slug: string } }>("/api/guides/:slug/finish", async (request) => {
-    const auth = requireApiAuth(request, "upload");
-    requireWritesEnabled();
-    consumeAuthenticatedUpload(auth.id);
-    return finishGuide(
-      request.params.slug,
-      auth.id,
-      auth.scopes.has("admin"),
-      expectedEditRevision(request),
-    );
-  });
-  app.post<{ Params: { slug: string } }>("/api/guides/:slug/publish", async (request, reply) => {
+  app.post<{ Params: { slug: string } }>("/api/guides/:slug/finish", async (request, reply) => {
     const auth = requireApiAuth(request, "upload");
     requireWritesEnabled();
     consumeAuthenticatedUpload(auth.id);
     return reply
       .code(201)
       .send(
-        publishGuide(
+        finishGuide(
           request.params.slug,
           auth.id,
           auth.scopes.has("admin"),

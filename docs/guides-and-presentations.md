@@ -8,10 +8,14 @@ Schaffa treats a guide as a server-side recording and a presentation as a render
 2. `POST /api/guides/:slug/steps` appends JSON and an optional screenshot immediately.
 3. Mutations use the current `editRevision` in `If-Match`; stale writes return `409 edit_conflict`.
 4. Step creation accepts an `Idempotency-Key` and replays its original response on retry.
-5. `finish` moves the recording to `draft` and returns the editorial preflight.
-6. `publish` stores complete JSON, Markdown, and HTML snapshots as an immutable revision.
+5. `finish` runs the editorial preflight and publishes complete JSON, Markdown,
+   and HTML snapshots as an immutable revision.
 
-Drafts and their screenshots require the owning upload token or an admin token. Public `/g/:slug`, `.json`, `.md`, and image routes expose only assets that belong to at least one published revision. Editing a published guide automatically begins a new draft and never changes an older revision.
+Recordings and their screenshots require the owning upload token or an admin
+token. Public `/g/:slug`, `.json`, `.md`, and image routes expose only assets
+that belong to at least one published revision. Editing a published guide
+automatically publishes a new immutable revision and never changes an older
+revision.
 
 The preflight blocks empty guides, incomplete visible steps, and likely tokens, secrets, passwords, or email addresses in text. Missing screenshots are warnings because terminal and API steps are intentionally allowed to remain text-only. Image OCR and pixel-level redaction remain future capture-quality work; users must still review visible screenshot contents before publication.
 
@@ -65,8 +69,8 @@ so website sessions survive between recordings. The recorder automatically
 suppresses screenshots for password/card inputs and common authentication,
 payment, billing, and secret URL paths. Use `Alt+Shift+R` to pause and resume on
 any other private screen. Closing the recording browser or pressing Ctrl+C
-waits for in-flight captures and uploads; a clean recording is moved to draft
-and returns the preflight result.
+waits for in-flight captures and uploads; a clean recording passes preflight
+and is published automatically.
 
 `npx schaffa record --title <title> --desktop --app <bundle-id>` records one
 native macOS app instead of opening a URL. A small ad-hoc-signed Swift helper is compiled once into a
@@ -79,8 +83,9 @@ suppress the screenshot entirely. Coordinates and bounds are window-relative,
 and desktop events reuse the same atomic manifest, serialized upload, sync,
 review, and correction pipeline as browser recordings.
 
-Before publishing, an agent can inspect and correct the active guide without
-working directly with raw API revisions:
+An agent can inspect and correct the active guide without working directly with
+raw API revisions. Corrections after publication immediately create a new
+immutable revision:
 
 ```sh
 npx schaffa guide status --json
@@ -88,7 +93,6 @@ npx schaffa guide edit-step --step 2 --title "Choose New project" --text "Select
 npx schaffa guide replace-screenshot --step 2 --screenshot ./correct-step.png
 npx schaffa guide delete-step --step 3
 npx schaffa guide finish
-npx schaffa guide publish
 ```
 
 Desktop mode currently targets macOS. Other operating systems can continue to

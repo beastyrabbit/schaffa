@@ -87,7 +87,7 @@ preflight, rendering, and export lifecycles.
 
 The guide skill should prefer `npx schaffa record` when a dedicated browser
 or supported native app is available. Document both browser and desktop modes,
-the privacy pause, ordered local recovery through `guide sync`, draft review,
+the privacy pause, ordered local recovery through `guide sync`, recording review,
 and the manual guide lifecycle for mixed terminal and UI workflows. Keep these
 details in the skill body; the description remains only the short guide trigger.
 

@@ -29,7 +29,7 @@ export class SchaffaRequestError extends Error {
 export interface GuideResult {
   slug: string;
   targetUrl: string | null;
-  status: "recording" | "draft" | "published";
+  status: "recording" | "published";
   revision: number;
   editRevision: number;
   publicUrl: string;
@@ -308,17 +308,6 @@ export async function finishGuide(options: GuideMutationOptions): Promise<GuideO
   return guideRequest<GuideOperationResult>(
     options,
     `/api/guides/${encodeURIComponent(options.slug)}/finish`,
-    {
-      method: "POST",
-      headers: { "If-Match": String(options.editRevision) },
-    },
-  );
-}
-
-export async function publishGuide(options: GuideMutationOptions): Promise<GuideOperationResult> {
-  return guideRequest<GuideOperationResult>(
-    options,
-    `/api/guides/${encodeURIComponent(options.slug)}/publish`,
     {
       method: "POST",
       headers: { "If-Match": String(options.editRevision) },

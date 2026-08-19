@@ -11,7 +11,6 @@ import {
   deleteGuideStep,
   finishGuide,
   getGuide,
-  publishGuide,
   replaceGuideScreenshot,
   startGuide,
   updateGuideStep,
@@ -269,9 +268,9 @@ test("drives the incremental guide API with revisions and authorization", async 
       {
         guide: {
           slug: "abc234def567",
-          status: String(url).endsWith("/publish") ? "published" : "draft",
-          revision: String(url).endsWith("/publish") ? 1 : 0,
-          editRevision: String(url).endsWith("/publish") ? 4 : 3,
+          status: "published",
+          revision: 1,
+          editRevision: 3,
           publicUrl: "https://schaffa.dev/g/abc234def567",
           apiUrl: "https://schaffa.dev/api/guides/abc234def567",
           steps: [],
@@ -301,13 +300,8 @@ test("drives the incremental guide API with revisions and authorization", async 
     token,
     fetch: fakeFetch,
   });
-  await publishGuide({
-    slug: finished.guide.slug,
-    editRevision: finished.guide.editRevision,
-    token,
-    fetch: fakeFetch,
-  });
-  assert.equal(requests.length, 4);
+  assert.equal(finished.guide.status, "published");
+  assert.equal(requests.length, 3);
   assert.equal(requests[0].init.headers.get("Authorization"), `Bearer ${token}`);
   assert.equal(JSON.parse(requests[0].init.body).targetUrl, "https://app.example.com/projects");
   assert.equal(requests[1].init.headers.get("If-Match"), "1");
@@ -319,7 +313,6 @@ test("drives the incremental guide API with revisions and authorization", async 
     viewportHeight: 800,
   });
   assert.equal(requests[2].url, "https://schaffa.dev/api/guides/abc234def567/finish");
-  assert.equal(requests[3].url, "https://schaffa.dev/api/guides/abc234def567/publish");
 });
 
 test("reads and corrects recorded guide steps through the owner API", async () => {
@@ -328,8 +321,8 @@ test("reads and corrects recorded guide steps through the owner API", async () =
   const requests = [];
   const guide = {
     slug: "abc234def567",
-    status: "draft",
-    revision: 0,
+    status: "published",
+    revision: 1,
     editRevision: 7,
     publicUrl: "https://schaffa.dev/g/abc234def567",
     apiUrl: "https://schaffa.dev/api/guides/abc234def567",

@@ -14,7 +14,6 @@ import {
   finishGuide,
   type GuideResult,
   getGuide,
-  publishGuide,
   replaceGuideScreenshot,
   startGuide,
   updateGuideStep,
@@ -46,7 +45,6 @@ Usage:
   schaffa guide replace-screenshot --step <number|id> --screenshot <path> [--json]
   schaffa guide sync [--manifest <path>] [--json]
   schaffa guide finish [--json]
-  schaffa guide publish [--json]
 
 Environment:
   SCHAFFA_TOKEN  Required for permanent publishing, files, presentations, and guides.
@@ -201,6 +199,7 @@ async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<vo
     manifestPath: recording.manifestPath,
     failedUploads: recording.failedUploads,
   };
+  await writeSession(result);
   if (recording.failedUploads === 0) {
     const finished = await finishGuide({ ...common, ...result });
     result = finished.guide;
@@ -329,13 +328,15 @@ async function runGuide(args: string[]): Promise<void> {
       });
       result = synced.guide;
       output = synced;
-      if (synced.failedUploads > 0) process.exitCode = 1;
+      if (synced.failedUploads > 0) {
+        process.exitCode = 1;
+      } else if (result.status === "recording") {
+        const operation = await finishGuide({ ...common, ...result });
+        result = operation.guide;
+        output = { ...synced, ...operation };
+      }
     } else if (command === "finish") {
       const operation = await finishGuide({ ...common, ...session });
-      result = operation.guide;
-      output = operation;
-    } else if (command === "publish") {
-      const operation = await publishGuide({ ...common, ...session });
       result = operation.guide;
       output = operation;
     } else throw new Error(`Unknown guide command.\n\n${help}`);

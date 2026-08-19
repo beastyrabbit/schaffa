@@ -274,22 +274,12 @@ export function openApiDocument() {
       "/api/guides/{slug}/finish": {
         post: {
           tags: ["Guides"],
-          summary: "Finish recording and run preflight",
+          summary: "Finish recording and publish an immutable revision",
           operationId: "finishGuide",
           security: [{ bearerAuth: [] }],
           parameters: [slugParameter, ifMatchParameter],
-          responses: { "200": jsonResponse("Draft and preflight") },
-        },
-      },
-      "/api/guides/{slug}/publish": {
-        post: {
-          tags: ["Guides"],
-          summary: "Publish an immutable revision",
-          operationId: "publishGuide",
-          security: [{ bearerAuth: [] }],
-          parameters: [slugParameter, ifMatchParameter],
           responses: {
-            "201": jsonResponse("Published revision"),
+            "201": jsonResponse("Published guide revision"),
             "422": errorResponse("Preflight failed"),
           },
         },
@@ -419,7 +409,7 @@ export function openApiDocument() {
             slug: { type: "string", pattern: "^[a-z2-7]{12}$" },
             title: { type: "string" },
             targetUrl: { type: ["string", "null"], format: "uri" },
-            status: { enum: ["recording", "draft", "published"] },
+            status: { enum: ["recording", "published"] },
             revision: { type: "integer", minimum: 0 },
             editRevision: { type: "integer", minimum: 1 },
             publicUrl: { type: "string", format: "uri" },
