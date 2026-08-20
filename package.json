@@ -1,6 +1,6 @@
 {
   "name": "schaffa-server",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "Self-hosted public page and file publishing for agents.",
   "private": true,
   "engines": {
