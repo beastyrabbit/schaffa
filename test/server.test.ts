@@ -1660,6 +1660,21 @@ test("keeps administration out of the public API", async () => {
   assert.match(admin.body, /Anmeldungen sperren/);
   assert.match(admin.body, /Token erstellen/);
   assert.match(admin.body, /Versionen/);
+
+  const createdToken = await app.inject({
+    method: "POST",
+    url: "/admin/tokens",
+    headers: {
+      host: "schaffa.test",
+      cookie: adminCookie(bootstrapToken),
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    payload: "name=admin-created-upload&scope=upload",
+  });
+  assert.equal(createdToken.statusCode, 200);
+  assert.match(createdToken.body, /Admin-Token jetzt einrichten/);
+  assert.match(createdToken.body, /src="\/assets\/token-setup\.js"/);
+  assert.match(createdToken.headers["content-security-policy"] || "", /script-src 'self'/);
 });
 
 test("write lockdown blocks publishing but leaves takedown available", async () => {
@@ -1730,6 +1745,26 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
   assert.equal(created.statusCode, 200);
   const token = /sfa_[A-Za-z0-9_-]+/.exec(created.body)?.[0];
   assert.ok(token);
+  assert.match(created.body, /Token jetzt einrichten/);
+  assert.match(created.body, /data-token-os/);
+  assert.match(created.body, /<option value="macos">macOS<\/option>/);
+  assert.match(created.body, /<option value="linux">Linux<\/option>/);
+  assert.match(created.body, /<option value="windows">Windows<\/option>/);
+  assert.match(created.body, /data-token-command/);
+  assert.match(created.body, /Befehl kopieren/);
+  assert.match(created.body, /src="\/assets\/token-setup\.js"/);
+  const setupScript = await app.inject({
+    method: "GET",
+    url: "/assets/token-setup.js",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(setupScript.statusCode, 200);
+  assert.match(setupScript.body, /~\/\.zshrc/);
+  assert.match(setupScript.body, /~\/\.bashrc/);
+  assert.match(setupScript.body, /set -Ux SCHAFFA_TOKEN/);
+  assert.match(setupScript.body, /SetEnvironmentVariable/);
+  assert.match(setupScript.body, /setx SCHAFFA_TOKEN/);
+  assert.match(setupScript.body, /Add-Content -Path \.env -Encoding utf8/);
   const tokenRow = db()
     .prepare("SELECT * FROM tokens WHERE token_hash != '' AND name = ?")
     .get("my-agent") as unknown as { id: string; user_id: string; revoked_at: string | null };

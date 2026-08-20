@@ -80,6 +80,7 @@ import {
   renderPublicNotFound,
   renderScanStatusPage,
   renderSkills,
+  tokenSetupClientScript,
 } from "./ui.js";
 import {
   authenticateUserSession,
@@ -326,6 +327,10 @@ export function buildServer(
   app.get("/assets/account.js", async (_request, reply) => {
     reply.header("Cache-Control", "public, max-age=3600");
     return reply.type("application/javascript; charset=utf-8").send(accountClientScript);
+  });
+  app.get("/assets/token-setup.js", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=3600");
+    return reply.type("application/javascript; charset=utf-8").send(tokenSetupClientScript);
   });
   app.get<{ Querystring: { signedOut?: string } }>("/account", async (request, reply) => {
     accountHeaders(reply);
@@ -824,6 +829,7 @@ export function buildServer(
     return reply.redirect("/admin#tokens");
   });
   app.post<{ Body: { name?: string; scope?: string } }>("/admin/tokens", async (request, reply) => {
+    adminHeaders(reply);
     const auth = requireAdminCookie(request);
     const scope = request.body?.scope;
     if (scope !== "upload" && scope !== "admin") {
@@ -1323,7 +1329,7 @@ function requireAdminCookie(request: FastifyRequest) {
 function adminHeaders(reply: FastifyReply): void {
   reply.headers({
     "Content-Security-Policy":
-      "default-src 'none'; img-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "default-src 'none'; script-src 'self'; img-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     "X-Frame-Options": "DENY",
   });
 }

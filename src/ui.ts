@@ -191,14 +191,106 @@ export function renderAccount(input: {
     `<header class="topbar"><a class="wordmark" href="/account">Schaffa</a><div class="identity"><span>${escapeHtml(input.user.displayName)}</span><form method="post" action="/account/logout"><button class="quiet" type="submit">Abmelden</button></form></div></header>
     <main class="workspace account-workspace">
       <div class="page-heading"><div><h1>Dein Konto</h1><p>Publikationen ansehen, löschen und ihre Zugänge verwalten.</p></div></div>
-      ${input.newToken ? `<aside class="token-reveal"><strong>Token jetzt speichern</strong><p>Dieser Wert wird nur einmal angezeigt.</p><code>${escapeHtml(input.newToken)}</code></aside>` : ""}
+      ${input.newToken ? renderTokenSetup(input.newToken) : ""}
       <nav class="tabs" aria-label="Kontobereiche"><a href="#pages">Seiten <span>${input.pages.length}</span></a><a href="#files">Dateien <span>${input.files.length}</span></a><a href="#tokens">Tokens <span>${input.tokens.length}</span></a></nav>
       <section id="pages"><div class="section-heading"><h2>Seiten</h2><p>Seiten, die mit einem deiner Tokens veröffentlicht wurden.</p></div><div class="table-wrap"><table><thead><tr><th>Slug</th><th>Stand</th><th>Token</th><th>Größe</th><th>Geändert</th><th>Aktion</th></tr></thead><tbody>${pageRows || emptyRow(6, "Du hast noch keine Seiten veröffentlicht.")}</tbody></table></div></section>
       <section id="files"><div class="section-heading"><h2>Dateien</h2><p>Dateien, die mit einem deiner Tokens hochgeladen wurden.</p></div><div class="table-wrap"><table><thead><tr><th>Datei</th><th>Typ</th><th>Token</th><th>Größe</th><th>Hochgeladen</th><th>Aktion</th></tr></thead><tbody>${fileRows || emptyRow(6, "Du hast noch keine Dateien hochgeladen.")}</tbody></table></div></section>
       <section id="tokens"><div class="section-heading"><h2>Agenten-Tokens</h2><p>Statische und interaktive Publikationen verwenden getrennte Tokens.</p></div><form class="operation-card token-create" method="post" action="/account/tokens"><label>Name<input name="name" required maxlength="80" placeholder="desktop-codex"></label><label>Typ<select name="scope"><option value="upload">Statische Uploads</option>${input.interactivePublishingEnabled && input.user.canPublishInteractive ? `<option value="interactive">Interaktive Seiten</option>` : ""}</select></label><button type="submit">Token erstellen</button></form>${input.interactivePublishingEnabled && input.user.canPublishInteractive ? `<p class="sub">Interactive-Tokens können ausschließlich interaktive HTML-Seiten veröffentlichen.</p>` : `<p class="sub">Interaktives Publishing ist für dieses Konto nicht freigegeben.</p>`}<div class="table-wrap token-table"><table><thead><tr><th>Name</th><th>Scope</th><th>Zuletzt benutzt</th><th>Status</th><th>Aktion</th></tr></thead><tbody>${tokenRows || emptyRow(5, "Noch keine Tokens vorhanden.")}</tbody></table></div></section>
     </main>`,
+    input.newToken ? `<script defer src="/assets/token-setup.js"></script>` : "",
   );
 }
+
+export const tokenSetupClientScript = `(() => {
+  const tokenReveal = document.querySelector("[data-token-reveal]");
+  if (!tokenReveal) return;
+    const token = tokenReveal.querySelector("[data-token-value]")?.textContent || "";
+    const osSelect = tokenReveal.querySelector("[data-token-os]");
+    const targetSelect = tokenReveal.querySelector("[data-token-target]");
+    const command = tokenReveal.querySelector("[data-token-command]");
+    const hint = tokenReveal.querySelector("[data-token-hint]");
+    const targets = {
+      macos: [
+        ["zsh", "Zsh · ~/.zshrc", "Schreibt den Token dauerhaft in ~/.zshrc."],
+        ["bash", "Bash · ~/.bash_profile", "Schreibt den Token dauerhaft in ~/.bash_profile."],
+        ["fish", "Fish", "Speichert den Token dauerhaft als Fish-Universal-Variable."],
+        ["env", "Projekt · .env", "Fügt den Token der .env-Datei im aktuellen Ordner hinzu."],
+        ["session", "Nur diese Sitzung", "Setzt den Token nur im aktuellen Terminalfenster."],
+      ],
+      linux: [
+        ["bash", "Bash · ~/.bashrc", "Schreibt den Token dauerhaft in ~/.bashrc."],
+        ["zsh", "Zsh · ~/.zshrc", "Schreibt den Token dauerhaft in ~/.zshrc."],
+        ["fish", "Fish", "Speichert den Token dauerhaft als Fish-Universal-Variable."],
+        ["env", "Projekt · .env", "Fügt den Token der .env-Datei im aktuellen Ordner hinzu."],
+        ["session", "Nur diese Sitzung", "Setzt den Token nur im aktuellen Terminalfenster."],
+      ],
+      windows: [
+        ["powershell", "PowerShell · dauerhaft", "Speichert den Token für deinen Windows-Benutzer und setzt ihn in der aktuellen Sitzung."],
+        ["powershell-session", "PowerShell · diese Sitzung", "Setzt den Token nur im aktuellen PowerShell-Fenster."],
+        ["cmd", "Eingabeaufforderung (CMD)", "Speichert den Token für zukünftige CMD-Fenster und setzt ihn im aktuellen Fenster."],
+        ["env", "PowerShell · Projekt .env", "Fügt den Token der .env-Datei im aktuellen Ordner hinzu."],
+      ],
+    };
+    const commandFor = (os, target) => {
+      if (os === "windows") {
+        if (target === "powershell") return "[Environment]::SetEnvironmentVariable('SCHAFFA_TOKEN', '" + token + "', 'User'); $env:SCHAFFA_TOKEN = '" + token + "'";
+        if (target === "powershell-session") return "$env:SCHAFFA_TOKEN = '" + token + "'";
+        if (target === "cmd") return 'setx SCHAFFA_TOKEN "' + token + '" && set "SCHAFFA_TOKEN=' + token + '"';
+        return "Add-Content -Path .env -Encoding utf8 -Value 'SCHAFFA_TOKEN=" + token + "'";
+      }
+      if (target === "fish") return "set -Ux SCHAFFA_TOKEN '" + token + "'";
+      if (target === "env") return "printf '\\nSCHAFFA_TOKEN=%s\\n' '" + token + "' >> .env";
+      if (target === "session") return "export SCHAFFA_TOKEN='" + token + "'";
+      const profile = target === "zsh" ? "~/.zshrc" : os === "macos" ? "~/.bash_profile" : "~/.bashrc";
+      return "printf '\\nexport SCHAFFA_TOKEN=%s\\n' '" + token + "' >> " + profile + " && source " + profile;
+    };
+    const renderCommand = () => {
+      if (!osSelect || !targetSelect || !command) return;
+      const availableTargets = targets[osSelect.value] || targets.macos;
+      const previousTarget = targetSelect.value;
+      targetSelect.replaceChildren(...availableTargets.map(([value, label]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        return option;
+      }));
+      if (availableTargets.some(([value]) => value === previousTarget)) targetSelect.value = previousTarget;
+      command.textContent = commandFor(osSelect.value, targetSelect.value);
+      if (hint) hint.textContent = availableTargets.find(([value]) => value === targetSelect.value)?.[2] || "";
+    };
+    const updateCommand = () => {
+      if (!osSelect || !targetSelect || !command) return;
+      command.textContent = commandFor(osSelect.value, targetSelect.value);
+      const availableTargets = targets[osSelect.value] || targets.macos;
+      if (hint) hint.textContent = availableTargets.find(([value]) => value === targetSelect.value)?.[2] || "";
+    };
+    const platform = navigator.userAgentData?.platform || navigator.platform || "";
+    if (/win/i.test(platform)) osSelect.value = "windows";
+    else if (/linux/i.test(platform)) osSelect.value = "linux";
+    else osSelect.value = "macos";
+    osSelect?.addEventListener("change", renderCommand);
+    targetSelect?.addEventListener("change", updateCommand);
+    renderCommand();
+    tokenReveal.querySelectorAll("[data-copy]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const source = tokenReveal.querySelector(button.getAttribute("data-copy"));
+        if (!source?.textContent) return;
+        const originalLabel = button.textContent;
+        try {
+          await navigator.clipboard.writeText(source.textContent);
+          button.textContent = "Kopiert";
+        } catch {
+          const range = document.createRange();
+          range.selectNodeContents(source);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+          button.textContent = "Markiert";
+        }
+        window.setTimeout(() => { button.textContent = originalLabel; }, 1800);
+      });
+    });
+})();`;
 
 export const accountClientScript = `(() => {
   const shell = document.querySelector("[data-account-login]");
@@ -236,6 +328,23 @@ export const accountClientScript = `(() => {
   });
   establishSession().catch((cause) => showError(cause instanceof Error ? cause.message : "Anmeldung fehlgeschlagen."));
 })();`;
+
+function renderTokenSetup(token: string, title = "Token jetzt einrichten"): string {
+  return `<aside class="token-reveal" data-token-reveal>
+    <div class="token-reveal-heading"><div><strong>${escapeHtml(title)}</strong><p>Dieser Wert wird nur einmal angezeigt.</p></div><button class="copy-button" type="button" data-copy="[data-token-value]">Token kopieren</button></div>
+    <code class="token-value" data-token-value>${escapeHtml(token)}</code>
+    <div class="token-setup">
+      <div class="token-setup-heading"><strong>Terminal-Befehl</strong><span>Auswählen, kopieren, ausführen.</span></div>
+      <div class="token-setup-fields">
+        <label>Betriebssystem<select data-token-os><option value="macos">macOS</option><option value="linux">Linux</option><option value="windows">Windows</option></select></label>
+        <label>Umgebung<select data-token-target aria-label="Shell oder Zieldatei"></select></label>
+      </div>
+      <div class="command-box"><code data-token-command aria-live="polite"></code><button class="copy-button command-copy" type="button" data-copy="[data-token-command]">Befehl kopieren</button></div>
+      <p class="token-hint" data-token-hint></p>
+      <p class="token-warning">Behandle den Token wie ein Passwort: Der Befehl kann im Shell-Verlauf stehen und <code>.env</code> gehört nicht in Git.</p>
+    </div>
+  </aside>`;
+}
 
 export function renderAdmin(input: {
   pages: PageSummary[];
@@ -325,7 +434,7 @@ export function renderAdmin(input: {
     </header>
     <main class="workspace">
       <div class="page-heading"><div><h1>Publikationen</h1><p>Öffentliche Seiten und Dateien dieses Servers.</p></div><a class="docs-link" href="${config.baseUrl}/api" target="_blank" rel="noopener noreferrer">API ansehen</a></div>
-      ${input.newToken ? `<aside class="token-reveal"><strong>Admin-Token jetzt speichern</strong><p>Dieser Wert wird nur einmal angezeigt.</p><code>${escapeHtml(input.newToken)}</code></aside>` : ""}
+      ${input.newToken ? renderTokenSetup(input.newToken, "Admin-Token jetzt einrichten") : ""}
       <form class="filters" method="get" action="/admin">
         <label>Suche<input type="search" name="q" value="${escapeHtml(input.filters.q)}" placeholder="Slug, Titel, Datei …"></label>
         <label>Uploader<select name="uploader"><option value="">Alle</option>${uploaders.map((uploader) => `<option value="${escapeHtml(uploader.id)}"${selected(input.filters.uploader, uploader.id)}>${escapeHtml(uploader.name)}</option>`).join("")}</select></label>
@@ -341,6 +450,7 @@ export function renderAdmin(input: {
       <section id="users"><div class="section-heading"><h2>Nutzer</h2><p>Interaktive Seiten benötigen eine ausdrückliche Freigabe pro Shoo-Identität.</p></div><div class="table-wrap"><table><thead><tr><th>Nutzer</th><th>E-Mail</th><th>Aktive / alle Tokens</th><th>Interactive</th><th>Letzte Anmeldung</th><th>Aktion</th></tr></thead><tbody>${userRows || emptyRow(6, "Keine Nutzer vorhanden.")}</tbody></table></div></section>
       <section id="tokens"><div class="section-heading"><h2>Tokens</h2><p>Tokenwerte werden nur einmal ausgegeben; hier liegen ausschließlich HMAC-Hashes.</p></div><form class="operation-card token-create" method="post" action="/admin/tokens"><label>Name<input name="name" required maxlength="80" placeholder="production-admin"></label><label>Rolle<select name="scope"><option value="upload">Upload</option><option value="admin">Admin</option></select></label><button type="submit">Token erstellen</button></form><div class="table-wrap token-table"><table><thead><tr><th>Name</th><th>Scopes</th><th>Zuletzt benutzt</th><th>Status</th><th>Aktion</th></tr></thead><tbody>${tokenRows || emptyRow(5, "Keine Tokens vorhanden.")}</tbody></table></div></section>
     </main>`,
+    input.newToken ? `<script defer src="/assets/token-setup.js"></script>` : "",
   );
 }
 
@@ -463,6 +573,6 @@ const styles = `
 :root{--paper:#f3f0e8;--surface:#fbfaf6;--ink:#20211e;--muted:#68685f;--line:#d6d1c5;--accent:#a43f24;--accent-dark:#7c2e1a;--success:#315a3a;--danger:#8c3329;font-family:"Avenir Next","Segoe UI",sans-serif;color:var(--ink);background:var(--paper);font-synthesis:none}
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:var(--paper)}a{color:inherit;text-decoration-color:#9a9589;text-underline-offset:3px}a:hover{text-decoration-color:var(--accent)}button,input{font:inherit}.topbar{height:64px;padding:0 32px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;background:var(--surface)}.wordmark{font-family:Georgia,"Times New Roman",serif;font-size:24px;font-weight:700;text-decoration:none;letter-spacing:-.04em}.identity{display:flex;align-items:center;gap:16px;color:var(--muted);font-size:14px}.identity form{margin:0}.quiet,.docs-link{border:1px solid var(--line);background:transparent;border-radius:8px;padding:8px 12px;color:var(--ink);text-decoration:none;cursor:pointer}.quiet:hover,.docs-link:hover{border-color:#9f998d;background:#fff}.workspace{max-width:1180px;margin:0 auto;padding:40px 32px 72px}.page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:24px}.page-heading h1{font:700 34px/1.1 Georgia,"Times New Roman",serif;letter-spacing:-.025em;margin:0}.page-heading p,.section-heading p{color:var(--muted);margin:8px 0 0}.tabs{height:52px;margin-top:32px;border-bottom:1px solid var(--line);display:flex;align-items:end;gap:28px}.tabs a{padding:0 0 13px;text-decoration:none;font-weight:600;color:var(--muted);border-bottom:2px solid transparent}.tabs a:first-child{color:var(--ink);border-color:var(--accent)}.tabs span{margin-left:5px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}section{scroll-margin-top:20px;padding-top:36px}.section-heading{display:flex;align-items:baseline;gap:16px;margin-bottom:14px}.section-heading h2{font-size:20px;margin:0}.section-heading p{font-size:14px}.table-wrap{border:1px solid var(--line);border-radius:10px;overflow-x:auto;background:var(--surface)}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:13px 16px;border-bottom:1px solid #e2ddd2;vertical-align:top}th{font-size:12px;letter-spacing:.025em;color:var(--muted);background:#f7f4ed;font-weight:700}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:#f7f4ed}td a{font-weight:600}.sub{display:block;color:var(--muted);font-size:12px;margin-top:4px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.state{color:var(--success);font-weight:600}.state.revoked{color:var(--danger)}.empty{text-align:center;color:var(--muted);padding:32px}.login-shell{min-height:100vh;display:grid;place-items:center;padding:24px}.login-panel{width:min(420px,100%);padding:32px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:0 12px 32px rgba(44,39,30,.08)}.login-panel h1{font:700 30px/1.1 Georgia,"Times New Roman",serif;margin:32px 0 8px}.lede{color:var(--muted);line-height:1.55;margin:0 0 24px}.login-panel label{display:block;font-weight:700;font-size:13px;margin-bottom:8px}.login-panel input{width:100%;border:1px solid #aaa397;border-radius:8px;background:#fff;padding:11px 12px;outline:none}.login-panel input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(164,63,36,.14)}.login-panel button[type=submit]{width:100%;margin-top:14px;border:0;border-radius:8px;padding:11px 16px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer}.login-panel button[type=submit]:hover{background:var(--accent-dark)}.error{padding:10px 12px;border-left:3px solid var(--danger);background:#f8e9e5;color:#6c241d;font-size:14px}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em}@media(max-width:720px){.topbar{padding:0 18px}.identity>span{display:none}.workspace{padding:28px 18px 56px}.page-heading{align-items:flex-start}.section-heading{display:block}.section-heading p{line-height:1.45}.tabs{gap:20px;overflow-x:auto}.docs-link{display:none}th,td{padding:11px 12px;white-space:nowrap}}
 .login-panel.not-found h1{margin-top:8px}.error-code{margin:40px 0 0;color:var(--accent);font:700 13px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em}
-.filters{margin-top:28px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--surface);display:grid;grid-template-columns:minmax(200px,2fr) repeat(3,minmax(130px,1fr)) auto auto;gap:12px;align-items:end}.filters label,.token-create label{display:grid;gap:6px;color:var(--muted);font-size:12px;font-weight:700}.filters input,.filters select,.token-create input,.token-create select{min-width:0;border:1px solid #aaa397;border-radius:7px;background:#fff;padding:9px 10px;color:var(--ink)}.filters button,.operation-card button,.primary-link{border:0;border-radius:7px;padding:10px 15px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer;text-decoration:none}.primary-link{display:block;text-align:center}.filters>a{padding:9px 4px;color:var(--muted);font-size:13px}.state.temporary{color:var(--accent)}button.danger{border:1px solid #d9aaa2;border-radius:7px;padding:7px 10px;background:#fff3f0;color:var(--danger);font-weight:700;cursor:pointer}.operation-list{display:grid;gap:10px}.operation-card{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.token-create{margin-bottom:14px}.token-create label{flex:1}.token-table{margin-top:14px}.account-workspace{max-width:1100px}.token-reveal{margin-top:28px;padding:18px;border:1px solid #d6b976;border-radius:10px;background:#fff8df}.token-reveal p{color:var(--muted)}.token-reveal code{display:block;overflow-wrap:anywhere;padding:12px;background:#fff;border:1px solid #e1d3a5;border-radius:7px}.row-actions{display:flex;align-items:flex-start;gap:8px}.row-actions summary{cursor:pointer;font-weight:700;color:var(--accent)}.version-actions{position:absolute;z-index:2;min-width:170px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);box-shadow:0 10px 24px rgba(44,39,30,.14)}.version-actions form{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px}.version-actions span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}td form{margin:0}@media(max-width:900px){.filters{grid-template-columns:1fr 1fr}}@media(max-width:720px){.filters{grid-template-columns:1fr}.operation-card{align-items:flex-start;flex-direction:column}.token-create label{width:100%}.row-actions{min-width:230px}}
+.filters{margin-top:28px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--surface);display:grid;grid-template-columns:minmax(200px,2fr) repeat(3,minmax(130px,1fr)) auto auto;gap:12px;align-items:end}.filters label,.token-create label{display:grid;gap:6px;color:var(--muted);font-size:12px;font-weight:700}.filters input,.filters select,.token-create input,.token-create select{min-width:0;border:1px solid #aaa397;border-radius:7px;background:#fff;padding:9px 10px;color:var(--ink)}.filters button,.operation-card button,.primary-link{border:0;border-radius:7px;padding:10px 15px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer;text-decoration:none}.primary-link{display:block;text-align:center}.filters>a{padding:9px 4px;color:var(--muted);font-size:13px}.state.temporary{color:var(--accent)}button.danger{border:1px solid #d9aaa2;border-radius:7px;padding:7px 10px;background:#fff3f0;color:var(--danger);font-weight:700;cursor:pointer}.operation-list{display:grid;gap:10px}.operation-card{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.token-create{margin-bottom:14px}.token-create label{flex:1}.token-table{margin-top:14px}.account-workspace{max-width:1100px}.token-reveal{margin-top:28px;padding:18px;border:1px solid #d6b976;border-radius:10px;background:#fff8df}.token-reveal-heading,.token-setup-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.token-reveal-heading p{margin:5px 0 14px;color:var(--muted);font-size:13px}.token-value{display:block;overflow-wrap:anywhere;padding:12px;background:#fff;border:1px solid #e1d3a5;border-radius:7px}.copy-button{flex:none;border:1px solid #bda963;border-radius:7px;padding:7px 10px;background:#fff;color:var(--ink);font-size:12px;font-weight:700;cursor:pointer}.copy-button:hover{border-color:#8f7936;background:#fffdf7}.copy-button:focus-visible{outline:3px solid rgba(164,63,36,.2);outline-offset:2px}.token-setup{margin-top:18px;padding-top:18px;border-top:1px solid #e1d3a5}.token-setup-heading{align-items:baseline}.token-setup-heading span{color:var(--muted);font-size:12px}.token-setup-fields{display:grid;grid-template-columns:1fr 1.5fr;gap:12px;margin-top:12px}.token-setup-fields label{display:grid;gap:6px;color:var(--muted);font-size:12px;font-weight:700}.token-setup-fields select{width:100%;min-width:0;border:1px solid #aaa397;border-radius:7px;background:#fff;padding:9px 10px;color:var(--ink)}.command-box{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;margin-top:12px;border:1px solid #4c4d47;border-radius:8px;overflow:hidden;background:#292a26}.command-box code{min-width:0;overflow-x:auto;padding:13px 14px;color:#f6f2e9;white-space:pre}.command-box .command-copy{margin:6px;border:0;background:#f6f2e9}.token-hint,.token-warning{margin:9px 0 0;color:var(--muted);font-size:12px;line-height:1.45}.token-warning code{color:var(--ink)}.row-actions{display:flex;align-items:flex-start;gap:8px}.row-actions summary{cursor:pointer;font-weight:700;color:var(--accent)}.version-actions{position:absolute;z-index:2;min-width:170px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);box-shadow:0 10px 24px rgba(44,39,30,.14)}.version-actions form{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px}.version-actions span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}td form{margin:0}@media(max-width:900px){.filters{grid-template-columns:1fr 1fr}}@media(max-width:720px){.filters{grid-template-columns:1fr}.operation-card{align-items:flex-start;flex-direction:column}.token-create label{width:100%}.token-setup-fields{grid-template-columns:1fr}.command-box{grid-template-columns:1fr}.command-box .command-copy{justify-self:start}.row-actions{min-width:230px}}
 .landing-page{min-height:100vh;background-color:#f3f0e8;background-image:linear-gradient(rgba(32,33,30,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(32,33,30,.035) 1px,transparent 1px);background-size:32px 32px}.landing-nav{max-width:1240px;height:76px;margin:0 auto;padding:0 32px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--ink)}.landing-nav .wordmark{font-size:28px}.landing-nav nav{display:flex;align-items:center;gap:24px;font-size:14px;font-weight:700}.landing-nav nav a{text-decoration:none}.landing-nav .nav-action{border:2px solid var(--ink);padding:9px 14px;background:#fbfaf6;box-shadow:3px 3px 0 var(--ink)}.landing-nav .nav-action:hover{background:#d8b64b}.landing{max-width:1240px;margin:0 auto;padding:0 32px}.landing-hero{min-height:650px;padding:68px 0 72px;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(340px,.85fr);gap:64px;align-items:center;border-bottom:2px solid var(--ink)}.hero-content{position:relative;z-index:1}.kicker{display:inline-block;margin:0 0 22px;padding:7px 10px;color:#fbfaf6;background:var(--accent);font:700 12px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;transform:rotate(-1deg)}.landing-hero h1{max-width:760px;margin:0;font:700 clamp(58px,7.3vw,100px)/.88 Georgia,"Times New Roman",serif;letter-spacing:-.065em;text-wrap:balance}.hero-copy{max-width:640px;margin:32px 0 0;color:#484942;font-size:19px;line-height:1.6}.hero-art{aspect-ratio:760/720;position:relative;display:flex;align-items:flex-end;justify-content:center;gap:12px;padding:0 24px 32px;background:url('/assets/landing-bg.svg') center/contain no-repeat;filter:drop-shadow(11px 14px 0 rgba(32,33,30,.14));transform:rotate(2deg)}.hero-art span{padding:7px 9px;border:2px solid var(--ink);background:#fbfaf6;font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;box-shadow:3px 3px 0 var(--ink)}.hero-art strong{font-size:25px}.quickstart{display:grid;grid-template-columns:minmax(250px,.75fr) minmax(420px,1.25fr);gap:70px;align-items:center;padding:78px 0}.quickstart .kicker{margin-bottom:16px;background:#315a3a;transform:rotate(1deg)}.quickstart h2{margin:0;font:700 44px/1 Georgia,"Times New Roman",serif;letter-spacing:-.04em}.quickstart p{max-width:440px;color:var(--muted);line-height:1.6}.quickstart pre{margin:0;overflow-x:auto;padding:27px;border:2px solid var(--ink);background:#292a26;color:#f6f2e9;box-shadow:9px 9px 0 #d8b64b;transform:rotate(-.5deg)}.quickstart code{font-size:14px;line-height:1.8}.landing-footer{max-width:1240px;margin:0 auto;padding:26px 32px 42px;border-top:2px solid var(--ink);display:flex;justify-content:space-between;gap:24px;color:var(--muted);font-size:13px}@media(max-width:860px){.landing-hero{grid-template-columns:minmax(0,1fr) minmax(280px,.7fr);gap:30px}.landing-hero h1{font-size:64px}}@media(max-width:680px){.landing-nav{height:66px;padding:0 18px}.landing-nav nav{gap:14px}.landing{padding:0 18px}.landing-hero{min-height:auto;padding:58px 0 54px;grid-template-columns:1fr;gap:42px}.landing-hero h1{font-size:56px}.hero-copy{font-size:17px}.hero-art{width:min(430px,94%);margin:0 auto}.quickstart{grid-template-columns:1fr;gap:30px;padding:58px 0}.quickstart pre{margin-right:9px;padding:20px}.quickstart code{font-size:12px}.landing-footer{padding:24px 18px 34px;flex-direction:column}}
 `;
