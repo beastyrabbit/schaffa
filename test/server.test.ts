@@ -1677,6 +1677,109 @@ test("keeps administration out of the public API", async () => {
   assert.match(createdToken.headers["content-security-policy"] || "", /script-src 'self'/);
 });
 
+test("filters admin publications by user and then uploader token", async () => {
+  const firstUserId = "admin-filter-user-first";
+  const secondUserId = "admin-filter-user-second";
+  db()
+    .prepare(
+      `INSERT INTO users (id, shoo_subject, email, name)
+       VALUES (?, ?, ?, ?), (?, ?, ?, ?)`,
+    )
+    .run(
+      firstUserId,
+      "admin-filter-subject-first",
+      "first-filter@example.test",
+      "First filter user",
+      secondUserId,
+      "admin-filter-subject-second",
+      "second-filter@example.test",
+      "Second filter user",
+    );
+  const firstUploader = createToken("First desktop", ["upload"], firstUserId);
+  const secondUploader = createToken("First automation", ["upload"], firstUserId);
+  const otherUserUploader = createToken("Second desktop", ["upload"], secondUserId);
+
+  assert.equal(
+    (
+      await publishHtmlWithToken(
+        "filter-first-desktop",
+        "<h1>First desktop</h1>",
+        firstUploader.token,
+      )
+    ).statusCode,
+    202,
+  );
+  assert.equal(
+    (
+      await publishHtmlWithToken(
+        "filter-first-automation",
+        "<h1>First automation</h1>",
+        secondUploader.token,
+      )
+    ).statusCode,
+    202,
+  );
+  assert.equal(
+    (
+      await publishHtmlWithToken(
+        "filter-second-desktop",
+        "<h1>Second desktop</h1>",
+        otherUserUploader.token,
+      )
+    ).statusCode,
+    202,
+  );
+
+  const fileBody = multipart("file", "second-user-file.txt", "text/plain", "Second user file");
+  const uploadedFile = await app.inject({
+    method: "POST",
+    url: "/api/files",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${otherUserUploader.token}`,
+      "content-type": fileBody.contentType,
+    },
+    payload: fileBody.payload,
+  });
+  assert.equal(uploadedFile.statusCode, 202);
+  await finishPendingScans();
+  const uploadedFilename = String(uploadedFile.json().filename);
+
+  const byUser = await app.inject({
+    method: "GET",
+    url: `/admin?user=${firstUserId}`,
+    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+  });
+  assert.equal(byUser.statusCode, 200);
+  assert.match(byUser.body, /name="user"/);
+  assert.match(byUser.body, /First filter user · first-filter@example\.test/);
+  assert.match(byUser.body, /filter-first-desktop/);
+  assert.match(byUser.body, /filter-first-automation/);
+  assert.doesNotMatch(byUser.body, /filter-second-desktop/);
+  assert.doesNotMatch(byUser.body, new RegExp(uploadedFilename));
+  assert.match(byUser.body, new RegExp(`value="${firstUploader.id}" data-user="${firstUserId}"`));
+  assert.match(byUser.body, /src="\/assets\/admin-filters\.js"/);
+
+  const byUploader = await app.inject({
+    method: "GET",
+    url: `/admin?user=${firstUserId}&uploader=${secondUploader.id}`,
+    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+  });
+  assert.equal(byUploader.statusCode, 200);
+  assert.match(byUploader.body, /filter-first-automation/);
+  assert.doesNotMatch(byUploader.body, /filter-first-desktop/);
+  assert.doesNotMatch(byUploader.body, /filter-second-desktop/);
+
+  const filterScript = await app.inject({
+    method: "GET",
+    url: "/assets/admin-filters.js",
+    headers: { host: "schaffa.test" },
+  });
+  assert.equal(filterScript.statusCode, 200);
+  assert.match(filterScript.headers["content-type"] || "", /^application\/javascript/);
+  assert.match(filterScript.body, /user\.addEventListener\("change", syncUploaders\)/);
+});
+
 test("write lockdown blocks publishing but leaves takedown available", async () => {
   const locked = await app.inject({
     method: "POST",

@@ -34,11 +34,13 @@ export interface PageSummary extends PageRow {
   latest_bytes: number;
   uploader_id: string;
   uploader_name: string;
+  uploader_user_id: string | null;
 }
 
 export interface FileSummary extends FileRow {
   uploader_id: string;
   uploader_name: string;
+  uploader_user_id: string | null;
 }
 
 export interface PublishedPage {
@@ -392,7 +394,8 @@ export function listPages(): PageSummary[] {
                 0
               ) AS latest_bytes,
               pv.created_by_token_id AS uploader_id,
-              COALESCE(t.name, 'Unknown uploader') AS uploader_name
+              COALESCE(t.name, 'Unknown uploader') AS uploader_name,
+              t.user_id AS uploader_user_id
        FROM pages p
        JOIN page_versions pv ON pv.page_id = p.id AND pv.version = p.current_version
        LEFT JOIN tokens t ON t.id = pv.created_by_token_id
@@ -415,7 +418,8 @@ export function listFiles(): FileSummary[] {
   return db()
     .prepare(
       `SELECT f.*, f.created_by_token_id AS uploader_id,
-              COALESCE(t.name, 'Unknown uploader') AS uploader_name
+              COALESCE(t.name, 'Unknown uploader') AS uploader_name,
+              t.user_id AS uploader_user_id
        FROM files f
        LEFT JOIN tokens t ON t.id = f.created_by_token_id
        ORDER BY f.created_at DESC`,
@@ -434,7 +438,8 @@ export function listPagesForUser(userId: string): PageSummary[] {
                 0
               ) AS latest_bytes,
               owner.id AS uploader_id,
-              owner.name AS uploader_name
+              owner.name AS uploader_name,
+              owner.user_id AS uploader_user_id
        FROM pages p
        JOIN tokens owner ON owner.id = p.owner_token_id
        WHERE owner.user_id = ?
@@ -456,7 +461,8 @@ export function listPagesForUser(userId: string): PageSummary[] {
 export function listFilesForUser(userId: string): FileSummary[] {
   return db()
     .prepare(
-      `SELECT f.*, t.id AS uploader_id, t.name AS uploader_name
+      `SELECT f.*, t.id AS uploader_id, t.name AS uploader_name,
+              t.user_id AS uploader_user_id
        FROM files f
        JOIN tokens t ON t.id = f.created_by_token_id
        WHERE t.user_id = ?
