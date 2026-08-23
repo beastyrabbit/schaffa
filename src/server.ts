@@ -71,6 +71,7 @@ import { openStoredFile } from "./storage.js";
 import {
   type AdminFilters,
   accountClientScript,
+  adminFiltersClientScript,
   renderAccount,
   renderAccountLogin,
   renderAdmin,
@@ -331,6 +332,10 @@ export function buildServer(
   app.get("/assets/token-setup.js", async (_request, reply) => {
     reply.header("Cache-Control", "public, max-age=3600");
     return reply.type("application/javascript; charset=utf-8").send(tokenSetupClientScript);
+  });
+  app.get("/assets/admin-filters.js", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=3600");
+    return reply.type("application/javascript; charset=utf-8").send(adminFiltersClientScript);
   });
   app.get<{ Querystring: { signedOut?: string } }>("/account", async (request, reply) => {
     accountHeaders(reply);
@@ -1296,6 +1301,7 @@ function hasActiveAdminToken(): boolean {
 
 interface AdminQuery {
   q?: string;
+  user?: string;
   uploader?: string;
   kind?: string;
   lifetime?: string;
@@ -1312,6 +1318,7 @@ function adminFilters(query: AdminQuery): AdminFilters {
     : "all";
   return {
     q: (query.q || "").trim().slice(0, 100),
+    user: (query.user || "").trim().slice(0, 80),
     uploader: (query.uploader || "").trim().slice(0, 80),
     kind,
     lifetime,
