@@ -557,14 +557,23 @@ export async function deleteGuide(slug: string): Promise<void> {
   await removeGuide(slug);
 }
 
-export function listGuides(): Array<GuideRow & { step_count: number; uploader_name: string }> {
+export type GuideSummary = GuideRow & {
+  step_count: number;
+  uploader_id: string;
+  uploader_name: string;
+  uploader_user_id: string | null;
+};
+
+export function listGuides(): GuideSummary[] {
   return db()
     .prepare(
       `SELECT g.*, (SELECT COUNT(*) FROM guide_steps gs WHERE gs.guide_id = g.id) AS step_count,
-              COALESCE(t.name, 'Unknown uploader') AS uploader_name
+              g.owner_token_id AS uploader_id,
+              COALESCE(t.name, 'Unknown uploader') AS uploader_name,
+              t.user_id AS uploader_user_id
        FROM guides g LEFT JOIN tokens t ON t.id = g.owner_token_id ORDER BY g.updated_at DESC`,
     )
-    .all() as unknown as Array<GuideRow & { step_count: number; uploader_name: string }>;
+    .all() as unknown as GuideSummary[];
 }
 
 export function guidePreflight(guide: GuideView): GuidePreflight {

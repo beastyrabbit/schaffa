@@ -1699,6 +1699,7 @@ test("filters admin publications by user and then uploader token", async () => {
     );
   const firstUploader = createToken("First desktop", ["upload"], firstUserId);
   const secondUploader = createToken("First automation", ["upload"], firstUserId);
+  const guideOnlyUploader = createToken("First guide agent", ["upload"], firstUserId);
   const otherUserUploader = createToken("Second desktop", ["upload"], secondUserId);
 
   assert.equal(
@@ -1747,6 +1748,38 @@ test("filters admin publications by user and then uploader token", async () => {
   await finishPendingScans();
   const uploadedFilename = String(uploadedFile.json().filename);
 
+  const firstGuide = await app.inject({
+    method: "POST",
+    url: "/api/guides",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${guideOnlyUploader.token}`,
+      "content-type": "application/json",
+    },
+    payload: {
+      title: "First filtered guide-search-needle",
+      description: "First guide description",
+      targetUrl: "https://first-filter.example.test/projects",
+    },
+  });
+  assert.equal(firstGuide.statusCode, 201);
+  const firstGuideSlug = String(firstGuide.json().slug);
+  const otherGuide = await app.inject({
+    method: "POST",
+    url: "/api/guides",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${otherUserUploader.token}`,
+      "content-type": "application/json",
+    },
+    payload: {
+      title: "Second filtered guide",
+      description: "other-guide-description",
+    },
+  });
+  assert.equal(otherGuide.statusCode, 201);
+  const otherGuideSlug = String(otherGuide.json().slug);
+
   const byUser = await app.inject({
     method: "GET",
     url: `/admin?user=${firstUserId}`,
@@ -1757,9 +1790,15 @@ test("filters admin publications by user and then uploader token", async () => {
   assert.match(byUser.body, /First filter user · first-filter@example\.test/);
   assert.match(byUser.body, /filter-first-desktop/);
   assert.match(byUser.body, /filter-first-automation/);
+  assert.match(byUser.body, new RegExp(firstGuideSlug));
+  assert.doesNotMatch(byUser.body, new RegExp(otherGuideSlug));
   assert.doesNotMatch(byUser.body, /filter-second-desktop/);
   assert.doesNotMatch(byUser.body, new RegExp(uploadedFilename));
   assert.match(byUser.body, new RegExp(`value="${firstUploader.id}" data-user="${firstUserId}"`));
+  assert.match(
+    byUser.body,
+    new RegExp(`value="${guideOnlyUploader.id}" data-user="${firstUserId}"`),
+  );
   assert.match(byUser.body, /src="\/assets\/admin-filters\.js"/);
 
   const byUploader = await app.inject({
@@ -1769,8 +1808,80 @@ test("filters admin publications by user and then uploader token", async () => {
   });
   assert.equal(byUploader.statusCode, 200);
   assert.match(byUploader.body, /filter-first-automation/);
+  assert.doesNotMatch(byUploader.body, new RegExp(firstGuideSlug));
   assert.doesNotMatch(byUploader.body, /filter-first-desktop/);
   assert.doesNotMatch(byUploader.body, /filter-second-desktop/);
+
+  const byGuideUploader = await app.inject({
+    method: "GET",
+    url: `/admin?user=${firstUserId}&uploader=${guideOnlyUploader.id}`,
+    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+  });
+  assert.equal(byGuideUploader.statusCode, 200);
+  assert.match(byGuideUploader.body, new RegExp(firstGuideSlug));
+  assert.doesNotMatch(byGuideUploader.body, new RegExp(otherGuideSlug));
+  assert.doesNotMatch(byGuideUploader.body, /filter-first-desktop/);
+  assert.doesNotMatch(byGuideUploader.body, /filter-first-automation/);
+
+  const byGuideSearch = await app.inject({
+    method: "GET",
+    url: "/admin?q=guide-search-needle",
+    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+  });
+  assert.equal(byGuideSearch.statusCode, 200);
+  assert.match(byGuideSearch.body, new RegExp(firstGuideSlug));
+  assert.doesNotMatch(byGuideSearch.body, new RegExp(otherGuideSlug));
+  assert.doesNotMatch(byGuideSearch.body, /filter-first-desktop/);
+  assert.doesNotMatch(byGuideSearch.body, new RegExp(uploadedFilename));
+
+  const guidesOnly = await app.inject({
+    method: "GET",
+    url: "/admin?kind=guides",
+    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+  });
+  assert.equal(guidesOnly.statusCode, 200);
+  assert.match(guidesOnly.body, /value="guides" selected/);
+  assert.match(guidesOnly.body, new RegExp(firstGuideSlug));
+  assert.match(guidesOnly.body, new RegExp(otherGuideSlug));
+  assert.doesNotMatch(guidesOnly.body, /filter-first-desktop/);
+  assert.doesNotMatch(guidesOnly.body, new RegExp(uploadedFilename));
+
+  const pagesOnly = await app.inject({
+    method: "GET",
+    url: "/admin?kind=pages",
+    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+  });
+  assert.equal(pagesOnly.statusCode, 200);
+  assert.doesNotMatch(pagesOnly.body, new RegExp(firstGuideSlug));
+  assert.doesNotMatch(pagesOnly.body, new RegExp(otherGuideSlug));
+
+  const filesOnly = await app.inject({
+    method: "GET",
+    url: "/admin?kind=files",
+    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+  });
+  assert.equal(filesOnly.statusCode, 200);
+  assert.doesNotMatch(filesOnly.body, new RegExp(firstGuideSlug));
+  assert.doesNotMatch(filesOnly.body, new RegExp(otherGuideSlug));
+
+  const permanentGuides = await app.inject({
+    method: "GET",
+    url: "/admin?kind=guides&lifetime=permanent",
+    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+  });
+  assert.equal(permanentGuides.statusCode, 200);
+  assert.match(permanentGuides.body, new RegExp(firstGuideSlug));
+  assert.match(permanentGuides.body, new RegExp(otherGuideSlug));
+
+  const anonymousOnly = await app.inject({
+    method: "GET",
+    url: "/admin?kind=guides&lifetime=anonymous-active",
+    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+  });
+  assert.equal(anonymousOnly.statusCode, 200);
+  assert.doesNotMatch(anonymousOnly.body, new RegExp(firstGuideSlug));
+  assert.doesNotMatch(anonymousOnly.body, new RegExp(otherGuideSlug));
+  assert.match(anonymousOnly.body, /Keine passenden Guides gefunden\./);
 
   const filterScript = await app.inject({
     method: "GET",

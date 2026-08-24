@@ -1,6 +1,7 @@
 import { config } from "./config.js";
-import type { GuideRow, TokenRow } from "./db.js";
+import type { TokenRow } from "./db.js";
 import { exampleSkills } from "./example-skills.js";
+import type { GuideSummary } from "./guides.js";
 import type { FileSummary, PageSummary } from "./service.js";
 import { filePublicUrl } from "./service.js";
 import type { InstanceSettings } from "./settings.js";
@@ -10,7 +11,7 @@ export interface AdminFilters {
   q: string;
   user: string;
   uploader: string;
-  kind: "all" | "pages" | "files";
+  kind: "all" | "guides" | "pages" | "files";
   lifetime: "all" | "permanent" | "anonymous-active";
 }
 
@@ -369,7 +370,7 @@ function renderTokenSetup(token: string, title = "Token jetzt einrichten"): stri
 export function renderAdmin(input: {
   pages: PageSummary[];
   files: FileSummary[];
-  guides: Array<GuideRow & { step_count: number; uploader_name: string }>;
+  guides: GuideSummary[];
   tokens: TokenRow[];
   users: UserSummary[];
   settings: InstanceSettings;
@@ -378,15 +379,19 @@ export function renderAdmin(input: {
   filters: AdminFilters;
   newToken?: string;
 }): string {
-  const uploaders = uniqueUploaders(input.pages, input.files);
+  const uploaders = uniqueUploaders(input.pages, input.files, input.guides);
+  const guides =
+    input.filters.kind === "all" || input.filters.kind === "guides"
+      ? input.guides.filter((guide) => guideMatches(guide, input.filters))
+      : [];
   const pages =
-    input.filters.kind === "files"
-      ? []
-      : input.pages.filter((page) => pageMatches(page, input.filters));
+    input.filters.kind === "all" || input.filters.kind === "pages"
+      ? input.pages.filter((page) => pageMatches(page, input.filters))
+      : [];
   const files =
-    input.filters.kind === "pages"
-      ? []
-      : input.files.filter((file) => fileMatches(file, input.filters));
+    input.filters.kind === "all" || input.filters.kind === "files"
+      ? input.files.filter((file) => fileMatches(file, input.filters))
+      : [];
 
   const pageRows = pages
     .map(
@@ -416,7 +421,7 @@ export function renderAdmin(input: {
     )
     .join("");
 
-  const guideRows = input.guides
+  const guideRows = guides
     .map(
       (guide) => `<tr>
         <td><a href="${config.baseUrl}/g/${encodeURIComponent(guide.slug)}" target="_blank" rel="noopener noreferrer">${escapeHtml(guide.slug)}</a><span class="sub">${escapeHtml(guide.title)}</span></td>
@@ -453,19 +458,19 @@ export function renderAdmin(input: {
       <div class="identity"><span>${escapeHtml(input.actorName)}</span><form method="post" action="/admin/logout"><button class="quiet" type="submit">Abmelden</button></form></div>
     </header>
     <main class="workspace">
-      <div class="page-heading"><div><h1>Publikationen</h1><p>Öffentliche Seiten und Dateien dieses Servers.</p></div><a class="docs-link" href="${config.baseUrl}/api" target="_blank" rel="noopener noreferrer">API ansehen</a></div>
+      <div class="page-heading"><div><h1>Publikationen</h1><p>Guides, Seiten und Dateien dieses Servers.</p></div><a class="docs-link" href="${config.baseUrl}/api" target="_blank" rel="noopener noreferrer">API ansehen</a></div>
       ${input.newToken ? renderTokenSetup(input.newToken, "Admin-Token jetzt einrichten") : ""}
       <form class="filters" method="get" action="/admin" data-admin-filters>
-        <label>Suche<input type="search" name="q" value="${escapeHtml(input.filters.q)}" placeholder="Slug, Titel, Datei …"></label>
+        <label>Suche<input type="search" name="q" value="${escapeHtml(input.filters.q)}" placeholder="Slug, Titel, Datei, Guide …"></label>
         <label>Nutzer<select name="user"><option value="">Alle</option>${input.users.map((user) => `<option value="${escapeHtml(user.id)}"${selected(input.filters.user, user.id)}>${escapeHtml(userLabel(user))}</option>`).join("")}</select></label>
         <label>Uploader-Token<select name="uploader"><option value="">Alle</option>${uploaders.map((uploader) => `<option value="${escapeHtml(uploader.id)}" data-user="${escapeHtml(uploader.userId || "")}"${selected(input.filters.uploader, uploader.id)}>${escapeHtml(uploader.name)}</option>`).join("")}</select></label>
-        <label>Art<select name="kind"><option value="all"${selected(input.filters.kind, "all")}>Alles</option><option value="pages"${selected(input.filters.kind, "pages")}>Seiten</option><option value="files"${selected(input.filters.kind, "files")}>Dateien</option></select></label>
+        <label>Art<select name="kind"><option value="all"${selected(input.filters.kind, "all")}>Alles</option><option value="guides"${selected(input.filters.kind, "guides")}>Guides</option><option value="pages"${selected(input.filters.kind, "pages")}>Seiten</option><option value="files"${selected(input.filters.kind, "files")}>Dateien</option></select></label>
         <label>Lebensdauer<select name="lifetime"><option value="all"${selected(input.filters.lifetime, "all")}>Alle</option><option value="permanent"${selected(input.filters.lifetime, "permanent")}>Dauerhaft</option><option value="anonymous-active"${selected(input.filters.lifetime, "anonymous-active")}>Anonym aktiv</option></select></label>
         <button type="submit">Filtern</button><a href="/admin">Zurücksetzen</a>
       </form>
-      <nav class="tabs" aria-label="Bereiche"><a href="#operations">Betrieb</a><a href="#guides">Guides <span>${input.guides.length}</span></a><a href="#pages">Seiten <span>${pages.length}</span></a><a href="#files">Dateien <span>${files.length}</span></a><a href="#users">Nutzer <span>${input.users.length}</span></a><a href="#tokens">Tokens <span>${input.tokens.length}</span></a></nav>
+      <nav class="tabs" aria-label="Bereiche"><a href="#operations">Betrieb</a><a href="#guides">Guides <span>${guides.length}</span></a><a href="#pages">Seiten <span>${pages.length}</span></a><a href="#files">Dateien <span>${files.length}</span></a><a href="#users">Nutzer <span>${input.users.length}</span></a><a href="#tokens">Tokens <span>${input.tokens.length}</span></a></nav>
       <section id="operations"><div class="section-heading"><h2>Betrieb</h2><p>Zugänge und Publishing im Notfall gezielt sperren.</p></div><div class="operation-list"><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="writesLocked" value="${input.settings.writesLocked ? "false" : "true"}"><div><strong>${input.settings.writesLocked ? "Publishing gesperrt" : "Publishing aktiv"}</strong><span class="sub">${input.settings.writesLocked ? "Nur Lesezugriffe und Admin-Wiederherstellung sind möglich." : "Uploads und Seiten-Updates werden angenommen."}</span></div><button class="${input.settings.writesLocked ? "" : "danger"}" type="submit">${input.settings.writesLocked ? "Lockdown aufheben" : "Lockdown aktivieren"}</button></form><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="interactivePublishingEnabled" value="${input.settings.interactivePublishingEnabled ? "false" : "true"}"><div><strong>Interaktives Publishing ${input.settings.interactivePublishingEnabled ? "aktiv" : "gesperrt"}</strong><span class="sub">Erfordert zusätzlich eine Freigabe pro Nutzer und einen eigenen Interactive-Token.</span></div><button class="${input.settings.interactivePublishingEnabled ? "danger" : ""}" type="submit">${input.settings.interactivePublishingEnabled ? "Instanzweit sperren" : "Instanzweit aktivieren"}</button></form><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="signupsEnabled" value="${input.settings.signupsEnabled ? "false" : "true"}"><div><strong>Registrierungen ${input.settings.signupsEnabled ? "aktiv" : "gesperrt"}</strong><span class="sub">Steuert, ob eine neue Shoo-Identität ein Konto anlegen darf.</span></div><button class="${input.settings.signupsEnabled ? "danger" : ""}" type="submit">${input.settings.signupsEnabled ? "Registrierungen sperren" : "Registrierungen erlauben"}</button></form><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="loginsEnabled" value="${input.settings.loginsEnabled ? "false" : "true"}"><div><strong>Anmeldungen ${input.settings.loginsEnabled ? "aktiv" : "gesperrt"}</strong><span class="sub">Beim Sperren werden alle aktiven Nutzersitzungen beendet.</span></div><button class="${input.settings.loginsEnabled ? "danger" : ""}" type="submit">${input.settings.loginsEnabled ? "Anmeldungen sperren" : "Anmeldungen erlauben"}</button></form></div></section>
-      <section id="guides"><div class="section-heading"><h2>Guides</h2><p>Aufnahmen, Entwürfe und unveränderliche öffentliche Revisionen.</p></div><div class="table-wrap"><table><thead><tr><th>Guide</th><th>Status</th><th>Revision</th><th>Schritte</th><th>Uploader</th><th>Geändert</th><th>Aktion</th></tr></thead><tbody>${guideRows || emptyRow(7, "Noch keine Guides vorhanden.")}</tbody></table></div></section>
+      <section id="guides"><div class="section-heading"><h2>Guides</h2><p>Aufnahmen, Entwürfe und unveränderliche öffentliche Revisionen.</p></div><div class="table-wrap"><table><thead><tr><th>Guide</th><th>Status</th><th>Revision</th><th>Schritte</th><th>Uploader</th><th>Geändert</th><th>Aktion</th></tr></thead><tbody>${guideRows || emptyRow(7, "Keine passenden Guides gefunden.")}</tbody></table></div></section>
       <section id="pages"><div class="section-heading"><h2>Seiten</h2><p>Anonyme Seiten verschwinden nach einer Stunde; gespeichert bleiben sie 30 Tage.</p></div><div class="table-wrap"><table><thead><tr><th>Slug</th><th>Aktuell</th><th>Versionen</th><th>Uploader</th><th>Status</th><th>Größe</th><th>Geändert</th><th>Aktion</th></tr></thead><tbody>${pageRows || emptyRow(8, "Keine passenden Seiten gefunden.")}</tbody></table></div></section>
       <section id="files"><div class="section-heading"><h2>Dateien</h2><p>Unveränderliche URLs mit zufälliger 128-Bit-ID.</p></div><div class="table-wrap"><table><thead><tr><th>Datei</th><th>Typ</th><th>Uploader</th><th>Größe</th><th>Hochgeladen</th><th>Aktion</th></tr></thead><tbody>${fileRows || emptyRow(6, "Keine passenden Dateien gefunden.")}</tbody></table></div></section>
       <section id="users"><div class="section-heading"><h2>Nutzer</h2><p>Interaktive Seiten benötigen eine ausdrückliche Freigabe pro Shoo-Identität.</p></div><div class="table-wrap"><table><thead><tr><th>Nutzer</th><th>E-Mail</th><th>Aktive / alle Tokens</th><th>Interactive</th><th>Letzte Anmeldung</th><th>Aktion</th></tr></thead><tbody>${userRows || emptyRow(6, "Keine Nutzer vorhanden.")}</tbody></table></div></section>
@@ -541,6 +546,13 @@ function fileMatches(file: FileSummary, filters: AdminFilters): boolean {
   return matchesQuery(filters.q, [file.filename, file.media_type, file.uploader_name]);
 }
 
+function guideMatches(guide: GuideSummary, filters: AdminFilters): boolean {
+  if (filters.user && guide.uploader_user_id !== filters.user) return false;
+  if (filters.uploader && guide.uploader_id !== filters.uploader) return false;
+  if (filters.lifetime === "anonymous-active") return false;
+  return matchesQuery(filters.q, [guide.slug, guide.title, guide.uploader_name]);
+}
+
 function matchesQuery(query: string, values: string[]): boolean {
   const needle = query.toLocaleLowerCase("de-DE");
   return !needle || values.some((value) => value.toLocaleLowerCase("de-DE").includes(needle));
@@ -549,9 +561,10 @@ function matchesQuery(query: string, values: string[]): boolean {
 function uniqueUploaders(
   pages: PageSummary[],
   files: FileSummary[],
+  guides: GuideSummary[],
 ): Array<{ id: string; name: string; userId: string | null }> {
   const uploaders = new Map<string, { name: string; userId: string | null }>();
-  for (const item of [...pages, ...files]) {
+  for (const item of [...pages, ...files, ...guides]) {
     uploaders.set(item.uploader_id, {
       name: item.uploader_name,
       userId: item.uploader_user_id,

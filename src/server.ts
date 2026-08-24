@@ -1308,7 +1308,7 @@ interface AdminQuery {
 }
 
 function adminFilters(query: AdminQuery): AdminFilters {
-  const kinds = new Set<AdminFilters["kind"]>(["all", "pages", "files"]);
+  const kinds = new Set<AdminFilters["kind"]>(["all", "guides", "pages", "files"]);
   const lifetimes = new Set<AdminFilters["lifetime"]>(["all", "permanent", "anonymous-active"]);
   const kind = kinds.has(query.kind as AdminFilters["kind"])
     ? (query.kind as AdminFilters["kind"])
