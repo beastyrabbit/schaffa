@@ -76,9 +76,16 @@ information needed after the skill has triggered:
 Prefer one exact command over several equivalent examples. Use direct `curl`
 uploads for HTML and ordinary files because those APIs are small and stable:
 
-- HTML: multipart field `html` to `POST /api/pages`. Authentication is
-  optional for a temporary page and required for a permanent page or update.
-- Files: multipart field `file` to `POST /api/files` with `SCHAFFA_TOKEN`.
+- HTML: multipart field `html` to `POST <configured-origin>/api/pages`.
+  Authentication is optional for a temporary page and required for a permanent
+  page or update.
+- Files: multipart field `file` to `POST <configured-origin>/api/files` with
+  `SCHAFFA_TOKEN`.
+
+Render the server's configured public origin directly into website skill
+commands. The official website therefore publishes to `https://schaffa.dev`,
+while self-hosted catalogs publish to their own instance. Do not expose a
+`SCHAFFA_URL` setting in these skills.
 
 Read `publicUrl` from the successful JSON response. If a required token is
 unset, stop and tell the user instead of guessing. Keep specialized CLI
@@ -180,6 +187,8 @@ Before publishing a new or changed skill, confirm all of the following:
   distinct command, lifecycle, or safety model.
 - HTML and file uploads use the documented `curl` API calls; guides and
   presentations use their specialized commands.
+- HTML and file skills contain the server's configured public origin directly
+  and do not expose a `SCHAFFA_URL` setting.
 - Required credentials are read from the environment and missing credentials
   cause a clear stop instead of guessing.
 - Success returns the actual `publicUrl` only after the upload succeeds.
