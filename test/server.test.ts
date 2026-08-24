@@ -378,9 +378,11 @@ test("serves one general read skill and focused writing skills", async () => {
     /description: Use when the user asks to communicate through an HTML document, or if they mention "HTML" with no additional context\./,
   );
   assert.match(htmlSkill.markdown, /-F "html=@<html-file>;type=text\/html"/);
-  assert.match(htmlSkill.markdown, /\$SCHAFFA_URL\/api\/pages/);
+  assert.match(htmlSkill.markdown, /https:\/\/schaffa\.test\/api\/pages/);
+  assert.doesNotMatch(htmlSkill.markdown, /SCHAFFA_URL/);
   assert.match(fileSkill.markdown, /-F "file=@<file>"/);
-  assert.match(fileSkill.markdown, /\$SCHAFFA_URL\/api\/files/);
+  assert.match(fileSkill.markdown, /https:\/\/schaffa\.test\/api\/files/);
+  assert.doesNotMatch(fileSkill.markdown, /SCHAFFA_URL/);
   assert.doesNotMatch(htmlSkill.markdown, /npx schaffa upload/);
   assert.doesNotMatch(fileSkill.markdown, /npx schaffa upload/);
   assert.match(guideSkill.markdown, /npx schaffa record --title "<title>" --browser/);

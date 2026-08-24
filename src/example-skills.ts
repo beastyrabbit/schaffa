@@ -48,12 +48,12 @@ Create one complete, self-contained HTML file capped at 512 KB.
 - Do not include scripts, forms, frames, event handlers, JavaScript URLs, meta refresh, external stylesheets, or external assets.
 - Never include secrets, private URLs, or local filesystem paths.
 
-Set \`SCHAFFA_URL\` to the Schaffa instance origin, then publish the finished file directly:
+Publish the finished file directly to Schaffa:
 
 \`\`\`sh
 curl --fail-with-body --silent --show-error \\
   -F "html=@<html-file>;type=text/html" \\
-  "$SCHAFFA_URL/api/pages"
+  "${config.baseUrl}/api/pages"
 \`\`\`
 
 Add \`-H "Authorization: Bearer $SCHAFFA_TOKEN"\` for a permanent page. Without it, the page expires after one hour. Keep one local file across revisions; for a permanent page, upload later versions with \`PUT /api/pages/<slug>\` so its public URL stays stable.
@@ -70,13 +70,13 @@ description: Use when the user asks to upload or share a file, or a public file 
 
 # Schaffa File
 
-Set \`SCHAFFA_URL\` to the Schaffa instance origin and require \`SCHAFFA_TOKEN\` in the environment. If the token is unset, tell the user instead of guessing.
+Require \`SCHAFFA_TOKEN\` in the environment. If the token is unset, tell the user instead of guessing.
 
 \`\`\`sh
 curl --fail-with-body --silent --show-error \\
   -H "Authorization: Bearer $SCHAFFA_TOKEN" \\
   -F "file=@<file>" \\
-  "$SCHAFFA_URL/api/files"
+  "${config.baseUrl}/api/files"
 \`\`\`
 
 Read \`publicUrl\` from the JSON response and return it. On HTTP 401, report that the token is missing or invalid and do not retry.
