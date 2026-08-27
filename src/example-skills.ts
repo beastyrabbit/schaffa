@@ -93,33 +93,38 @@ description: Use when the user asks for a step-by-step guide.
 
 # Schaffa Guide
 
-Keep \`SCHAFFA_TOKEN\` in the environment. Start before the first relevant action. Keep \`.schaffa/guide-session.json\` and \`.schaffa/recordings/\` local and uncommitted; neither stores the token.
+Keep \`SCHAFFA_TOKEN\` in the environment. Start before the first action. Keep \`.schaffa/guide-session.json\` and \`.schaffa/recordings/\` local and uncommitted; they do not store the token.
 
-Prefer the automatic recorder when the agent can operate a dedicated browser or native macOS app:
+Prefer automatic recording:
 
-- Browser: \`npx schaffa record --title "<title>" --browser "<url>"\`
+- Signed-in Chrome on macOS: \`npx schaffa record --title "<title>" --chrome "<url>"\`
+- Isolated browser profile: \`npx schaffa record --title "<title>" --browser "<url>"\`
 - Desktop: \`npx schaffa record --title "<title>" --desktop --app <bundle-id>\`
 
-Clicks are highlighted and uploaded in order. Close the browser or press Ctrl+C to publish automatically. Use Alt+Shift+R to pause on private screens. After an upload failure, run \`npx schaffa guide sync\`; a clean sync also publishes automatically.
+\`--chrome\` asks running Chrome for a window without creating or selecting a profile. Chrome chooses an existing profile session with its logins, extensions, and password manager. Do not promise a specific profile. The recorder binds to that exact window and ignores others. Use \`--browser\` only for an isolated profile.
 
-Inspect and correct the complete server-side recording before finishing it. Use a one-based step number or exact step ID. Corrections to an already published guide immediately create a new immutable revision:
+Clicks get a compact cursor and red target outline. Close the recorded window or press Ctrl+C to publish. Alt+Shift+R pauses capture. After upload failure, run \`npx schaffa guide sync\`; a clean sync publishes.
+
+Review every server step. Use a one-based number or exact step ID. Published fixes create an immutable revision:
 
 - Inspect: \`npx schaffa guide status --json\`
 - Edit: \`npx schaffa guide edit-step --step <number-or-id> --title "<title>" --text "<instruction>"\`
 - Replace an image: \`npx schaffa guide replace-screenshot --step <number-or-id> --screenshot <path>\`
 - Delete: \`npx schaffa guide delete-step --step <number-or-id>\`
 
-For mixed terminal, API, file, and browser workflows, use the manual lifecycle:
+Replacement does not recreate the cursor or target outline. Add them to the image before upload when needed.
+
+For mixed work, record manually:
 
 - Start: \`npx schaffa guide start --title "<title>"\`
 - Add a step: \`npx schaffa guide step --title "<step>" --text "<instruction>" --action <type> --target "<target>" --verification "<expected-result>"\`
 - Finish: \`npx schaffa guide finish --json\`
 
-Record semantic state changes, not every technical click. Add \`--screenshot <path>\` only when visible state helps the reader. Never capture passwords, authentication, payments, private data, or secret-manager screens. Desktop mode ignores clicks outside the selected bundle ID, never reads editable accessibility values, and omits screenshots for secure controls. Visible form contents can still appear in screenshots, so review every step before publishing.
+Record state changes, not every click. Add screenshots only when visible state helps. Never capture authentication, passwords, payments, private data, or secret-manager screens. Chrome pixels can expose tabs, extensions, and forms; pause and review. Desktop mode ignores other apps, editable values, and secure controls.
 
-Writes use the persisted edit revision. On conflict, load and reconcile the current guide. Retry steps through their original idempotent manifest entry.
+Writes use the persisted edit revision. On conflict, reload and reconcile. Retry with the original idempotent manifest entry.
 
-Finishing a manual recording publishes it automatically. If preflight blocks publication, fix the reported content and run \`npx schaffa guide finish --json\` again. Return the published public URL.`,
+Finishing publishes it automatically. Fix preflight findings and rerun \`npx schaffa guide finish --json\`. Return its URL.`,
   },
   {
     slug: "presentation",

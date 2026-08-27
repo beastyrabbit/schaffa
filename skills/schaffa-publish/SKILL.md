@@ -11,19 +11,30 @@ Publish through the bundled curl wrapper. Never print, echo, or pass `SCHAFFA_TO
 
 When a user asks for a guide or wants a workflow documented, start the guide before the first relevant action. Do not wait until the task is finished. Keep `.schaffa/guide-session.json` local and out of source control; it contains the random slug and current edit revision, not the bearer token.
 
-Prefer the automatic recorder when the agent can operate a dedicated browser or
-native macOS app through desktop control:
+Prefer the automatic recorder when the agent can operate Chrome or a native
+macOS app through desktop control:
 
 ```sh
-npx schaffa record --title "Project setup" --browser "https://app.example.com/projects"
+npx schaffa record --title "Project setup" --chrome "https://app.example.com/projects"
+npx schaffa record --title "Isolated setup" --browser "https://app.example.com/projects"
 npx schaffa record --title "Desktop setup" --desktop --app com.example.desktopapp
 ```
 
-Every trusted primary click is highlighted, saved locally, and uploaded during
-the recording. Desktop mode ignores clicks outside the bundle ID passed to
-`--app`, never reads editable accessibility values, and omits
-screenshots for secure controls. Closing the browser or pressing Ctrl+C drains
-the capture queue, runs preflight, and publishes the guide automatically.
+The Chrome command opens a new window in the already running Google Chrome
+without creating a profile. Chrome uses an existing profile session, whose
+logins, extensions, and password manager remain available. Do not promise which
+profile Chrome will use when several are open. The recorder binds to that exact
+macOS window and ignores every other Chrome window. Do not use the isolated
+`--browser` mode for a signed-in workflow unless the user explicitly wants a
+separate Schaffa browser profile.
+
+Every trusted primary click receives a compact cursor and red target outline,
+is saved locally, and uploads during the recording. Desktop mode ignores clicks
+outside the bundle ID passed to `--app`, never reads editable accessibility
+values, and omits screenshots for secure controls. Signed-in Chrome screenshots
+can still expose tabs, bookmarks, extensions, and form contents, so pause when
+necessary and review every step. Closing the recorded window or pressing
+Ctrl+C drains the capture queue, runs preflight, and publishes the guide automatically.
 `Alt+Shift+R` pauses private screens. If any upload fails, run `npx schaffa guide
 sync`; a clean sync publishes the recording automatically. Do not recreate or
 reorder the local screenshots manually.
@@ -38,6 +49,9 @@ npx schaffa guide edit-step --step 2 --title "Choose New project" --text "Select
 npx schaffa guide replace-screenshot --step 2 --screenshot ./correct-step.png
 npx schaffa guide delete-step --step 3
 ```
+
+Screenshot replacement does not recreate the recorder cursor or target outline.
+If those annotations matter, add them to the replacement image before upload.
 
 ```sh
 npx schaffa guide start --title "Project setup"
