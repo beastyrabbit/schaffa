@@ -14,7 +14,7 @@ npx schaffa upload ./plan.html
 
 ```sh
 # Automatic browser or macOS desktop capture
-schaffa record --title "Create a project" --browser "https://app.example.com/projects"
+schaffa record --title "Create a project" --chrome "https://app.example.com/projects"
 schaffa record --title "Configure Calculator" --desktop --app com.apple.calculator
 
 # Inspect and correct an active recording
@@ -34,19 +34,27 @@ schaffa publish deck.md --kind presentation --export pdf --export pptx
 Each requested PDF or PowerPoint export is linked from a compact download bar in the published
 presentation. The bar is hidden when no export format is requested.
 
-Browser mode opens an isolated Chrome, Edge, or Chromium window whose profile is
-reused across recordings. Desktop mode records native macOS windows without
+Chrome mode opens a new window in the already running Google Chrome without
+creating a profile. Chrome uses one of its existing profile sessions, so that
+session's logins, extensions, and password manager remain available. The native
+recorder binds to that exact window and ignores other Chrome work. The isolated
+`--browser` mode remains available when a separate persistent Schaffa browser
+profile is wanted. Desktop mode records native macOS windows without
 opening a browser tab, is restricted to the application selected by `--app`,
 and requires one-time Accessibility and Screen Recording permission. Typed
 values and keystrokes are excluded from event metadata, but
 visible form contents can still appear in screenshots.
-Every primary click gets a visible target outline and click dot. Original JPEG
-or PNG captures and an upload manifest are retained under
+Every primary click gets a visible red target outline and compact cursor.
+Original JPEG or PNG captures and an upload manifest are retained under
 `.schaffa/recordings/<slug>/`; run
 `schaffa guide sync` after a network failure. Close the browser or press Ctrl+C
 to stop and publish automatically, and use `Alt+Shift+R` to pause capture on
 private screens. Edits to an already published guide automatically create a new
 immutable revision.
+
+`schaffa guide replace-screenshot` cleans the supplied image but does not
+recreate a recorder cursor or target outline. Add those annotations to the
+replacement image before uploading it when needed.
 
 The earlier `schaffa guide record --title ... --url ...` form remains supported.
 The short command is `npx schaffa record`, not literal `npx record`: the latter

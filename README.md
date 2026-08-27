@@ -70,17 +70,22 @@ npx schaffa upload ./plan.html
 Record a workflow while it happens:
 
 ```sh
-npx schaffa record --title "Create a project" --browser "https://app.example.com/projects"
+npx schaffa record --title "Create a project" --chrome "https://app.example.com/projects"
 npx schaffa record --title "Configure Calculator" --desktop --app com.apple.calculator
 ```
 
-Browser mode opens a dedicated Chrome, Edge, or Chromium window. Desktop mode
+Chrome mode opens a new window in the already running Google Chrome without
+creating a profile. Chrome uses one of its existing profile sessions, so that
+session's logins, extensions, and password manager remain available. It records
+only that exact macOS window. The isolated `--browser` mode remains available
+when a separate persistent Schaffa browser profile is wanted. Desktop mode
 records only the native macOS app selected by bundle ID and needs one-time
-Accessibility and Screen Recording permission. Every primary click is captured before the UI changes,
-highlighted, saved locally under `.schaffa/recordings/<slug>/`, and uploaded
-immediately as an incremental guide step. Close the browser or press Ctrl+C to
-stop. `Alt+Shift+R` pauses capture for private screens. If the network fails,
-the local manifest remains recoverable with `npx schaffa guide sync`.
+Accessibility and Screen Recording permission. Every primary click is captured
+before the UI changes, marked with a compact cursor and red target outline,
+saved locally under `.schaffa/recordings/<slug>/`, and uploaded immediately as
+an incremental guide step. Close the recorded window or press Ctrl+C to stop.
+`Alt+Shift+R` pauses capture for private screens. If the network fails, the
+local manifest remains recoverable with `npx schaffa guide sync`.
 
 Manual recording remains available for terminal, API, and mixed workflows:
 
@@ -98,6 +103,10 @@ npx schaffa guide edit-step --step 2 --title "Choose New project" --text "Select
 npx schaffa guide replace-screenshot --step 2 --screenshot ./correct-step.png
 npx schaffa guide delete-step --step 3
 ```
+
+`replace-screenshot` cleans the supplied image, but it cannot recreate a
+recorder cursor or target outline. Those annotations are baked into the original
+screenshot pixels, so add them to the replacement image first when they matter.
 
 Finishing a recording publishes it automatically. Corrections made after that
 point immediately create a new immutable public revision.

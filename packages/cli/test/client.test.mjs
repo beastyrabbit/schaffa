@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -17,10 +18,15 @@ import {
   upload,
 } from "../dist/client.js";
 import {
+  chromeWindowArguments,
   describeDesktopClick,
+  desktopClickMatchesScope,
   desktopMarker,
+  findChromeExecutable,
+  openChromeWindow,
   parseDesktopEvent,
   prepareDesktopRecorder,
+  recordChromeWindowGuide,
   recordDesktopGuide,
 } from "../dist/desktop-recorder.js";
 import {
@@ -426,6 +432,466 @@ test("parses native desktop events and converts window-relative markers", () => 
   });
   assert.equal(parseDesktopEvent("not json"), null);
   assert.equal(parseDesktopEvent('{"type":"click","x":null}'), null);
+  assert.deepEqual(
+    parseDesktopEvent('{"type":"bound","windowId":42,"ownerPid":99,"windowTitle":"Projects"}'),
+    {
+      type: "bound",
+      windowId: 42,
+      ownerPid: 99,
+      windowTitle: "Projects",
+    },
+  );
+  assert.equal(desktopClickMatchesScope(event, "com.apple.calculator", 42), true);
+  assert.equal(desktopClickMatchesScope(event, "com.apple.calculator", 43), false);
+  assert.equal(desktopClickMatchesScope(event, "com.google.Chrome", 42), false);
+  assert.throws(() => findChromeExecutable(directory), /not an executable file/);
+});
+
+test("records only the dedicated window without creating a Chrome profile", {
+  skip: process.platform !== "darwin",
+}, async () => {
+  const recordingDirectory = path.join(directory, "chrome-window-recording");
+  await mkdir(recordingDirectory, { recursive: true });
+  const helper = path.join(directory, "fake-chrome-window-helper.mjs");
+  await writeFile(
+    helper,
+    `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+import path from "node:path";
+const output = process.argv[process.argv.indexOf("--output") + 1];
+const token = process.argv[process.argv.indexOf("--window-title-token") + 1];
+if (!/^SFR-[0-9a-f]{16}$/.test(token)) process.exit(64);
+const screenshotPath = path.join(output, "desktop-1234567890abcdefabcd.png");
+writeFileSync(screenshotPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"), { mode: 0o600 });
+process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+setTimeout(() => {
+  process.stdout.write(JSON.stringify({ type: "click", timestamp: new Date().toISOString(), app: "Google Chrome", bundleId: "com.google.Chrome", windowTitle: "Unrelated before binding", windowId: 76, role: "AXButton", subrole: "", label: "Too early", x: 20, y: 30, windowWidth: 800, windowHeight: 600, sensitive: false }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "bound", windowId: 77, ownerPid: 1234, windowTitle: token }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "bound", windowId: 78, ownerPid: 1234, windowTitle: "Adversarial rebind" }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "click", timestamp: new Date().toISOString(), app: "Google Chrome", bundleId: "com.google.Chrome", windowTitle: "Unrelated", windowId: 78, role: "AXButton", subrole: "", label: "Wrong window", x: 40, y: 50, windowWidth: 800, windowHeight: 600, sensitive: false }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "click", timestamp: new Date().toISOString(), app: "Google Chrome", bundleId: "com.google.Chrome", windowTitle: "Projects", windowId: 77, role: "AXButton", subrole: "", label: "Create project", x: 100, y: 120, windowWidth: 800, windowHeight: 600, sensitive: false, screenshotPath, box: { left: 80, top: 100, width: 80, height: 40 } }) + "\\n");
+}, 20);
+setTimeout(() => process.exit(0), 60);
+`,
+  );
+  await chmod(helper, 0o700);
+  const fakeChrome = path.join(directory, "fake-existing-chrome");
+  await writeFile(fakeChrome, "fake");
+  await chmod(fakeChrome, 0o700);
+  assert.equal(findChromeExecutable(fakeChrome), fakeChrome);
+  const requests = [];
+  const launched = [];
+  let launchHtml = "";
+  let navigationTarget;
+  const guide = {
+    slug: "chrome234guide",
+    status: "recording",
+    revision: 0,
+    editRevision: 1,
+    publicUrl: "https://schaffa.dev/g/chrome234guide",
+    apiUrl: "https://schaffa.dev/api/guides/chrome234guide",
+    steps: [],
+  };
+  const result = await recordChromeWindowGuide({
+    guide,
+    url: "https://app.example.com/projects",
+    token,
+    outputDirectory: recordingDirectory,
+    helperExecutable: helper,
+    browserExecutable: fakeChrome,
+    launchWindow: async (executable, url) => {
+      launched.push({ executable, url });
+      const response = await fetch(url);
+      launchHtml = await response.text();
+      navigationTarget = fetch(`${url}/go`).then(async (release) => {
+        assert.equal(release.status, 200);
+        return release.text();
+      });
+    },
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return jsonResponse(
+        {
+          ...guide,
+          editRevision: 2,
+          steps: [{ id: "step-chrome-1", position: 1, title: "Create project anklicken" }],
+        },
+        201,
+      );
+    },
+  });
+  const manifest = JSON.parse(await readFile(result.manifestPath, "utf8"));
+  assert.equal(launched.length, 1);
+  assert.equal(launched[0].executable, fakeChrome);
+  assert.match(launched[0].url, /^http:\/\/127\.0\.0\.1:/);
+  assert.match(launchHtml, /<title>SFR-[0-9a-f]{16}<\/title>/);
+  assert.equal(await navigationTarget, "https://app.example.com/projects");
+  assert.deepEqual(chromeWindowArguments(launched[0].url), ["--new-window", launched[0].url]);
+  assert.doesNotMatch(chromeWindowArguments(launched[0].url).join(" "), /user-data-dir/);
+  assert.equal(manifest.steps.length, 1);
+  assert.match(manifest.recordingId, /^[0-9a-f]{24}$/);
+  assert.equal(manifest.steps[0].target, "Create project");
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].init.headers.get("Idempotency-Key"), /^recorder-[0-9a-f]{24}-000001$/);
+  assert.equal(JSON.parse(requests[0].init.body.get("step")).clickMarker.viewportWidth, 800);
+});
+
+test("reports a Chrome window binding failure", {
+  skip: process.platform !== "darwin",
+}, async () => {
+  const recordingDirectory = path.join(directory, "chrome-binding-failure");
+  const helper = path.join(directory, "fake-chrome-binding-failure.mjs");
+  await writeFile(
+    helper,
+    `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+setTimeout(() => {
+  process.stdout.write(JSON.stringify({ type: "error", message: "The requested application window could not be found." }) + "\\n");
+  process.exit(0);
+}, 20);
+`,
+  );
+  await chmod(helper, 0o700);
+  const fakeChrome = path.join(directory, "fake-chrome-binding-failure-launcher");
+  await writeFile(fakeChrome, "fake");
+  await chmod(fakeChrome, 0o700);
+  await assert.rejects(
+    recordChromeWindowGuide({
+      guide: {
+        slug: "bindfailguide",
+        status: "recording",
+        revision: 0,
+        editRevision: 1,
+        publicUrl: "https://schaffa.dev/g/bindfailguide",
+        apiUrl: "https://schaffa.dev/api/guides/bindfailguide",
+        steps: [],
+      },
+      url: "https://app.example.com",
+      token,
+      outputDirectory: recordingDirectory,
+      helperExecutable: helper,
+      browserExecutable: fakeChrome,
+      launchWindow: async () => {},
+    }),
+    /Desktop recorder failed: The requested application window could not be found/,
+  );
+});
+
+test("requires native binding before accepting an explicitly scoped window click", async () => {
+  const recordingDirectory = path.join(directory, "explicit-window-binding");
+  const helper = path.join(directory, "fake-explicit-window-helper.mjs");
+  await writeFile(
+    helper,
+    `#!/usr/bin/env node
+if (process.argv[process.argv.indexOf("--window-id") + 1] !== "42") process.exit(64);
+const click = { type: "click", timestamp: new Date().toISOString(), app: "Calculator", bundleId: "com.apple.calculator", windowTitle: "Calculator", windowId: 42, role: "AXButton", subrole: "", label: "Seven", x: 100, y: 200, windowWidth: 300, windowHeight: 500, sensitive: false };
+process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify(click) + "\\n");
+process.stdout.write(JSON.stringify({ type: "bound", windowId: 42, ownerPid: 1234, windowTitle: "Calculator" }) + "\\n");
+process.stdout.write(JSON.stringify(click) + "\\n");
+setTimeout(() => process.exit(0), 30);
+`,
+  );
+  await chmod(helper, 0o700);
+  const requests = [];
+  const guide = {
+    slug: "explicit42guide",
+    status: "recording",
+    revision: 0,
+    editRevision: 1,
+    publicUrl: "https://schaffa.dev/g/explicit42guide",
+    apiUrl: "https://schaffa.dev/api/guides/explicit42guide",
+    steps: [],
+  };
+  const result = await recordDesktopGuide({
+    guide,
+    appBundleId: "com.apple.calculator",
+    windowId: 42,
+    token,
+    outputDirectory: recordingDirectory,
+    helperExecutable: helper,
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return jsonResponse(
+        { ...guide, editRevision: 2, steps: [{ id: "step-1", position: 1, title: "Seven" }] },
+        201,
+      );
+    },
+  });
+  const manifest = JSON.parse(await readFile(result.manifestPath, "utf8"));
+  assert.equal(manifest.steps.length, 1);
+  assert.equal(requests.length, 1);
+});
+
+test("locks a recording directory against concurrent recorder processes", async () => {
+  const recordingDirectory = path.join(directory, "locked-recording");
+  const helper = path.join(directory, "fake-locking-helper.mjs");
+  await writeFile(
+    helper,
+    `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+setTimeout(() => process.exit(0), 180);
+`,
+  );
+  await chmod(helper, 0o700);
+  const guide = {
+    slug: "locked234guide",
+    status: "recording",
+    revision: 0,
+    editRevision: 1,
+    publicUrl: "https://schaffa.dev/g/locked234guide",
+    apiUrl: "https://schaffa.dev/api/guides/locked234guide",
+    steps: [],
+  };
+  const first = recordDesktopGuide({
+    guide,
+    appBundleId: "com.apple.calculator",
+    token,
+    outputDirectory: recordingDirectory,
+    helperExecutable: helper,
+  });
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      await access(path.join(recordingDirectory, ".recording.lock"));
+      break;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+  await assert.rejects(
+    recordDesktopGuide({
+      guide,
+      appBundleId: "com.apple.calculator",
+      token,
+      outputDirectory: recordingDirectory,
+      helperExecutable: helper,
+    }),
+    /Another recorder is already using/,
+  );
+  await first;
+  await assert.rejects(access(path.join(recordingDirectory, ".recording.lock")), {
+    code: "ENOENT",
+  });
+});
+
+test("uses distinct idempotency keys for concurrent sessions of the same guide", async () => {
+  const helper = path.join(directory, "fake-concurrent-session-helper.mjs");
+  await writeFile(
+    helper,
+    `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "click", timestamp: new Date().toISOString(), app: "Calculator", bundleId: "com.apple.calculator", windowTitle: "Calculator", windowId: 7, role: "AXButton", subrole: "", label: "Seven", x: 100, y: 200, windowWidth: 300, windowHeight: 500, sensitive: false }) + "\\n");
+setTimeout(() => process.exit(0), 30);
+`,
+  );
+  await chmod(helper, 0o700);
+  const guide = {
+    slug: "shared234guide",
+    status: "recording",
+    revision: 0,
+    editRevision: 1,
+    publicUrl: "https://schaffa.dev/g/shared234guide",
+    apiUrl: "https://schaffa.dev/api/guides/shared234guide",
+    steps: [],
+  };
+  const keys = [];
+  const record = async (name) =>
+    recordDesktopGuide({
+      guide,
+      appBundleId: "com.apple.calculator",
+      token,
+      outputDirectory: path.join(directory, name),
+      helperExecutable: helper,
+      fetch: async (_url, init) => {
+        keys.push(init.headers.get("Idempotency-Key"));
+        return jsonResponse(
+          { ...guide, editRevision: 2, steps: [{ id: name, position: 1, title: "Seven" }] },
+          201,
+        );
+      },
+    });
+  const [first, second] = await Promise.all([
+    record("shared-session-a"),
+    record("shared-session-b"),
+  ]);
+  const firstManifest = JSON.parse(await readFile(first.manifestPath, "utf8"));
+  const secondManifest = JSON.parse(await readFile(second.manifestPath, "utf8"));
+  assert.equal(keys.length, 2);
+  assert.notEqual(keys[0], keys[1]);
+  assert.notEqual(firstManifest.recordingId, secondManifest.recordingId);
+});
+
+test("rejects a concurrent automatic recorder before it can replace the active session", async () => {
+  const workingDirectory = path.join(directory, "concurrent-cli-recorders");
+  const stateDirectory = path.join(workingDirectory, ".schaffa");
+  await mkdir(stateDirectory, { recursive: true });
+  const sessionPath = path.join(stateDirectory, "guide-session.json");
+  const lockPath = path.join(stateDirectory, "guide-session.lock");
+  await writeFile(sessionPath, '{"slug":"originalguide","editRevision":7}\n');
+  const fakeBrowser = path.join(workingDirectory, "fake-browser.mjs");
+  await writeFile(fakeBrowser, "#!/usr/bin/env node\nprocess.exit(1);\n");
+  await chmod(fakeBrowser, 0o700);
+
+  let requestCount = 0;
+  let releaseFirstStart;
+  let markFirstStartReceived;
+  const firstStartReceived = new Promise((resolve) => {
+    markFirstStartReceived = resolve;
+  });
+  const server = createServer((request, response) => {
+    request.resume();
+    if (request.method !== "POST" || request.url !== "/api/guides") {
+      response.writeHead(404).end();
+      return;
+    }
+    requestCount += 1;
+    const slug = `session${requestCount}guide`;
+    const respond = () => {
+      if (response.headersSent) return;
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          slug,
+          status: "recording",
+          revision: 0,
+          editRevision: 1,
+          publicUrl: `${origin}/g/${slug}`,
+          apiUrl: `${origin}/api/guides/${slug}`,
+          steps: [],
+        }),
+      );
+    };
+    if (requestCount === 1) {
+      releaseFirstStart = respond;
+      markFirstStartReceived();
+    } else {
+      respond();
+    }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const origin = `http://127.0.0.1:${address.port}`;
+  const cli = path.resolve("dist/cli.js");
+  const argumentsForRecorder = [
+    cli,
+    "record",
+    "--title",
+    "Concurrent recording",
+    "--browser",
+    "https://app.example.com",
+    "--browser-executable",
+    fakeBrowser,
+  ];
+  const environment = { ...process.env, SCHAFFA_TOKEN: token, SCHAFFA_URL: origin };
+  const first = spawn(process.execPath, argumentsForRecorder, {
+    cwd: workingDirectory,
+    env: environment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let firstStderr = "";
+  first.stderr.on("data", (chunk) => {
+    firstStderr += chunk;
+  });
+  const firstCompleted = new Promise((resolve, reject) => {
+    first.once("error", reject);
+    first.once("close", (code, signal) => resolve({ code, signal }));
+  });
+
+  try {
+    await Promise.race([
+      firstStartReceived,
+      firstCompleted.then(({ code, signal }) => {
+        throw new Error(
+          `The first recorder exited before starting (${code ?? signal}): ${firstStderr}`,
+        );
+      }),
+    ]);
+    await access(lockPath);
+    await assert.rejects(
+      execFileAsync(process.execPath, argumentsForRecorder, {
+        cwd: workingDirectory,
+        env: environment,
+      }),
+      /Another guide recorder is active in this directory/,
+    );
+    assert.equal(requestCount, 1);
+    assert.deepEqual(JSON.parse(await readFile(sessionPath, "utf8")), {
+      slug: "originalguide",
+      editRevision: 7,
+    });
+
+    releaseFirstStart();
+    const completed = await firstCompleted;
+    assert.equal(completed.code, 1);
+    assert.match(firstStderr, /Error:/);
+    await assert.rejects(access(lockPath), { code: "ENOENT" });
+    assert.equal(JSON.parse(await readFile(sessionPath, "utf8")).slug, "session1guide");
+  } finally {
+    releaseFirstStart?.();
+    if (first.exitCode === null && first.signalCode === null) first.kill("SIGKILL");
+    await firstCompleted.catch(() => undefined);
+    server.closeAllConnections();
+    await new Promise((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+test("rejects conflicting automatic recorder URL modes", async () => {
+  const cli = path.resolve("dist/cli.js");
+  await assert.rejects(
+    execFileAsync(process.execPath, [
+      cli,
+      "record",
+      "--title",
+      "Conflict",
+      "--chrome",
+      "https://app.example.com",
+      "--url",
+      "https://other.example.com",
+      "--token",
+      token,
+    ]),
+    /Choose one recording mode/,
+  );
+});
+
+test("passes only the new-window request to the existing Chrome executable", {
+  skip: process.platform !== "darwin",
+}, async () => {
+  const argumentPath = path.join(directory, "chrome-launch-arguments.json");
+  const executable = path.join(directory, "fake-chrome-launcher.mjs");
+  await writeFile(
+    executable,
+    `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(argumentPath)}, JSON.stringify(process.argv.slice(2)));
+`,
+  );
+  await chmod(executable, 0o700);
+  const launchUrl = "http://127.0.0.1:43210/recording";
+  await openChromeWindow(executable, launchUrl);
+  const argumentsPassed = JSON.parse(await readFile(argumentPath, "utf8"));
+  assert.deepEqual(argumentsPassed, ["--new-window", launchUrl]);
+  assert.doesNotMatch(argumentsPassed.join(" "), /user-data-dir|profile-directory/);
+});
+
+test("reports a Chrome launcher failure that happens after the initial spawn", {
+  skip: process.platform !== "darwin",
+}, async () => {
+  const executable = path.join(directory, "late-failing-chrome-launcher.mjs");
+  await writeFile(
+    executable,
+    `#!/usr/bin/env node
+setTimeout(() => process.exit(7), 700);
+`,
+  );
+  await chmod(executable, 0o700);
+  await assert.rejects(
+    openChromeWindow(executable, "http://127.0.0.1:43210/recording"),
+    /Chrome rejected the new window request \(7\)/,
+  );
 });
 
 test("compiles and caches the signed native desktop helper on macOS", {
@@ -435,6 +901,287 @@ test("compiles and caches the signed native desktop helper on macOS", {
   const second = await prepareDesktopRecorder();
   assert.equal(first, second);
   assert.match(first, /\.schaffa\/bin\/desktop-recorder-[0-9a-f]{20}$/);
+});
+
+test("SIGTERM flushes native captures without starting queued uploads", async () => {
+  const workingDirectory = path.join(directory, "sigterm-native-wrapper");
+  const recordingDirectory = path.join(workingDirectory, "recording");
+  await mkdir(workingDirectory, { recursive: true });
+  const helper = path.join(workingDirectory, "sigterm-helper.mjs");
+  await writeFile(
+    helper,
+    `#!/usr/bin/env node
+const timer = setInterval(() => {}, 1000);
+process.on("SIGTERM", () => {
+  clearInterval(timer);
+  process.exit(0);
+});
+process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+for (let sequence = 1; sequence <= 4; sequence += 1) {
+  process.stdout.write(JSON.stringify({ type: "click", timestamp: new Date().toISOString(), app: "Calculator", bundleId: "com.apple.calculator", windowTitle: "Calculator", windowId: 7, role: "AXButton", subrole: "", label: "Button " + sequence, x: 100, y: 200, windowWidth: 300, windowHeight: 500, sensitive: false }) + "\\n");
+}
+`,
+  );
+  await chmod(helper, 0o700);
+  const desktopRecorderModule = new URL("../dist/desktop-recorder.js", import.meta.url).href;
+  const wrapper = path.join(workingDirectory, "sigterm-wrapper.mjs");
+  await writeFile(
+    wrapper,
+    `import { readFile } from "node:fs/promises";
+import { recordDesktopGuide } from ${JSON.stringify(desktopRecorderModule)};
+const guide = {
+  slug: "sigtermguide",
+  status: "recording",
+  revision: 0,
+  editRevision: 1,
+  publicUrl: "https://schaffa.dev/g/sigtermguide",
+  apiUrl: "https://schaffa.dev/api/guides/sigtermguide",
+  steps: [],
+};
+let requests = 0;
+const upload = async (input, init) => {
+  requests += 1;
+  process.stdout.write("REQUEST " + String(input) + "\\n");
+  return new Promise((resolve) => {
+    const keepAlive = setInterval(() => {}, 1_000);
+    init.signal.addEventListener("abort", () => {
+      clearInterval(keepAlive);
+      setTimeout(() => resolve(new Response(JSON.stringify({
+        ...guide,
+        editRevision: 2,
+        steps: [{ id: "uploaded-1", position: 1, title: "Button 1" }],
+      }), { status: 201, headers: { "content-type": "application/json" } })), 25);
+    }, { once: true });
+  });
+};
+try {
+  await recordDesktopGuide({
+    guide,
+    appBundleId: "com.apple.calculator",
+    token: ${JSON.stringify(token)},
+    outputDirectory: ${JSON.stringify(recordingDirectory)},
+    helperExecutable: ${JSON.stringify(helper)},
+    fetch: upload,
+    onMessage: (message) => process.stdout.write(message + "\\n"),
+  });
+  process.stderr.write("Recorder returned successfully and could be published.\\n");
+  process.exitCode = 2;
+} catch (error) {
+  const manifest = JSON.parse(await readFile(${JSON.stringify(path.join(recordingDirectory, "manifest.json"))}, "utf8"));
+  process.stdout.write("SUMMARY " + JSON.stringify({ requests, statuses: manifest.steps.map((step) => step.status) }) + "\\n");
+  process.stderr.write((error instanceof Error ? error.message : String(error)) + "\\n");
+  process.exitCode = 1;
+}
+`,
+  );
+  const child = spawn(process.execPath, [wrapper], {
+    cwd: workingDirectory,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const completed = new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => resolve({ code, signal }));
+  });
+  try {
+    await waitForManifestSteps(path.join(recordingDirectory, "manifest.json"), 4, completed);
+    assert.match(stdout, /REQUEST .*\/steps/);
+    assert.equal(child.kill("SIGTERM"), true);
+    const result = await Promise.race([
+      completed,
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error("The native recorder did not stop after SIGTERM.")),
+          2_000,
+        ),
+      ),
+    ]);
+    assert.deepEqual(result, { code: 1, signal: null });
+    assert.match(stderr, /terminated by SIGTERM/);
+    assert.match(stderr, /not published/);
+    assert.doesNotMatch(stderr, /returned successfully/);
+    const requests = stdout.match(/^REQUEST /gm) || [];
+    assert.equal(requests.length, 1);
+    assert.doesNotMatch(stdout, /\/finish/);
+    const summary = JSON.parse(stdout.match(/^SUMMARY (.+)$/m)[1]);
+    assert.equal(summary.requests, 1);
+    assert.deepEqual(summary.statuses, ["pending", "pending", "pending", "pending"]);
+    await assert.rejects(access(path.join(recordingDirectory, ".recording.lock")), {
+      code: "ENOENT",
+    });
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    await completed.catch(() => undefined);
+  }
+});
+
+test("SIGTERM flushes browser captures without starting queued uploads", async () => {
+  const workingDirectory = path.join(directory, "sigterm-browser-wrapper");
+  const recordingDirectory = path.join(workingDirectory, "recording");
+  const profileDirectory = path.join(workingDirectory, "profile");
+  const fakeBrowserExecutable = path.join(workingDirectory, "fake-browser");
+  await mkdir(workingDirectory, { recursive: true });
+  await writeFile(fakeBrowserExecutable, "fake");
+  const recorderModule = new URL("../dist/recorder.js", import.meta.url).href;
+  const wrapper = path.join(workingDirectory, "sigterm-browser-wrapper.mjs");
+  await writeFile(
+    wrapper,
+    `import { readFile } from "node:fs/promises";
+import { recordBrowserGuide } from ${JSON.stringify(recorderModule)};
+const guide = {
+  slug: "browsertermguide",
+  status: "recording",
+  revision: 0,
+  editRevision: 1,
+  publicUrl: "https://schaffa.dev/g/browsertermguide",
+  apiUrl: "https://schaffa.dev/api/guides/browsertermguide",
+  steps: [],
+};
+const bindings = new Map();
+const browserListeners = new Map();
+let frameListener;
+const page = {
+  isClosed: () => false,
+  url: () => "https://app.example.com",
+  title: async () => "Example",
+  exposeFunction: async (name, callback) => { bindings.set(name, callback); },
+  evaluateOnNewDocument: async () => {},
+  evaluate: async () => {},
+  goto: async () => {},
+  screenshot: async () => Buffer.from("image"),
+  createCDPSession: async () => ({
+    on: (name, callback) => { if (name === "Page.screencastFrame") frameListener = callback; },
+    send: async (name) => {
+      if (name === "Page.startScreencast") {
+        queueMicrotask(() => frameListener?.({ data: Buffer.from("frame").toString("base64"), sessionId: 1 }));
+      }
+    },
+  }),
+};
+const browser = {
+  connected: true,
+  pages: async () => [page],
+  newPage: async () => page,
+  on: () => {},
+  once: (name, callback) => { browserListeners.set(name, callback); },
+  close: async () => {
+    if (!browser.connected) return;
+    browser.connected = false;
+    browserListeners.get("disconnected")?.();
+  },
+};
+let requests = 0;
+const upload = async (input, init) => {
+  requests += 1;
+  process.stdout.write("REQUEST " + String(input) + "\\n");
+  return new Promise((resolve) => {
+    const keepAlive = setInterval(() => {}, 1_000);
+    init.signal.addEventListener("abort", () => {
+      clearInterval(keepAlive);
+      setTimeout(() => resolve(new Response(JSON.stringify({
+        ...guide,
+        editRevision: 2,
+        steps: [{ id: "uploaded-1", position: 1, title: "Start" }],
+      }), { status: 201, headers: { "content-type": "application/json" } })), 25);
+    }, { once: true });
+  });
+};
+const emitClicks = () => {
+  const record = bindings.get("__schaffaRecordClick");
+  for (let sequence = 1; sequence <= 3; sequence += 1) {
+    record({
+      x: 100,
+      y: 120,
+      tag: "button",
+      role: "button",
+      label: "Button " + sequence,
+      selector: "#button-" + sequence,
+      url: "https://app.example.com",
+      pageTitle: "Example",
+      viewportWidth: 800,
+      viewportHeight: 600,
+      box: { left: 80, top: 100, width: 80, height: 40 },
+      inFrame: false,
+      sensitive: false,
+      timestamp: new Date().toISOString(),
+    });
+  }
+};
+try {
+  await recordBrowserGuide({
+    guide,
+    url: "https://app.example.com",
+    token: ${JSON.stringify(token)},
+    browserExecutable: ${JSON.stringify(fakeBrowserExecutable)},
+    outputDirectory: ${JSON.stringify(recordingDirectory)},
+    profileDirectory: ${JSON.stringify(profileDirectory)},
+    fetch: upload,
+    launchBrowser: async () => browser,
+    onMessage: (message) => {
+      process.stdout.write(message + "\\n");
+      if (message.startsWith("Recording.")) emitClicks();
+    },
+  });
+  process.stderr.write("Recorder returned successfully and could be published.\\n");
+  process.exitCode = 2;
+} catch (error) {
+  const manifest = JSON.parse(await readFile(${JSON.stringify(path.join(recordingDirectory, "manifest.json"))}, "utf8"));
+  process.stdout.write("SUMMARY " + JSON.stringify({ requests, statuses: manifest.steps.map((step) => step.status) }) + "\\n");
+  process.stderr.write((error instanceof Error ? error.message : String(error)) + "\\n");
+  process.exitCode = 1;
+}
+`,
+  );
+  const child = spawn(process.execPath, [wrapper], {
+    cwd: workingDirectory,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const completed = new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => resolve({ code, signal }));
+  });
+  try {
+    await waitForManifestSteps(path.join(recordingDirectory, "manifest.json"), 4, completed);
+    assert.match(stdout, /REQUEST .*\/steps/);
+    assert.equal(child.kill("SIGTERM"), true);
+    const result = await Promise.race([
+      completed,
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error("The browser recorder did not stop after SIGTERM.")),
+          2_000,
+        ),
+      ),
+    ]);
+    assert.deepEqual(result, { code: 1, signal: null });
+    assert.match(stderr, /terminated by SIGTERM/);
+    assert.match(stderr, /not published/);
+    assert.doesNotMatch(stderr, /returned successfully/);
+    const requests = stdout.match(/^REQUEST /gm) || [];
+    assert.equal(requests.length, 1);
+    assert.doesNotMatch(stdout, /\/finish/);
+    const summary = JSON.parse(stdout.match(/^SUMMARY (.+)$/m)[1]);
+    assert.equal(summary.requests, 1);
+    assert.deepEqual(summary.statuses, ["pending", "pending", "pending", "pending"]);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    await completed.catch(() => undefined);
+  }
 });
 
 test("records a native click locally and uploads it in order", async () => {
@@ -577,6 +1324,23 @@ test("sync preserves a rejected screenshot as an ordered text step", async () =>
     requests[1].init.headers.get("Idempotency-Key"),
   );
 });
+
+async function waitForManifestSteps(manifestPath, count, completed) {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    try {
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      if (manifest.steps.length >= count) return;
+    } catch {}
+    await Promise.race([
+      new Promise((resolve) => setTimeout(resolve, 10)),
+      completed.then(({ code, signal }) => {
+        throw new Error(`The recorder exited before capturing every step (${code ?? signal}).`);
+      }),
+    ]);
+  }
+  throw new Error(`The recorder did not persist ${count} steps before the timeout.`);
+}
 
 function jsonResponse(body, status) {
   return new Response(JSON.stringify(body), {

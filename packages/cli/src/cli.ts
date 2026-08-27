@@ -1,8 +1,19 @@
 #!/usr/bin/env node
 
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  type FileHandle,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -19,7 +30,12 @@ import {
   updateGuideStep,
   upload,
 } from "./client.js";
-import { prepareDesktopRecorder, recordDesktopGuide } from "./desktop-recorder.js";
+import {
+  findChromeExecutable,
+  prepareDesktopRecorder,
+  recordChromeWindowGuide,
+  recordDesktopGuide,
+} from "./desktop-recorder.js";
 import {
   findBrowserExecutable,
   readRecordingSlug,
@@ -34,6 +50,7 @@ const help = `Schaffa publishes pages, presentations, files, and incrementally r
 Usage:
   schaffa upload <file> [--token <token>] [--interactive] [--json]
   schaffa publish <deck.md> --kind presentation [--export pdf] [--export pptx] [--json]
+  schaffa record --title <title> --chrome <url> [--browser-executable <path>] [--json]
   schaffa record --title <title> --browser <url> [--browser-executable <path>] [--json]
   schaffa record --title <title> --desktop --app <bundle-id> [--json]
   schaffa guide start --title <title> [--description <text>] [--url <url>] [--language <tag>] [--json]
@@ -130,6 +147,7 @@ async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<vo
       language: { type: "string" },
       desktop: { type: "boolean" },
       app: { type: "string" },
+      chrome: { type: "string" },
       browser: { type: "string" },
       "browser-executable": { type: "string" },
       token: { type: "string" },
@@ -139,9 +157,15 @@ async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<vo
   if (!values.title) throw new Error("record requires --title.");
   const selectedToken = values.token || process.env.SCHAFFA_TOKEN;
   if (!selectedToken) throw new Error("SCHAFFA_TOKEN is required for guide operations.");
+  const chromeUrl = values.chrome;
   const browserUrl = legacy ? values.url : values.browser || values.url;
-  if (values.desktop && browserUrl) {
-    throw new Error("Choose either --desktop or --browser <url>, not both.");
+  const selectedModes = (
+    legacy
+      ? [Boolean(values.desktop), Boolean(chromeUrl), Boolean(values.url)]
+      : [Boolean(values.desktop), Boolean(chromeUrl), Boolean(values.browser), Boolean(values.url)]
+  ).filter(Boolean).length;
+  if (selectedModes > 1) {
+    throw new Error("Choose one recording mode: --chrome, --browser, or --desktop.");
   }
   if (values.desktop && !values.app) {
     throw new Error("Desktop recording requires --app <bundle-id>.");
@@ -149,66 +173,92 @@ async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<vo
   if (!values.desktop && values.app) {
     throw new Error("--app can only be used together with --desktop.");
   }
-  if (!values.desktop && !browserUrl) {
+  if (!values.desktop && !chromeUrl && !browserUrl) {
     throw new Error(
       legacy
         ? "guide record requires --url (or use --desktop)."
-        : "record requires --desktop or --browser <url>.",
+        : "record requires --chrome <url>, --browser <url>, or --desktop.",
     );
   }
   const common = {
     token: selectedToken,
     ...(process.env.SCHAFFA_URL ? { baseUrl: process.env.SCHAFFA_URL } : {}),
   };
-  const helper = values.desktop
-    ? await prepareDesktopRecorder({ promptForPermissions: true })
-    : undefined;
-  const browserExecutable = !values.desktop
-    ? findBrowserExecutable(legacy ? values.browser : values["browser-executable"])
-    : undefined;
-  let result = await startGuide({
-    ...common,
-    title: values.title,
-    ...(values.description ? { description: values.description } : {}),
-    ...(browserUrl ? { targetUrl: browserUrl } : {}),
-    ...(values.language ? { language: values.language } : {}),
-  });
-  await writeSession(result);
-  const recording = values.desktop
-    ? await recordDesktopGuide({
-        guide: result,
-        appBundleId: values.app as string,
-        token: selectedToken,
-        ...(common.baseUrl ? { baseUrl: common.baseUrl } : {}),
-        ...(values.language ? { language: values.language } : {}),
-        ...(helper ? { helperExecutable: helper } : {}),
-        onMessage: (message) => process.stderr.write(`${message}\n`),
-      })
-    : await recordBrowserGuide({
-        guide: result,
-        url: browserUrl as string,
-        token: selectedToken,
-        ...(common.baseUrl ? { baseUrl: common.baseUrl } : {}),
-        ...(values.language ? { language: values.language } : {}),
-        ...(browserExecutable ? { browserExecutable } : {}),
-        onMessage: (message) => process.stderr.write(`${message}\n`),
-      });
-  result = recording.guide;
-  let output: unknown = {
-    guide: result,
-    manifestPath: recording.manifestPath,
-    failedUploads: recording.failedUploads,
-  };
-  await writeSession(result);
-  if (recording.failedUploads === 0) {
-    const finished = await finishGuide({ ...common, ...result });
-    result = finished.guide;
-    output = { ...finished, manifestPath: recording.manifestPath };
-  } else {
-    process.exitCode = 1;
+  if (chromeUrl && process.platform !== "darwin") {
+    throw new Error(
+      "Recording through an existing Chrome profile session currently supports macOS only.",
+    );
   }
-  await writeSession(result);
-  process.stdout.write(values.json ? `${JSON.stringify(output)}\n` : `${result.publicUrl}\n`);
+  const sessionLock = await acquireGuideSessionLock();
+  try {
+    const chromeExecutable = chromeUrl
+      ? findChromeExecutable(values["browser-executable"])
+      : undefined;
+    const helper =
+      values.desktop || chromeUrl
+        ? await prepareDesktopRecorder({ promptForPermissions: true })
+        : undefined;
+    const browserExecutable = browserUrl
+      ? findBrowserExecutable(legacy ? values.browser : values["browser-executable"])
+      : values["browser-executable"];
+    const targetUrl = chromeUrl || browserUrl;
+    let result = await startGuide({
+      ...common,
+      title: values.title,
+      ...(values.description ? { description: values.description } : {}),
+      ...(targetUrl ? { targetUrl } : {}),
+      ...(values.language ? { language: values.language } : {}),
+    });
+    await writeSession(result);
+    const recording = chromeUrl
+      ? await recordChromeWindowGuide({
+          guide: result,
+          url: chromeUrl,
+          token: selectedToken,
+          ...(common.baseUrl ? { baseUrl: common.baseUrl } : {}),
+          ...(values.language ? { language: values.language } : {}),
+          ...(helper ? { helperExecutable: helper } : {}),
+          ...(chromeExecutable ? { browserExecutable: chromeExecutable } : {}),
+          onMessage: (message) => process.stderr.write(`${message}\n`),
+        })
+      : values.desktop
+        ? await recordDesktopGuide({
+            guide: result,
+            appBundleId: values.app as string,
+            token: selectedToken,
+            ...(common.baseUrl ? { baseUrl: common.baseUrl } : {}),
+            ...(values.language ? { language: values.language } : {}),
+            ...(helper ? { helperExecutable: helper } : {}),
+            onMessage: (message) => process.stderr.write(`${message}\n`),
+          })
+        : await recordBrowserGuide({
+            guide: result,
+            url: browserUrl as string,
+            token: selectedToken,
+            ...(common.baseUrl ? { baseUrl: common.baseUrl } : {}),
+            ...(values.language ? { language: values.language } : {}),
+            ...(browserExecutable ? { browserExecutable } : {}),
+            onMessage: (message) => process.stderr.write(`${message}\n`),
+          });
+    result = recording.guide;
+    let output: unknown = {
+      guide: result,
+      manifestPath: recording.manifestPath,
+      failedUploads: recording.failedUploads,
+    };
+    await writeSession(result);
+    if (recording.failedUploads === 0) {
+      const finished = await finishGuide({ ...common, ...result });
+      result = finished.guide;
+      output = { ...finished, manifestPath: recording.manifestPath };
+    } else {
+      process.exitCode = 1;
+    }
+    await writeSession(result);
+    process.stdout.write(values.json ? `${JSON.stringify(output)}\n` : `${result.publicUrl}\n`);
+  } finally {
+    await sessionLock.release();
+  }
 }
 
 async function runGuide(args: string[]): Promise<void> {
@@ -506,6 +556,7 @@ function escapeHtmlAttribute(value: string): string {
 }
 
 const sessionPath = () => path.resolve(".schaffa/guide-session.json");
+const sessionLockPath = () => path.resolve(".schaffa/guide-session.lock");
 
 interface GuideSession {
   slug: string;
@@ -527,11 +578,90 @@ async function readSession(): Promise<GuideSession> {
 
 async function writeSession(guide: GuideResult | GuideSession): Promise<void> {
   await mkdir(path.dirname(sessionPath()), { recursive: true });
-  await writeFile(
-    sessionPath(),
-    `${JSON.stringify({ slug: guide.slug, editRevision: guide.editRevision, ...("idempotencyKey" in guide && guide.idempotencyKey ? { idempotencyKey: guide.idempotencyKey } : {}) })}\n`,
-    { mode: 0o600 },
-  );
+  const temporary = `${sessionPath()}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(
+      temporary,
+      `${JSON.stringify({ slug: guide.slug, editRevision: guide.editRevision, ...("idempotencyKey" in guide && guide.idempotencyKey ? { idempotencyKey: guide.idempotencyKey } : {}) })}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+    await rename(temporary, sessionPath());
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+async function acquireGuideSessionLock(): Promise<{ release: () => Promise<void> }> {
+  const lockPath = sessionLockPath();
+  await mkdir(path.dirname(lockPath), { recursive: true });
+  const id = randomUUID();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = await open(lockPath, "wx", 0o600);
+      try {
+        await handle.writeFile(
+          `${JSON.stringify({ id, pid: process.pid, startedAt: new Date().toISOString() })}\n`,
+        );
+      } catch (error) {
+        await handle.close().catch(() => undefined);
+        await rm(lockPath, { force: true });
+        throw error;
+      }
+      return guideSessionLock(handle, lockPath, id);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (attempt === 0 && (await removeStaleGuideSessionLock(lockPath))) continue;
+      throw new Error(
+        "Another guide recorder is active in this directory. Stop it before starting another recording here.",
+      );
+    }
+  }
+  throw new Error("The guide recording session could not be locked.");
+}
+
+function guideSessionLock(
+  handle: FileHandle,
+  lockPath: string,
+  id: string,
+): { release: () => Promise<void> } {
+  let released = false;
+  return {
+    release: async () => {
+      if (released) return;
+      released = true;
+      await handle.close().catch(() => undefined);
+      try {
+        const current = JSON.parse(await readFile(lockPath, "utf8")) as { id?: unknown };
+        if (current.id === id) await rm(lockPath, { force: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    },
+  };
+}
+
+async function removeStaleGuideSessionLock(lockPath: string): Promise<boolean> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(lockPath, "r");
+    const [contents, openedInfo] = await Promise.all([handle.readFile("utf8"), handle.stat()]);
+    const value = JSON.parse(contents) as { pid?: unknown };
+    if (!Number.isSafeInteger(value.pid) || (value.pid as number) <= 0) return false;
+    try {
+      process.kill(value.pid as number, 0);
+      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") return false;
+    }
+    const currentInfo = await lstat(lockPath);
+    if (currentInfo.dev !== openedInfo.dev || currentInfo.ino !== openedInfo.ino) return false;
+    await rm(lockPath);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
 }
 
 function resolveStepId(guide: GuideResult, value: string): string {

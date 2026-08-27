@@ -52,6 +52,7 @@ interface RecordedStep {
 
 interface RecordingManifest {
   schemaVersion: 1;
+  recordingId?: string;
   slug: string;
   publicUrl: string;
   startedAt: string;
@@ -73,6 +74,8 @@ export interface RecorderOptions {
   browserExecutable?: string;
   profileDirectory?: string;
   outputDirectory?: string;
+  fetch?: typeof fetch;
+  launchBrowser?: (executablePath: string, profileDirectory: string) => Promise<Browser>;
   onMessage?: (message: string) => void;
 }
 
@@ -96,6 +99,7 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
 
   const manifest: RecordingManifest = {
     schemaVersion: 1,
+    recordingId: randomUUID(),
     slug: options.guide.slug,
     publicUrl: options.guide.publicUrl,
     startedAt: new Date().toISOString(),
@@ -104,21 +108,26 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
   };
   await persistManifest(manifestPath, manifest);
 
-  const puppeteer = await import("puppeteer-core");
-  const browser = await puppeteer.launch({
-    executablePath,
-    headless: false,
-    userDataDir: profileDirectory,
-    defaultViewport: null,
-    handleSIGINT: false,
-    handleSIGTERM: false,
-    handleSIGHUP: false,
-    args: ["--start-maximized"],
-  });
+  const browser = options.launchBrowser
+    ? await options.launchBrowser(executablePath, profileDirectory)
+    : await (async () => {
+        const puppeteer = await import("puppeteer-core");
+        return puppeteer.launch({
+          executablePath,
+          headless: false,
+          userDataDir: profileDirectory,
+          defaultViewport: null,
+          handleSIGINT: false,
+          handleSIGTERM: false,
+          handleSIGHUP: false,
+          args: ["--start-maximized"],
+        });
+      })();
 
   let guide = options.guide;
   let sequence = 0;
   let stopping = false;
+  let terminated = false;
   let paused = false;
   let uploadsBlocked = false;
   const attachedPages = new WeakSet<Page>();
@@ -126,12 +135,19 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
   let captureQueue = Promise.resolve();
   let uploadQueue = Promise.resolve();
   let manifestWriteQueue = Promise.resolve();
+  const terminationController = new AbortController();
+  let terminationTimer: NodeJS.Timeout | undefined;
   const interrupt = () => {
     stopping = true;
     if (browser.connected) void browser.close().catch(() => undefined);
   };
+  const terminate = () => {
+    terminated = true;
+    terminationTimer ||= setTimeout(() => terminationController.abort(), 250);
+    interrupt();
+  };
   process.on("SIGINT", interrupt);
-  process.on("SIGTERM", interrupt);
+  process.on("SIGTERM", terminate);
   const saveManifest = () => {
     const operation = manifestWriteQueue.then(() => {
       manifest.updatedAt = new Date().toISOString();
@@ -149,12 +165,26 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
       );
     }
   };
+  const uploadFetch: typeof fetch = (input, init) => {
+    if (terminated) {
+      return Promise.reject(new Error("Recording terminated before the upload started."));
+    }
+    const signal = terminationController.signal;
+    const request = (options.fetch || fetch)(input, { ...init, signal });
+    return new Promise<Response>((resolve, reject) => {
+      const abort = () => reject(new Error("Recording terminated during the upload."));
+      signal.addEventListener("abort", abort, { once: true });
+      request.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    });
+  };
 
   const queueUpload = (
     step: RecordedStep,
     input: Omit<Parameters<typeof addGuideStep>[0], "slug" | "editRevision" | "token" | "baseUrl">,
   ) => {
+    if (terminated) return;
     uploadQueue = uploadQueue.then(async () => {
+      if (terminated) return;
       if (uploadsBlocked) {
         step.status = "pending";
         step.uploadError =
@@ -169,7 +199,8 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
           editRevision: guide.editRevision,
           token: options.token,
           ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
-          idempotencyKey: `recorder-${guide.slug}-${String(step.sequence).padStart(6, "0")}`,
+          fetch: uploadFetch,
+          idempotencyKey: recorderIdempotencyKey(manifest, step.sequence),
         });
         step.status = "uploaded";
         const stepId = guide.steps.at(-1)?.id;
@@ -177,6 +208,11 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
         delete step.uploadError;
         options.onMessage?.(`Step ${step.sequence} uploaded: ${step.target}`);
       } catch (error) {
+        if (terminated) {
+          step.status = "pending";
+          delete step.uploadError;
+          return;
+        }
         let failure: unknown = error;
         if (isRejectedCapture(error, input)) {
           try {
@@ -188,7 +224,8 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
               editRevision: guide.editRevision,
               token: options.token,
               ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
-              idempotencyKey: `recorder-${guide.slug}-${String(step.sequence).padStart(6, "0")}`,
+              fetch: uploadFetch,
+              idempotencyKey: recorderIdempotencyKey(manifest, step.sequence),
             });
             step.status = "uploaded";
             step.captureError = `The server rejected the screenshot (HTTP ${error.status}); the text step was preserved.`;
@@ -202,6 +239,11 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
           } catch (fallbackError) {
             failure = fallbackError;
           }
+        }
+        if (terminated) {
+          step.status = "pending";
+          delete step.uploadError;
+          return;
         }
         if (failure) {
           uploadsBlocked = true;
@@ -400,9 +442,17 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
     stopping = true;
     await captureQueue;
     await uploadQueue;
+    if (terminationTimer) clearTimeout(terminationTimer);
+    await saveManifestSafely();
     if (browser.connected) await browser.close().catch(() => undefined);
     process.off("SIGINT", interrupt);
-    process.off("SIGTERM", interrupt);
+    process.off("SIGTERM", terminate);
+  }
+
+  if (terminated) {
+    throw new Error(
+      "Recording terminated by SIGTERM. Captured work remains resumable and the guide was not published.",
+    );
   }
 
   return {
@@ -450,7 +500,7 @@ export async function syncRecording(options: {
         token: options.token,
         ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
         ...(options.fetch ? { fetch: options.fetch } : {}),
-        idempotencyKey: `recorder-${guide.slug}-${String(step.sequence).padStart(6, "0")}`,
+        idempotencyKey: recorderIdempotencyKey(manifest, step.sequence),
       });
       step.status = "uploaded";
       const stepId = guide.steps.at(-1)?.id;
@@ -471,7 +521,7 @@ export async function syncRecording(options: {
             token: options.token,
             ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
             ...(options.fetch ? { fetch: options.fetch } : {}),
-            idempotencyKey: `recorder-${guide.slug}-${String(step.sequence).padStart(6, "0")}`,
+            idempotencyKey: recorderIdempotencyKey(manifest, step.sequence),
           });
           step.status = "uploaded";
           step.captureError = `The server rejected the screenshot (HTTP ${error.status}); the text step was preserved.`;
@@ -796,6 +846,11 @@ function recordingScreenshotPath(manifestPath: string, screenshot: string): stri
     throw new Error(`Unsafe screenshot path in recording manifest: ${screenshot}`);
   }
   return resolved;
+}
+
+function recorderIdempotencyKey(manifest: RecordingManifest, sequence: number): string {
+  const recording = manifest.recordingId ? `${manifest.recordingId}-` : `${manifest.slug}-`;
+  return `recorder-${recording}${String(sequence).padStart(6, "0")}`;
 }
 
 function isRejectedCapture(

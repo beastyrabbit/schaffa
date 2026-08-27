@@ -128,8 +128,11 @@ function markerOverlay(
   const x = clamp(marker.x * scaleX, 0, width);
   const y = clamp(marker.y * scaleY, 0, height);
   const shortestEdge = Math.min(width, height);
-  const radius = Math.max(20, shortestEdge * 0.024);
-  const markerStroke = Math.max(5, shortestEdge * 0.0045);
+  const cursorHeight = Math.min(Math.max(14, shortestEdge * 0.022), 32, shortestEdge * 0.42);
+  const cursorScale = cursorHeight / 21;
+  const cursorWidth = 14 * cursorScale;
+  const cursorStroke = Math.min(Math.max(1.4, shortestEdge * 0.0015), cursorHeight * 0.12, 2.5);
+  const cursorHalo = (cursorStroke + 3) / 2;
   const boxStroke = Math.max(6, shortestEdge * 0.0055);
   let rectangle = "";
   if (marker.box && marker.box.width > 0 && marker.box.height > 0) {
@@ -139,8 +142,23 @@ function markerOverlay(
     const boxHeight = clamp(marker.box.height * scaleY + 8, 8, height - top);
     rectangle = `<rect x="${left}" y="${top}" width="${boxWidth}" height="${boxHeight}" rx="10" fill="#e11d48" fill-opacity="0.08" stroke="#fff" stroke-width="${boxStroke + 4}"/><rect x="${left}" y="${top}" width="${boxWidth}" height="${boxHeight}" rx="10" fill="none" stroke="#e11d48" stroke-width="${boxStroke}"/>`;
   }
+  const fitsRight = x + cursorWidth + cursorHalo <= width;
+  const fitsLeft = x - cursorWidth - cursorHalo >= 0;
+  const narrowTarget = marker.box !== undefined && marker.box.width * scaleX <= cursorWidth * 1.25;
+  const directionX = narrowTarget && fitsLeft ? -1 : fitsRight || !fitsLeft ? 1 : -1;
+  const cursorDirectionY =
+    y + cursorHeight + cursorHalo <= height || y - cursorHeight - cursorHalo < 0 ? 1 : -1;
+  const cursorPoint = (offsetX: number, offsetY: number): string =>
+    `${x + offsetX * cursorScale * directionX} ${y + offsetY * cursorScale * cursorDirectionY}`;
+  const cursor = `M ${cursorPoint(0, 0)} L ${cursorPoint(0, 18)} L ${cursorPoint(
+    4.5,
+    13.7,
+  )} L ${cursorPoint(8.6, 21)} L ${cursorPoint(11.5, 19.4)} L ${cursorPoint(
+    7.5,
+    12.2,
+  )} L ${cursorPoint(14, 12.2)} Z`;
   return Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${rectangle}<circle cx="${x}" cy="${y}" r="${radius + markerStroke}" fill="#fff" fill-opacity="0.92"/><circle cx="${x}" cy="${y}" r="${radius}" fill="#e11d48" fill-opacity="0.28" stroke="#e11d48" stroke-width="${markerStroke}"/><circle cx="${x}" cy="${y}" r="${Math.max(7, radius * 0.28)}" fill="#e11d48" stroke="#fff" stroke-width="${Math.max(3, markerStroke * 0.55)}"/></svg>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${rectangle}<path d="${cursor}" fill="#fff" fill-opacity="0.96" stroke="#fff" stroke-linejoin="round" stroke-width="${cursorStroke + 3}"/><path d="${cursor}" fill="#fff" fill-opacity="0.94" stroke="#dc2626" stroke-linejoin="round" stroke-width="${cursorStroke}"/></svg>`,
   );
 }
 

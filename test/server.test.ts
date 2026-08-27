@@ -98,6 +98,7 @@ const { config } = await import("../src/config.js");
 const { db } = await import("../src/db.js");
 const { createToken, seedBootstrapToken } = await import("../src/auth.js");
 const { allSkillsMarkdown, exampleSkills } = await import("../src/example-skills.js");
+const { cleanImage } = await import("../src/image-cleaner.js");
 const { purgeRetainedAnonymousPages } = await import("../src/service.js");
 const { pendingScanCount, processNextPendingScan } = await import("../src/scan-worker.js");
 const app = buildServer({
@@ -385,7 +386,13 @@ test("serves one general read skill and focused writing skills", async () => {
   assert.doesNotMatch(fileSkill.markdown, /SCHAFFA_URL/);
   assert.doesNotMatch(htmlSkill.markdown, /npx schaffa upload/);
   assert.doesNotMatch(fileSkill.markdown, /npx schaffa upload/);
+  assert.match(guideSkill.markdown, /npx schaffa record --title "<title>" --chrome/);
   assert.match(guideSkill.markdown, /npx schaffa record --title "<title>" --browser/);
+  assert.match(guideSkill.markdown, /existing profile session/);
+  assert.match(guideSkill.markdown, /without creating.*profile/);
+  assert.match(guideSkill.markdown, /Do not promise a specific profile/);
+  assert.doesNotMatch(guideSkill.markdown, /current profile/);
+  assert.match(guideSkill.markdown, /exact macOS window|exact window/);
   assert.match(guideSkill.markdown, /npx schaffa record --title "<title>" --desktop/);
   assert.match(guideSkill.markdown, /npx schaffa guide sync/);
   assert.match(guideSkill.markdown, /npx schaffa guide edit-step --step <number-or-id>/);
@@ -694,6 +701,217 @@ test("creates pages with non-semantic random slugs", async () => {
   assert.equal(created.json().rawUrl, `https://schaffa.test/p/${created.json().slug}/raw`);
 });
 
+test("keeps cursor markers visible at all four screenshot corners", async () => {
+  const corners = [
+    { name: "top-left", x: 0, y: 0, inwardX: 1, inwardY: 1 },
+    { name: "top-right", x: 320, y: 0, inwardX: -1, inwardY: 1 },
+    { name: "bottom-left", x: 0, y: 180, inwardX: 1, inwardY: -1 },
+    { name: "bottom-right", x: 320, y: 180, inwardX: -1, inwardY: -1 },
+  ];
+
+  for (const corner of corners) {
+    const image = await renderMarkedScreenshot(320, 180, {
+      x: corner.x,
+      y: corner.y,
+      viewportWidth: 320,
+      viewportHeight: 180,
+    });
+    const expectedX = corner.x === 0 ? 0 : image.width - 1;
+    const expectedY = corner.y === 0 ? 0 : image.height - 1;
+    assertRedNear(image, expectedX, expectedY, 3, `${corner.name} cursor tip`);
+    assertRedNear(
+      image,
+      expectedX + corner.inwardX * 8,
+      expectedY + corner.inwardY * 8,
+      3,
+      `${corner.name} inward cursor body`,
+    );
+  }
+});
+
+test("scales click coordinates independently for unequal axes and Retina images", async () => {
+  const unequal = await renderMarkedScreenshot(480, 180, {
+    x: 60,
+    y: 240,
+    viewportWidth: 240,
+    viewportHeight: 360,
+  });
+  assertRedNear(unequal, 120, 120, 3, "unequal-axis marker");
+  assertNoRedNear(unequal, 30, 120, 8, "x coordinate scaled with the y ratio");
+  assertNoRedNear(unequal, 120, 60, 8, "y coordinate left at an unscaled position");
+
+  const retina = await renderMarkedScreenshot(800, 600, {
+    x: 125.5,
+    y: 75.25,
+    viewportWidth: 400,
+    viewportHeight: 300,
+  });
+  assertRedNear(retina, 251, 151, 3, "Retina marker");
+  assertNoRedNear(retina, 126, 75, 8, "unscaled CSS-pixel position");
+});
+
+test("keeps the cursor legible on a small screenshot", async () => {
+  const image = await renderMarkedScreenshot(36, 24, {
+    x: 18,
+    y: 12,
+    viewportWidth: 36,
+    viewportHeight: 24,
+  });
+
+  assert.equal(image.width, 36);
+  assert.equal(image.height, 24);
+  assertRedNear(image, 18, 12, 3, "small-image cursor tip");
+  const preservedBackground = rgbAt(image, 1, 12);
+  assert.ok(
+    preservedBackground[0] < 120 && preservedBackground[1] < 140 && preservedBackground[2] < 160,
+    `small-image marker should not cover the full screenshot: ${preservedBackground.join(",")}`,
+  );
+});
+
+test("draws a compact cursor instead of covering the clicked content", async () => {
+  const image = await renderMarkedScreenshot(2215, 1407, {
+    x: 1100,
+    y: 700,
+    viewportWidth: 2215,
+    viewportHeight: 1407,
+  });
+  const bounds = redPixelBounds(image);
+
+  assert.ok(bounds, "cursor should contain a visible red outline");
+  assert.ok(
+    bounds.width >= 12 && bounds.width <= 30,
+    `cursor outline should stay narrow, received ${bounds.width}px`,
+  );
+  assert.ok(
+    bounds.height >= 20 && bounds.height <= 38,
+    `cursor outline should stay compact, received ${bounds.height}px`,
+  );
+  assertRedNear(image, 1100, 700, 3, "cursor hot spot");
+});
+
+test("scales and draws a valid click target outline", async () => {
+  const image = await renderMarkedScreenshot(500, 300, {
+    x: 210,
+    y: 125,
+    viewportWidth: 250,
+    viewportHeight: 150,
+    box: { left: 50, top: 40, width: 75, height: 30 },
+  });
+
+  // The target is scaled by 2x and padded by four output pixels on every side.
+  const left = 96;
+  const top = 76;
+  const right = 254;
+  const bottom = 144;
+  assertRedNear(image, left, (top + bottom) / 2, 3, "target left edge");
+  assertRedNear(image, right, (top + bottom) / 2, 3, "target right edge");
+  assertRedNear(image, (left + right) / 2, top, 3, "target top edge");
+  assertRedNear(image, (left + right) / 2, bottom, 3, "target bottom edge");
+  assertRedNear(image, 420, 250, 3, "cursor beside the target outline");
+});
+
+test("keeps a tiny checkbox target and its adjacent label visible", async () => {
+  const image = await renderMarkedScreenshot(500, 300, {
+    x: 205,
+    y: 105,
+    viewportWidth: 500,
+    viewportHeight: 300,
+    box: { left: 200, top: 100, width: 10, height: 10 },
+  });
+
+  // A checkbox-sized target keeps its red outline while the cursor is mirrored
+  // to the left instead of covering the label immediately to its right.
+  assertRedNear(image, 214, 105, 3, "tiny target right edge");
+  assertRedNear(image, 205, 105, 3, "tiny-target cursor tip");
+  assertSlateBackground(rgbAt(image, 224, 108), "space reserved for the checkbox label");
+});
+
+test("keeps annotation pixels already present in a replacement screenshot", async () => {
+  const owner = createToken("pre-annotated replacement owner");
+  const auth = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/guides",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: { title: "Pre-annotated replacement" },
+  });
+  assert.equal(created.statusCode, 201);
+  const slug = created.json().slug as string;
+  const marker = { x: 80, y: 45, viewportWidth: 200, viewportHeight: 120 };
+  const originalScreenshot = await sharp({
+    create: { width: 400, height: 240, channels: 4, background: "#334155" },
+  })
+    .png()
+    .toBuffer();
+  const stepBody = multipartFields(
+    {
+      step: JSON.stringify({
+        title: "Marked step",
+        description: "The original upload has a generated click marker.",
+        clickMarker: marker,
+      }),
+    },
+    "screenshot",
+    "original.png",
+    "image/png",
+    originalScreenshot,
+  );
+  const added = await app.inject({
+    method: "POST",
+    url: `/api/guides/${slug}/steps`,
+    headers: { ...auth, "content-type": stepBody.contentType, "if-match": '"1"' },
+    payload: stepBody.payload,
+  });
+  assert.equal(added.statusCode, 201);
+  assert.equal(
+    added.json().steps[0].clickMarker,
+    undefined,
+    "the step API does not persist click-marker coordinates for later replacements",
+  );
+  const stepId = added.json().steps[0].id as string;
+  const originalPath = new URL(added.json().steps[0].screenshotUrl).pathname;
+
+  // Guide steps do not retain click-marker coordinates. The replacement route
+  // can keep annotation pixels already in the file, but cannot recreate them.
+  const replacementSource = await sharp({
+    create: { width: 400, height: 240, channels: 4, background: "#0f766e" },
+  })
+    .png()
+    .toBuffer();
+  const annotatedReplacement = await cleanImage(replacementSource, marker);
+  const replacementBody = multipart(
+    "screenshot",
+    "replacement.webp",
+    "image/webp",
+    annotatedReplacement.data,
+  );
+  const replaced = await app.inject({
+    method: "PUT",
+    url: `/api/guides/${slug}/steps/${stepId}/screenshot`,
+    headers: {
+      ...auth,
+      "content-type": replacementBody.contentType,
+      "if-match": '"2"',
+    },
+    payload: replacementBody.payload,
+  });
+  assert.equal(replaced.statusCode, 200);
+  assert.equal(replaced.json().editRevision, 3);
+  const replacementPath = new URL(replaced.json().steps[0].screenshotUrl).pathname;
+  assert.notEqual(replacementPath, originalPath);
+
+  const removedOriginal = await app.inject({ method: "GET", url: originalPath, headers: auth });
+  assert.equal(removedOriginal.statusCode, 404);
+  const replacementImage = await app.inject({
+    method: "GET",
+    url: replacementPath,
+    headers: auth,
+  });
+  assert.equal(replacementImage.statusCode, 200);
+  const decoded = await decodeRgbImage(replacementImage.rawPayload);
+  assertRedNear(decoded, 160, 90, 4, "replacement marker");
+});
+
 test("records, edits, publishes, and revisions a guide incrementally", async () => {
   const owner = createToken("guide owner");
   const other = createToken("guide stranger");
@@ -760,7 +978,7 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   assert.equal(replay.json().steps[0].id, firstStepId);
 
   const screenshot = await sharp({
-    create: { width: 3000, height: 2000, channels: 4, background: "#a43f24" },
+    create: { width: 3000, height: 2000, channels: 4, background: "#4b5563" },
   })
     .png()
     .toBuffer();
@@ -810,10 +1028,13 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   assert.equal(Math.max(marked.info.width, marked.info.height), 2560);
   const markerX = Math.round(marked.info.width / 2);
   const markerY = Math.round(marked.info.height / 2);
-  const markerOffset = (markerY * marked.info.width + markerX) * marked.info.channels;
-  assert.ok((marked.data[markerOffset] ?? 0) > 180);
-  assert.ok((marked.data[markerOffset + 1] ?? 255) < 130);
-  assert.ok((marked.data[markerOffset + 2] ?? 255) < 150);
+  const markedImage = {
+    data: marked.data,
+    width: marked.info.width,
+    height: marked.info.height,
+  };
+  assertRedNear(markedImage, markerX, markerY, 3, "uploaded cursor hot spot");
+  assertLightNear(markedImage, markerX + 3, markerY + 12, 3, "uploaded cursor fill");
 
   const stale = await app.inject({
     method: "PATCH",
@@ -894,6 +1115,11 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
     headers: { host: "schaffa.test" },
   });
   assert.equal(publicImage.statusCode, 200);
+  assert.deepEqual(
+    publicImage.rawPayload,
+    ownerImage.rawPayload,
+    "the public guide should serve the same image with the cursor baked in",
+  );
 
   const json = await app.inject({
     method: "GET",
@@ -2616,4 +2842,142 @@ function multipartFields(
     contentType: `multipart/form-data; boundary=${boundary}`,
     payload: Buffer.concat(chunks),
   };
+}
+
+interface TestClickMarker {
+  x: number;
+  y: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  box?: { left: number; top: number; width: number; height: number };
+}
+
+interface RgbImage {
+  data: Buffer;
+  width: number;
+  height: number;
+}
+
+async function renderMarkedScreenshot(
+  width: number,
+  height: number,
+  marker: TestClickMarker,
+): Promise<RgbImage> {
+  const source = await sharp({
+    create: { width, height, channels: 4, background: "#475569" },
+  })
+    .png()
+    .toBuffer();
+  const cleaned = await cleanImage(source, marker);
+  return decodeRgbImage(cleaned.data);
+}
+
+async function decodeRgbImage(data: Buffer): Promise<RgbImage> {
+  const decoded = await sharp(data).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  return { data: decoded.data, width: decoded.info.width, height: decoded.info.height };
+}
+
+function assertRedNear(
+  image: RgbImage,
+  centerX: number,
+  centerY: number,
+  radius: number,
+  label: string,
+): void {
+  assert.ok(
+    redPixelCount(image, centerX, centerY, radius) > 0,
+    `${label} should contain a red marker pixel near (${centerX}, ${centerY}).`,
+  );
+}
+
+function assertNoRedNear(
+  image: RgbImage,
+  centerX: number,
+  centerY: number,
+  radius: number,
+  label: string,
+): void {
+  assert.equal(
+    redPixelCount(image, centerX, centerY, radius),
+    0,
+    `${label} should not contain marker-red pixels near (${centerX}, ${centerY}).`,
+  );
+}
+
+function assertLightNear(
+  image: RgbImage,
+  centerX: number,
+  centerY: number,
+  radius: number,
+  label: string,
+): void {
+  const minimumX = Math.max(0, Math.floor(centerX - radius));
+  const maximumX = Math.min(image.width - 1, Math.ceil(centerX + radius));
+  const minimumY = Math.max(0, Math.floor(centerY - radius));
+  const maximumY = Math.min(image.height - 1, Math.ceil(centerY + radius));
+  let count = 0;
+  for (let y = minimumY; y <= maximumY; y += 1) {
+    for (let x = minimumX; x <= maximumX; x += 1) {
+      const [red, green, blue] = rgbAt(image, x, y);
+      if (red >= 190 && green >= 190 && blue >= 190) count += 1;
+    }
+  }
+  assert.ok(count > 0, `${label} should contain part of the white cursor fill.`);
+}
+
+function redPixelCount(image: RgbImage, centerX: number, centerY: number, radius: number): number {
+  const minimumX = Math.max(0, Math.floor(centerX - radius));
+  const maximumX = Math.min(image.width - 1, Math.ceil(centerX + radius));
+  const minimumY = Math.max(0, Math.floor(centerY - radius));
+  const maximumY = Math.min(image.height - 1, Math.ceil(centerY + radius));
+  let count = 0;
+  for (let y = minimumY; y <= maximumY; y += 1) {
+    for (let x = minimumX; x <= maximumX; x += 1) {
+      const offset = (y * image.width + x) * 3;
+      const red = image.data[offset] ?? 0;
+      const green = image.data[offset + 1] ?? 0;
+      const blue = image.data[offset + 2] ?? 0;
+      if (red >= 150 && red >= green + 45 && red >= blue + 25) count += 1;
+    }
+  }
+  return count;
+}
+
+function redPixelBounds(image: RgbImage): {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+} | null {
+  let left = image.width;
+  let top = image.height;
+  let right = -1;
+  let bottom = -1;
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      const [red, green, blue] = rgbAt(image, x, y);
+      if (red < 150 || red < green + 45 || red < blue + 25) continue;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  return right < left
+    ? null
+    : { left, top, right, bottom, width: right - left + 1, height: bottom - top + 1 };
+}
+
+function assertSlateBackground(pixel: [number, number, number], label: string): void {
+  assert.ok(
+    pixel[0] < 140 && pixel[1] < 150 && pixel[2] < 170,
+    `${label} should remain readable instead of being covered by the white cursor: ${pixel.join(",")}`,
+  );
+}
+
+function rgbAt(image: RgbImage, x: number, y: number): [number, number, number] {
+  const offset = (y * image.width + x) * 3;
+  return [image.data[offset] ?? 0, image.data[offset + 1] ?? 0, image.data[offset + 2] ?? 0];
 }

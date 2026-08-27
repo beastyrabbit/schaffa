@@ -39,16 +39,26 @@ Authentication, password, payment, private-data, and secret-manager steps should
 
 ## Automatic browser and desktop recorder
 
-`npx schaffa record --title <title> --browser <url>` launches a dedicated,
-persistent browser profile and starts the server-side guide before navigation.
+`npx schaffa record --title <title> --chrome <url>` opens a new window in the
+already running Google Chrome on macOS and starts the server-side guide before
+navigation. It does not create a profile or choose among multiple existing
+Chrome profiles. Chrome supplies an existing profile session, whose logins,
+extensions, and password manager remain available. The native recorder pins the
+new window's exact macOS window ID, so clicks in every other Chrome window are
+ignored. Closing that window ends the recording without closing Chrome.
+
+`npx schaffa record --title <title> --browser <url>` remains available as an
+isolated alternative with a separate persistent Schaffa browser profile.
 The compatible legacy form is `npx schaffa guide record --title <title> --url
 <url>`.
-The initial page and every trusted primary-button click become ordered steps.
-The capture script derives a short target from accessible names, labels, or
-visible text and records the target box plus click coordinates against the most
-recent pre-click browser frame. The server renders the red outline and click
-dot into the cleaned WebP. Event metadata never contains typed values or keystrokes; visible
-form contents can still appear in screenshot pixels and must be reviewed.
+In Chrome mode, macOS Accessibility derives a short target from the clicked
+control and Screen Recording captures that window before the click is
+delivered. In isolated browser mode, an injected capture script reads the
+control's accessible name, label, or visible text and selects the most recent
+pre-click browser frame. Both modes record the target box and click coordinates.
+The server renders the red outline and compact cursor into the cleaned WebP. Event
+metadata never contains typed values or keystrokes; visible form contents can
+still appear in screenshot pixels and must be reviewed.
 
 Each screenshot is written first to a JPEG or PNG under
 `.schaffa/recordings/<slug>/step-NNNN.*`. The adjacent `manifest.json` records
@@ -64,11 +74,12 @@ Manifest updates use an atomic same-directory rename, so an interrupted write
 leaves either the previous complete manifest or the new one. Screenshot and
 manifest files are owner-readable only.
 
-The browser profile lives outside the project at `~/.schaffa/browser-profile`
-so website sessions survive between recordings. The recorder automatically
-suppresses screenshots for password/card inputs and common authentication,
-payment, billing, and secret URL paths. Use `Alt+Shift+R` to pause and resume on
-any other private screen. Closing the recording browser or pressing Ctrl+C
+The isolated browser profile lives outside the project at
+`~/.schaffa/browser-profile`. Chrome mode never uses it. Both automatic modes
+suppress screenshots for password and secure controls; isolated browser mode
+also checks common authentication, payment, billing, and secret URL paths. Use
+`Alt+Shift+R` to pause and resume on any other private screen. Closing the
+recorded window or pressing Ctrl+C
 waits for in-flight captures and uploads; a clean recording passes preflight
 and is published automatically.
 
@@ -94,6 +105,11 @@ npx schaffa guide replace-screenshot --step 2 --screenshot ./correct-step.png
 npx schaffa guide delete-step --step 3
 npx schaffa guide finish
 ```
+
+Screenshot replacement runs the supplied image through the normal image
+cleaner. The guide step does not retain click-marker coordinates after the first
+upload, so replacement cannot recreate the recorder cursor or target outline.
+Add those annotations to the replacement image before uploading it when needed.
 
 Desktop mode currently targets macOS. Other operating systems can continue to
 use manual guide steps until equivalent native helpers are implemented.

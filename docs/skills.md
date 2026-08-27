@@ -92,8 +92,11 @@ unset, stop and tell the user instead of guessing. Keep specialized CLI
 workflows for guides and presentations, which have their own recording,
 preflight, rendering, and export lifecycles.
 
-The guide skill should prefer `npx schaffa record` when a dedicated browser
-or supported native app is available. Document both browser and desktop modes,
+The guide skill should prefer `npx schaffa record --chrome` for signed-in Chrome
+work on macOS and bind the recording to the new window in an existing Chrome
+profile session. It must not promise which profile Chrome will use when several
+are open. Keep isolated browser mode as an explicit fallback. Document Chrome,
+isolated browser, and desktop modes,
 the privacy pause, ordered local recovery through `guide sync`, recording review,
 and the manual guide lifecycle for mixed terminal and UI workflows. Keep these
 details in the skill body; the description remains only the short guide trigger.
