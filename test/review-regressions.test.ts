@@ -22,6 +22,26 @@ const { guideMetadataBytes } = await import("../src/service.js");
 const { cleanImage } = await import("../src/image-cleaner.js");
 const { openApiDocument } = await import("../src/openapi.js");
 
+test("version backfill resumes after ALTER and preserves previously allocated counters", async () => {
+  const { closeDb } = await import("../src/db.js");
+  const publish = () => queueHtmlWithToken("migration-restart", "<h1>Fixture</h1>", bootstrapToken);
+  assert.equal((await publish()).json().version, 1);
+  assert.equal((await publish()).json().version, 2);
+  // Model a startup interrupted after the new column committed with its default.
+  db()
+    .prepare("UPDATE pages SET last_allocated_version = 0 WHERE slug = ?")
+    .run("migration-restart");
+  closeDb();
+  assert.equal((await publish()).json().version, 3);
+  // A higher counter can outlive deleted versions and must never be backfilled down.
+  db()
+    .prepare("UPDATE pages SET last_allocated_version = 5 WHERE slug = ?")
+    .run("migration-restart");
+  closeDb();
+  assert.equal((await publish()).json().version, 6);
+  await finishPendingScans();
+});
+
 test("real publication and error responses match their OpenAPI schemas", async () => {
   const schemas = openApiDocument().components.schemas;
   const ajv = new Ajv({ strict: false, validateFormats: false });

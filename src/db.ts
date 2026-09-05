@@ -342,12 +342,14 @@ export function db(): DatabaseSync {
     database.exec("ALTER TABLE pages ADD COLUMN kind TEXT NOT NULL DEFAULT 'static'");
   }
   if (!pageColumns.some((column) => column.name === "last_allocated_version")) {
-    database.exec(`
-      ALTER TABLE pages ADD COLUMN last_allocated_version INTEGER NOT NULL DEFAULT 0;
-      UPDATE pages SET last_allocated_version = MAX(current_version,
-        COALESCE((SELECT MAX(version) FROM page_versions WHERE page_id = pages.id), 0));
-    `);
+    database.exec("ALTER TABLE pages ADD COLUMN last_allocated_version INTEGER NOT NULL DEFAULT 0");
   }
+  // Resume after an interrupted ALTER without lowering an allocated counter.
+  database.exec(`
+    UPDATE pages SET last_allocated_version = MAX(current_version,
+      COALESCE((SELECT MAX(version) FROM page_versions WHERE page_id = pages.id), 0))
+    WHERE last_allocated_version = 0;
+  `);
 
   const pageVersionColumns = database
     .prepare("PRAGMA table_info(page_versions)")
