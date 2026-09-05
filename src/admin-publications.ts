@@ -24,16 +24,22 @@ const publications = `WITH publications AS (
 )`;
 
 export function selectAdminPublications(filters: PublicationFilters, requestedPage = 1) {
-  const where = `WHERE (?1 = '' OR user = ?1) AND (?2 = '' OR uploader = ?2)
-    AND (?3 = 'all' OR kind = ?3)
-    AND (?4 = 'all' OR (?4 = 'permanent' AND anonymous = 0) OR (?4 = 'anonymous-active' AND anonymous = 1))
-    AND (?5 = '' OR casefold_contains(label, ?5) OR casefold_contains(detail, ?5) OR casefold_contains(name, ?5))`;
-  const params = [filters.user, filters.uploader, filters.kind, filters.lifetime, filters.q];
+  const where = `WHERE ($user = '' OR user = $user) AND ($uploader = '' OR uploader = $uploader)
+    AND ($kind = 'all' OR kind = $kind)
+    AND ($lifetime = 'all' OR ($lifetime = 'permanent' AND anonymous = 0) OR ($lifetime = 'anonymous-active' AND anonymous = 1))
+    AND ($q = '' OR casefold_contains(label, $q) OR casefold_contains(detail, $q) OR casefold_contains(name, $q))`;
+  const params = {
+    $user: filters.user,
+    $uploader: filters.uploader,
+    $kind: filters.kind,
+    $lifetime: filters.lifetime,
+    $q: filters.q,
+  };
   const counts = db()
     .prepare(
       `${publications} SELECT kind, COUNT(*) AS count FROM publications ${where} GROUP BY kind`,
     )
-    .all(...params) as Array<{ kind: "pages" | "files" | "guides"; count: number }>;
+    .all(params) as Array<{ kind: "pages" | "files" | "guides"; count: number }>;
   const totals = { pages: 0, files: 0, guides: 0 };
   for (const row of counts) totals[row.kind] = row.count;
   const total = totals.pages + totals.files + totals.guides;
@@ -44,9 +50,12 @@ export function selectAdminPublications(filters: PublicationFilters, requestedPa
   );
   const selected = db()
     .prepare(
-      `${publications} SELECT id, kind FROM publications ${where} ORDER BY updated DESC, kind, id LIMIT 50 OFFSET ?6`,
+      `${publications} SELECT id, kind FROM publications ${where} ORDER BY updated DESC, kind, id LIMIT 50 OFFSET $offset`,
     )
-    .all(...params, (page - 1) * 50) as Array<{ id: string; kind: "pages" | "files" | "guides" }>;
+    .all({ ...params, $offset: (page - 1) * 50 }) as Array<{
+    id: string;
+    kind: "pages" | "files" | "guides";
+  }>;
   const ids = { pages: [] as string[], files: [] as string[], guides: [] as string[] };
   for (const row of selected) ids[row.kind].push(row.id);
   const uploaders = db()
