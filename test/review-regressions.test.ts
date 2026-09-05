@@ -1,3 +1,5 @@
+import { readdir } from "node:fs/promises";
+import path from "node:path";
 import { Ajv } from "ajv";
 import type { GuideView } from "../src/guides.js";
 import {
@@ -21,6 +23,37 @@ const { guidePreflight } = await import("../src/guides.js");
 const { guideMetadataBytes } = await import("../src/service.js");
 const { cleanImage } = await import("../src/image-cleaner.js");
 const { openApiDocument } = await import("../src/openapi.js");
+
+test("page commit rechecks capacity after an intervening guide metadata write", async () => {
+  const { publishPage, assertStorageCapacity } = await import("../src/service.js");
+  const { createGuide } = await import("../src/guides.js");
+  const usage = db()
+    .prepare(
+      "SELECT (SELECT COALESCE(SUM(bytes),0) FROM page_versions) + (SELECT COALESCE(SUM(bytes),0) FROM files) + (SELECT COALESCE(SUM(bytes),0) FROM guide_images) AS bytes",
+    )
+    .get() as { bytes: number };
+  const html = Buffer.from(`<h1>${"Fixture ".repeat(100)}</h1>`);
+  config.maxStorageBytes = usage.bytes + guideMetadataBytes() + html.length;
+  const publication = publishPage({
+    slug: "quota-interleave",
+    operation: "create",
+    tokenId: "bootstrap",
+    html,
+  });
+  // Let the serialized page operation reach its asynchronous filesystem write.
+  await Promise.resolve();
+  createGuide({ title: "Intervening guide metadata" }, "bootstrap");
+  await assert.rejects(publication, { code: "storage_quota" });
+  assertStorageCapacity(0);
+  assert.equal(
+    db().prepare("SELECT id FROM pages WHERE slug = ?").get("quota-interleave"),
+    undefined,
+  );
+  assert.deepEqual(
+    await readdir(path.join(config.dataDir, "quarantine/pages/quota-interleave")),
+    [],
+  );
+});
 
 test("version backfill resumes after ALTER and preserves previously allocated counters", async () => {
   const { closeDb } = await import("../src/db.js");

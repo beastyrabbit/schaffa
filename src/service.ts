@@ -222,6 +222,8 @@ async function publishPageLocked(input: {
       .run(versionId, pageId, version, storagePath, input.html.length, digest, input.tokenId);
     const removeVersion = db().prepare("DELETE FROM page_versions WHERE page_id = ? AND id = ?");
     for (const row of prunable) removeVersion.run(pageId, row.id);
+    // Guide metadata can change while the page bytes are being written.
+    assertStorageCapacity(0);
     db().exec("COMMIT");
   } catch (error) {
     db().exec("ROLLBACK");
