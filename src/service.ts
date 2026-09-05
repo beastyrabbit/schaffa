@@ -74,7 +74,7 @@ export interface PublishedFile {
 let metadataWriteQueue = Promise.resolve();
 let reservedStorageBytes = 0;
 
-function serializeMetadataWrite<T>(operation: () => Promise<T>): Promise<T> {
+export function serializeMetadataWrite<T>(operation: () => Promise<T>): Promise<T> {
   const result = metadataWriteQueue.then(operation);
   metadataWriteQueue = result.then(
     () => undefined,
@@ -158,7 +158,7 @@ async function publishPageLocked(input: {
   }
   const publishedTitle = title ?? existing?.title ?? null;
   const pageId = existing?.id || randomUUID();
-  const version = (existing?.current_version || 0) + 1;
+  const version = (existing?.last_allocated_version || 0) + 1;
   const digest = sha256(input.html);
   const versionId = randomUUID();
   const now = Date.now();
@@ -200,18 +200,18 @@ async function publishPageLocked(input: {
       db()
         .prepare(
           `UPDATE pages
-           SET title = COALESCE(?, title), current_version = ?, updated_at = CURRENT_TIMESTAMP
+           SET title = COALESCE(?, title), current_version = ?, last_allocated_version = ?, updated_at = CURRENT_TIMESTAMP
            WHERE id = ?`,
         )
-        .run(title, version, pageId);
+        .run(title, version, version, pageId);
     } else {
       db()
         .prepare(
           `INSERT INTO pages
-           (id, slug, title, current_version, expires_at, purge_at, owner_token_id, kind)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, slug, title, current_version, last_allocated_version, expires_at, purge_at, owner_token_id, kind)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(pageId, slug, title, version, expiresAt, purgeAt, input.tokenId, kind);
+        .run(pageId, slug, title, version, version, expiresAt, purgeAt, input.tokenId, kind);
     }
     db()
       .prepare(
@@ -383,7 +383,7 @@ async function readUploadBuffer(input: Readable, limit: number): Promise<Buffer>
   return Buffer.concat(chunks, bytes);
 }
 
-export function listPages(): PageSummary[] {
+export function listPages(ids?: string[]): PageSummary[] {
   const pages = db()
     .prepare(
       `SELECT p.*,
@@ -399,10 +399,13 @@ export function listPages(): PageSummary[] {
        FROM pages p
        JOIN page_versions pv ON pv.page_id = p.id AND pv.version = p.current_version
        LEFT JOIN tokens t ON t.id = pv.created_by_token_id
-       WHERE p.expires_at IS NULL OR datetime(p.expires_at) > CURRENT_TIMESTAMP
+       WHERE (p.expires_at IS NULL OR datetime(p.expires_at) > CURRENT_TIMESTAMP)
+         AND (? IS NULL OR p.id IN (SELECT value FROM json_each(?)))
        ORDER BY p.updated_at DESC`,
     )
-    .all() as unknown as Array<Omit<PageSummary, "version_numbers">>;
+    .all(ids ? JSON.stringify(ids) : null, ids ? JSON.stringify(ids) : null) as unknown as Array<
+    Omit<PageSummary, "version_numbers">
+  >;
   const versions = db().prepare(
     "SELECT version FROM page_versions WHERE page_id = ? ORDER BY version DESC",
   );
@@ -414,7 +417,7 @@ export function listPages(): PageSummary[] {
   }));
 }
 
-export function listFiles(): FileSummary[] {
+export function listFiles(ids?: string[]): FileSummary[] {
   return db()
     .prepare(
       `SELECT f.*, f.created_by_token_id AS uploader_id,
@@ -422,9 +425,13 @@ export function listFiles(): FileSummary[] {
               t.user_id AS uploader_user_id
        FROM files f
        LEFT JOIN tokens t ON t.id = f.created_by_token_id
+       WHERE (? IS NULL OR f.id IN (SELECT value FROM json_each(?)))
        ORDER BY f.created_at DESC`,
     )
-    .all() as unknown as FileSummary[];
+    .all(
+      ids ? JSON.stringify(ids) : null,
+      ids ? JSON.stringify(ids) : null,
+    ) as unknown as FileSummary[];
 }
 
 export function listPagesForUser(userId: string): PageSummary[] {
@@ -697,7 +704,7 @@ async function purgeRetainedAnonymousPagesLocked(): Promise<number> {
   return removed;
 }
 
-function assertStorageCapacity(additionalBytes: number): void {
+export function assertStorageCapacity(additionalBytes: number): void {
   const row = db()
     .prepare(
       `SELECT
@@ -706,9 +713,28 @@ function assertStorageCapacity(additionalBytes: number): void {
          COALESCE((SELECT SUM(bytes) FROM guide_images), 0) AS bytes`,
     )
     .get() as unknown as { bytes: number };
-  if (row.bytes + reservedStorageBytes + additionalBytes > config.maxStorageBytes) {
+  if (
+    row.bytes + guideMetadataBytes() + reservedStorageBytes + additionalBytes >
+    config.maxStorageBytes
+  ) {
     throw new AppError("The server storage quota has been reached.", 507, "storage_quota");
   }
+}
+
+export function guideMetadataBytes(guideId: string | null = null): number {
+  const row = db()
+    .prepare(`SELECT COALESCE(SUM(bytes), 0) AS bytes FROM (
+    SELECT length(CAST(title || COALESCE(description, '') || COALESCE(target_url, '') || language AS BLOB)) AS bytes
+      FROM guides WHERE ?1 IS NULL OR id = ?1
+    UNION ALL SELECT length(CAST(title || description || COALESCE(action_type, '') || COALESCE(action_target, '') || COALESCE(verification, '') || COALESCE(screenshot_caption, '') AS BLOB))
+      FROM guide_steps WHERE ?1 IS NULL OR guide_id = ?1
+    UNION ALL SELECT length(CAST(json_snapshot || markdown_snapshot || html_snapshot AS BLOB))
+      FROM guide_revisions WHERE ?1 IS NULL OR guide_id = ?1
+    UNION ALL SELECT length(CAST(key || operation || response_json AS BLOB))
+      FROM guide_idempotency WHERE ?1 IS NULL OR guide_id = ?1
+  )`)
+    .get(guideId) as { bytes: number };
+  return row.bytes;
 }
 
 async function makeAnonymousCapacity(additionalBytes: number): Promise<void> {

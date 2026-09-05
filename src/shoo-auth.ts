@@ -17,8 +17,13 @@ export const verifyShooToken: ShooTokenVerifier = async (idToken) => {
     issuer: config.shooIssuer,
     audience: `origin:${new URL(config.baseUrl).origin}`,
     algorithms: ["ES256"],
+    requiredClaims: ["exp", "iat", "pairwise_sub"],
   });
-  if (typeof payload.pairwise_sub !== "string" || payload.pairwise_sub.length > 200) {
+  if (
+    typeof payload.pairwise_sub !== "string" ||
+    !payload.pairwise_sub.trim() ||
+    payload.pairwise_sub.length > 200
+  ) {
     throw new Error("Shoo token is missing a valid pairwise subject.");
   }
   return {

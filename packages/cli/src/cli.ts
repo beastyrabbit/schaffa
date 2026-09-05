@@ -36,6 +36,7 @@ import {
   recordChromeWindowGuide,
   recordDesktopGuide,
 } from "./desktop-recorder.js";
+import { inlinePresentationAssets } from "./presentation-assets.js";
 import {
   findBrowserExecutable,
   readRecordingSlug,
@@ -304,7 +305,10 @@ async function runGuide(args: string[]): Promise<void> {
     });
     output = result;
   } else {
-    const session = await readSession();
+    const session =
+      command === "sync" && values.manifest
+        ? { slug: await readRecordingSlug(values.manifest), editRevision: 0 }
+        : await readSession();
     if (command === "step") {
       if (!values.title || !values.text) throw new Error("guide step requires --title and --text.");
       const idempotencyKey =
@@ -435,7 +439,10 @@ async function runPresentation(args: string[]): Promise<void> {
       html,
     ]);
     const rendered = await readFile(html, "utf8");
-    const staticHtml = rendered.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+    const staticHtml = await inlinePresentationAssets(
+      rendered.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ""),
+      source,
+    );
     if (/<script\b|<form\b|\son[a-z]+\s*=|(?:src|href)\s*=\s*["']https?:\/\//i.test(staticHtml)) {
       throw new Error("Rendered presentation contains active or external content.");
     }

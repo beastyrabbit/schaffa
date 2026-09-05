@@ -100,7 +100,7 @@ Schaffa does not inject CSS into static pages. The uploaded file must be a compl
 
 Schaffa rejects scripts, forms, frames, event-handler attributes, JavaScript URLs, and meta refresh. If an upload fails with `unsafe_html`, remove the active construct; do not weaken or bypass the policy.
 
-When the user explicitly needs runtime guidance or another interactive behavior, use the CLI with an approved interactive-only token: `npx schaffa upload <html-file> --interactive`. Do not silently switch a static publication to interactive. The instance and user must already be approved; visitors receive a warning and the page runs without network, storage, forms, pop-ups, or navigation.
+When the user explicitly needs runtime guidance or another interactive behavior, use the CLI with an approved interactive-only token: `npx schaffa upload <html-file> --interactive`. Do not silently switch a static publication to interactive. The instance and user must already be approved; visitors receive a warning and the page runs in an opaque sandbox with CSP restrictions on requests and resources. This does not guarantee complete network isolation in every browser.
 
 ## Publish a file
 

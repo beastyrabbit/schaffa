@@ -34,6 +34,7 @@ export interface PageRow {
   slug: string;
   title: string | null;
   current_version: number;
+  last_allocated_version: number;
   created_at: string;
   updated_at: string;
   expires_at: string | null;
@@ -128,6 +129,13 @@ export function db(): DatabaseSync {
   database.exec("PRAGMA journal_mode = WAL");
   database.exec("PRAGMA foreign_keys = ON");
   database.exec("PRAGMA busy_timeout = 5000");
+  database.function("casefold_contains", { deterministic: true }, (value, needle) =>
+    Number(
+      String(value ?? "")
+        .toLocaleLowerCase("de-DE")
+        .includes(String(needle ?? "").toLocaleLowerCase("de-DE")),
+    ),
+  );
   database.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -156,6 +164,7 @@ export function db(): DatabaseSync {
       slug TEXT NOT NULL UNIQUE,
       title TEXT,
       current_version INTEGER NOT NULL DEFAULT 0,
+      last_allocated_version INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       expires_at TEXT,
@@ -331,6 +340,13 @@ export function db(): DatabaseSync {
   }
   if (!pageColumns.some((column) => column.name === "kind")) {
     database.exec("ALTER TABLE pages ADD COLUMN kind TEXT NOT NULL DEFAULT 'static'");
+  }
+  if (!pageColumns.some((column) => column.name === "last_allocated_version")) {
+    database.exec(`
+      ALTER TABLE pages ADD COLUMN last_allocated_version INTEGER NOT NULL DEFAULT 0;
+      UPDATE pages SET last_allocated_version = MAX(current_version,
+        COALESCE((SELECT MAX(version) FROM page_versions WHERE page_id = pages.id), 0));
+    `);
   }
 
   const pageVersionColumns = database

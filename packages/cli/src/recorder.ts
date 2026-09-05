@@ -5,12 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import type { Browser, Page } from "puppeteer-core";
 import {
-  addGuideStep,
+  type addGuideStep,
   type GuideClickMarker,
   type GuideResult,
   getGuide,
   SchaffaRequestError,
 } from "./client.js";
+
+import { appendRecordedStep, recordingUploadQueue } from "./recording-upload.js";
 
 const recorderBinding = "__schaffaRecordClick";
 const pauseBinding = "__schaffaSetPaused";
@@ -124,16 +126,14 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
         });
       })();
 
-  let guide = options.guide;
+  const guide = options.guide;
   let sequence = 0;
   let stopping = false;
   let terminated = false;
   let paused = false;
-  let uploadsBlocked = false;
   const attachedPages = new WeakSet<Page>();
   const frameHistory = new WeakMap<Page, LatestFrame[]>();
   let captureQueue = Promise.resolve();
-  let uploadQueue = Promise.resolve();
   let manifestWriteQueue = Promise.resolve();
   const terminationController = new AbortController();
   let terminationTimer: NodeJS.Timeout | undefined;
@@ -146,6 +146,9 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
     terminationTimer ||= setTimeout(() => terminationController.abort(), 250);
     interrupt();
   };
+  const browserClosed = waitForBrowserClose(browser, () => {
+    stopping = true;
+  });
   process.on("SIGINT", interrupt);
   process.on("SIGTERM", terminate);
   const saveManifest = () => {
@@ -178,85 +181,23 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
     });
   };
 
+  const uploads = recordingUploadQueue({
+    guide,
+    stopped: () => terminated,
+    save: saveManifestSafely,
+    onMessage: options.onMessage,
+  });
   const queueUpload = (
     step: RecordedStep,
     input: Omit<Parameters<typeof addGuideStep>[0], "slug" | "editRevision" | "token" | "baseUrl">,
-  ) => {
-    if (terminated) return;
-    uploadQueue = uploadQueue.then(async () => {
-      if (terminated) return;
-      if (uploadsBlocked) {
-        step.status = "pending";
-        step.uploadError =
-          "Waiting for an earlier failed upload. Run `schaffa guide sync` to retry.";
-        await saveManifestSafely();
-        return;
-      }
-      try {
-        guide = await addGuideStep({
-          ...input,
-          slug: guide.slug,
-          editRevision: guide.editRevision,
-          token: options.token,
-          ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
-          fetch: uploadFetch,
-          idempotencyKey: recorderIdempotencyKey(manifest, step.sequence),
-        });
-        step.status = "uploaded";
-        const stepId = guide.steps.at(-1)?.id;
-        if (stepId) step.stepId = stepId;
-        delete step.uploadError;
-        options.onMessage?.(`Step ${step.sequence} uploaded: ${step.target}`);
-      } catch (error) {
-        if (terminated) {
-          step.status = "pending";
-          delete step.uploadError;
-          return;
-        }
-        let failure: unknown = error;
-        if (isRejectedCapture(error, input)) {
-          try {
-            const { screenshot: _screenshot, clickMarker: _clickMarker, ...textStep } = input;
-            guide = await addGuideStep({
-              ...textStep,
-              capture: false,
-              slug: guide.slug,
-              editRevision: guide.editRevision,
-              token: options.token,
-              ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
-              fetch: uploadFetch,
-              idempotencyKey: recorderIdempotencyKey(manifest, step.sequence),
-            });
-            step.status = "uploaded";
-            step.captureError = `The server rejected the screenshot (HTTP ${error.status}); the text step was preserved.`;
-            const stepId = guide.steps.at(-1)?.id;
-            if (stepId) step.stepId = stepId;
-            delete step.uploadError;
-            options.onMessage?.(
-              `Step ${step.sequence} uploaded without its rejected screenshot; the local file was kept.`,
-            );
-            failure = null;
-          } catch (fallbackError) {
-            failure = fallbackError;
-          }
-        }
-        if (terminated) {
-          step.status = "pending";
-          delete step.uploadError;
-          return;
-        }
-        if (failure) {
-          uploadsBlocked = true;
-          step.status = "failed";
-          step.uploadError = failure instanceof Error ? failure.message : "Unknown upload error.";
-          options.onMessage?.(
-            `Step ${step.sequence} kept locally; upload failed: ${step.uploadError}`,
-          );
-        }
-      }
-      await saveManifestSafely();
+  ) =>
+    uploads.enqueue(step, {
+      ...input,
+      token: options.token,
+      ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
+      fetch: uploadFetch,
+      idempotencyKey: recorderIdempotencyKey(manifest, step.sequence),
     });
-  };
 
   const captureStep = async (
     page: Page,
@@ -435,13 +376,11 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
       "Recording. Close the browser or press Ctrl+C to stop. Alt+Shift+R pauses capture.",
     );
 
-    await waitForBrowserClose(browser, () => {
-      stopping = true;
-    });
+    await browserClosed;
   } finally {
     stopping = true;
     await captureQueue;
-    await uploadQueue;
+    await uploads.drain();
     if (terminationTimer) clearTimeout(terminationTimer);
     await saveManifestSafely();
     if (browser.connected) await browser.close().catch(() => undefined);
@@ -456,7 +395,7 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
   }
 
   return {
-    guide,
+    guide: uploads.guide,
     manifestPath,
     failedUploads: manifest.steps.filter((step) => step.status !== "uploaded").length,
   };
@@ -488,7 +427,7 @@ export async function syncRecording(options: {
       ? recordingScreenshotPath(manifestPath, step.screenshot)
       : undefined;
     try {
-      guide = await addGuideStep({
+      guide = await appendRecordedStep({
         slug: guide.slug,
         editRevision: guide.editRevision,
         title: step.title || `Click ${quote(step.target)}`,
@@ -510,7 +449,7 @@ export async function syncRecording(options: {
     } catch (error) {
       if (isRejectedManifestCapture(error, step, screenshot)) {
         try {
-          guide = await addGuideStep({
+          guide = await appendRecordedStep({
             slug: guide.slug,
             editRevision: guide.editRevision,
             title: step.title || `Click ${quote(step.target)}`,
@@ -853,17 +792,6 @@ function recorderIdempotencyKey(manifest: RecordingManifest, sequence: number): 
   return `recorder-${recording}${String(sequence).padStart(6, "0")}`;
 }
 
-function isRejectedCapture(
-  error: unknown,
-  input: { screenshot?: string },
-): error is SchaffaRequestError {
-  return (
-    error instanceof SchaffaRequestError &&
-    (error.status === 413 || error.status === 422) &&
-    typeof input.screenshot === "string"
-  );
-}
-
 function isRejectedManifestCapture(
   error: unknown,
   step: RecordedStep,
@@ -912,5 +840,9 @@ async function waitForBrowserClose(browser: Browser, onStop: () => void): Promis
       resolve();
     };
     browser.once("disconnected", finish);
+    if (!browser.connected) {
+      browser.off("disconnected", finish);
+      finish();
+    }
   });
 }

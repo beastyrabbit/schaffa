@@ -19,11 +19,15 @@ revision.
 
 The preflight blocks empty guides, incomplete visible steps, and likely tokens, secrets, passwords, or email addresses in text. Missing screenshots are warnings because terminal and API steps are intentionally allowed to remain text-only. Image OCR and pixel-level redaction remain future capture-quality work; users must still review visible screenshot contents before publication.
 
+Preflight covers guide title, description, destination URL, and visible step fields. Findings identify the affected field. URL-encoded text is checked too. Public guide revisions and screenshots use five-minute caches with revalidation, matching page/file takedown timing. Existing downloaded copies and caches created under older one-year headers cannot be recalled.
+
+Guide defaults allow 1,000 steps, 1,000 published revisions, and 64 MiB of text metadata per guide, configurable with `MAX_GUIDE_STEPS`, `MAX_GUIDE_REVISIONS`, and `MAX_GUIDE_METADATA_BYTES`. Existing immutable revisions are retained. Exceeding a budget rejects the edit without advancing its revision. Guide text, snapshots, and idempotency responses count toward `MAX_STORAGE_BYTES` alongside publication and image bytes. This is a logical content budget; SQLite indexes, WAL, and temporary conversion files still require extra disk space.
+
 ## Presentation pipeline
 
 `schaffa publish deck.md --kind presentation` uses Marp's `bare` renderer. Marp currently emits a small auto-scaling runtime even for this template, so the CLI removes all scripts and rejects active or external content before uploading the HTML through the existing page validator. CSS scroll snap preserves native slide-by-slide navigation without weakening Schaffa's CSP. The Markdown source remains canonical, while PDF and PPTX are optional immutable file uploads. When either format is requested with `--export`, the CLI adds same-origin download links for the generated files to the published deck. The links need no JavaScript and are omitted from printing.
 
-Local images are allowed during rendering. Do not put remote fonts, CDNs, or external image URLs in a deck; the CLI rejects the resulting HTML. PDF/PPTX exports require a supported local Chromium installation used by Marp.
+Local PNG, JPEG, GIF, and WebP images inside the Markdown source directory are embedded in the published HTML, including slide backgrounds. Keep each image below 2 MiB and the final HTML below the server's page limit. Unsupported local formats, images outside the source directory, CSS imports, and unresolved assets fail before publication. Do not put remote fonts, CDNs, or external image URLs in a deck; the CLI rejects the resulting HTML. PDF/PPTX exports require a supported local Chromium installation used by Marp.
 
 ## Capture adapter contract
 

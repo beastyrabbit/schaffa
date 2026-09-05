@@ -51,7 +51,7 @@ Static pages remain the default. Interactive publishing is disabled instance-wid
 
 Publish an interactive page by adding `?type=interactive` or using the CLI's `--interactive` flag. Page type is immutable across versions. Anonymous publishing and global admin tokens cannot publish interactive pages.
 
-The public page URL shows a warning screen. Continuing to `/run` executes only inline classic scripts under a CSP sandbox without `allow-same-origin`. Network access, workers, child frames, forms, browser storage, pop-ups, downloads, and top-level navigation are unavailable. External and module scripts, event-handler attributes, frames, forms, JavaScript URLs, and meta refresh are rejected during upload. The sandbox reduces risk but cannot prevent misleading UI or a page from consuming CPU in its own tab.
+The public page URL shows a warning screen. Continuing to `/run` executes only inline classic scripts under a CSP sandbox without `allow-same-origin`. CSP blocks fetch requests, external resources, workers, and child frames. The sandbox restricts forms, browser storage, pop-ups, and downloads. Navigation and WebRTC directives are browser-dependent and do not provide complete network isolation. External and module scripts, event-handler attributes, frames, forms, JavaScript URLs, and meta refresh are rejected during upload. The sandbox reduces risk but cannot prevent misleading UI or a page from consuming CPU in its own tab.
 
 | URL | Result |
 | --- | --- |

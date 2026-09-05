@@ -93,6 +93,15 @@ jobs:
       - name: Run type, lint, and test checks
         run: pnpm typecheck && pnpm lint && pnpm test
 
+      - name: Scan committed content for secrets
+        run: bash scripts/ci-gitleaks.sh
+
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
+
       - name: Publish CLI with npm Trusted Publishing
         if: env.PUBLISH_NPM != 'false'
-        run: pnpm --filter schaffa publish --no-git-checks --access public --tag "$RELEASE_DIST_TAG"
+        run: |
+          pnpm pack:cli "$RUNNER_TEMP/package"
+          bash scripts/ci-check-cli.sh "$RUNNER_TEMP"/package/*.tgz
+          pnpm publish "$RUNNER_TEMP"/package/*.tgz --no-git-checks --access public --tag "$RELEASE_DIST_TAG"

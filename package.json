@@ -4,7 +4,7 @@
   "description": "Self-hosted public page and file publishing for agents.",
   "private": true,
   "engines": {
-    "node": ">=22.5"
+    "node": ">=24"
   },
   "scripts": {
     "build": "pnpm build:server && pnpm --filter schaffa build",
@@ -14,11 +14,12 @@
     "dev:server": "tsx watch src/server.ts",
     "format": "biome format --write .",
     "lint": "biome check .",
+    "pack:cli": "node scripts/pack-cli.mjs",
     "security": "gitleaks dir . --redact --no-banner",
     "start": "node dist/server.js",
     "test": "pnpm test:server && pnpm test:release && pnpm --filter schaffa test",
-    "test:release": "node --test test/release-validation.test.mjs",
-    "test:server": "tsx --test test/**/*.test.ts",
+    "test:release": "node --test test/*.test.mjs",
+    "test:server": "pnpm --filter schaffa build && tsx --test test/**/*.test.ts",
     "token": "tsx scripts/token.ts",
     "typecheck": "tsc --noEmit && pnpm --filter schaffa exec tsc --noEmit -p tsconfig.json"
   },
@@ -34,7 +35,7 @@
     "@fastify/formbody": "^9.0.0",
     "@fastify/multipart": "^10.1.0",
     "@scalar/fastify-api-reference": "^1.64.1",
-    "fastify": "^5.11.3",
+    "fastify": "^5.12.3",
     "jose": "^6.2.8",
     "mime-types": "^3.0.2",
     "parse5": "^8.0.1",
@@ -44,6 +45,8 @@
     "@biomejs/biome": "^2.5.7",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^26.2.0",
+    "ajv": "^8.20.0",
+    "puppeteer-core": "^25.6.0",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
   },

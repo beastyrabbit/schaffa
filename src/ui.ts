@@ -1,3 +1,10 @@
+export {
+  accountClientScript,
+  adminFiltersClientScript,
+  tokenSetupClientScript,
+} from "./browser-scripts.js";
+
+import type { selectAdminPublications } from "./admin-publications.js";
 import { config } from "./config.js";
 import type { TokenRow } from "./db.js";
 import { exampleSkills } from "./example-skills.js";
@@ -104,6 +111,13 @@ export function renderPublicNotFound(): string {
   );
 }
 
+export function renderManagementError(message: string, destination: "/admin" | "/account"): string {
+  return layout(
+    "Aktion fehlgeschlagen",
+    `<main class="login-shell"><section class="login-panel"><h1>Aktion fehlgeschlagen</h1><p class="error">${escapeHtml(message)}</p><p><a href="${destination}">Zurück zur Verwaltung</a></p></section></main>`,
+  );
+}
+
 export function renderScanStatusPage(input: {
   status: "pending" | "rejected";
   message: string | null;
@@ -203,153 +217,6 @@ export function renderAccount(input: {
   );
 }
 
-export const tokenSetupClientScript = `(() => {
-  const tokenReveal = document.querySelector("[data-token-reveal]");
-  if (!tokenReveal) return;
-    const token = tokenReveal.querySelector("[data-token-value]")?.textContent || "";
-    const osSelect = tokenReveal.querySelector("[data-token-os]");
-    const targetSelect = tokenReveal.querySelector("[data-token-target]");
-    const command = tokenReveal.querySelector("[data-token-command]");
-    const hint = tokenReveal.querySelector("[data-token-hint]");
-    const targets = {
-      macos: [
-        ["zsh", "Zsh · ~/.zshrc", "Schreibt den Token dauerhaft in ~/.zshrc."],
-        ["bash", "Bash · ~/.bash_profile", "Schreibt den Token dauerhaft in ~/.bash_profile."],
-        ["fish", "Fish", "Speichert den Token dauerhaft als Fish-Universal-Variable."],
-        ["env", "Projekt · .env", "Fügt den Token der .env-Datei im aktuellen Ordner hinzu."],
-        ["session", "Nur diese Sitzung", "Setzt den Token nur im aktuellen Terminalfenster."],
-      ],
-      linux: [
-        ["bash", "Bash · ~/.bashrc", "Schreibt den Token dauerhaft in ~/.bashrc."],
-        ["zsh", "Zsh · ~/.zshrc", "Schreibt den Token dauerhaft in ~/.zshrc."],
-        ["fish", "Fish", "Speichert den Token dauerhaft als Fish-Universal-Variable."],
-        ["env", "Projekt · .env", "Fügt den Token der .env-Datei im aktuellen Ordner hinzu."],
-        ["session", "Nur diese Sitzung", "Setzt den Token nur im aktuellen Terminalfenster."],
-      ],
-      windows: [
-        ["powershell", "PowerShell · dauerhaft", "Speichert den Token für deinen Windows-Benutzer und setzt ihn in der aktuellen Sitzung."],
-        ["powershell-session", "PowerShell · diese Sitzung", "Setzt den Token nur im aktuellen PowerShell-Fenster."],
-        ["cmd", "Eingabeaufforderung (CMD)", "Speichert den Token für zukünftige CMD-Fenster und setzt ihn im aktuellen Fenster."],
-        ["env", "PowerShell · Projekt .env", "Fügt den Token der .env-Datei im aktuellen Ordner hinzu."],
-      ],
-    };
-    const commandFor = (os, target) => {
-      if (os === "windows") {
-        if (target === "powershell") return "[Environment]::SetEnvironmentVariable('SCHAFFA_TOKEN', '" + token + "', 'User'); $env:SCHAFFA_TOKEN = '" + token + "'";
-        if (target === "powershell-session") return "$env:SCHAFFA_TOKEN = '" + token + "'";
-        if (target === "cmd") return 'setx SCHAFFA_TOKEN "' + token + '" && set "SCHAFFA_TOKEN=' + token + '"';
-        return "Add-Content -Path .env -Encoding utf8 -Value 'SCHAFFA_TOKEN=" + token + "'";
-      }
-      if (target === "fish") return "set -Ux SCHAFFA_TOKEN '" + token + "'";
-      if (target === "env") return "printf '\\nSCHAFFA_TOKEN=%s\\n' '" + token + "' >> .env";
-      if (target === "session") return "export SCHAFFA_TOKEN='" + token + "'";
-      const profile = target === "zsh" ? "~/.zshrc" : os === "macos" ? "~/.bash_profile" : "~/.bashrc";
-      return "printf '\\nexport SCHAFFA_TOKEN=%s\\n' '" + token + "' >> " + profile + " && source " + profile;
-    };
-    const renderCommand = () => {
-      if (!osSelect || !targetSelect || !command) return;
-      const availableTargets = targets[osSelect.value] || targets.macos;
-      const previousTarget = targetSelect.value;
-      targetSelect.replaceChildren(...availableTargets.map(([value, label]) => {
-        const option = document.createElement("option");
-        option.value = value;
-        option.textContent = label;
-        return option;
-      }));
-      if (availableTargets.some(([value]) => value === previousTarget)) targetSelect.value = previousTarget;
-      command.textContent = commandFor(osSelect.value, targetSelect.value);
-      if (hint) hint.textContent = availableTargets.find(([value]) => value === targetSelect.value)?.[2] || "";
-    };
-    const updateCommand = () => {
-      if (!osSelect || !targetSelect || !command) return;
-      command.textContent = commandFor(osSelect.value, targetSelect.value);
-      const availableTargets = targets[osSelect.value] || targets.macos;
-      if (hint) hint.textContent = availableTargets.find(([value]) => value === targetSelect.value)?.[2] || "";
-    };
-    const platform = navigator.userAgentData?.platform || navigator.platform || "";
-    if (/win/i.test(platform)) osSelect.value = "windows";
-    else if (/linux/i.test(platform)) osSelect.value = "linux";
-    else osSelect.value = "macos";
-    osSelect?.addEventListener("change", renderCommand);
-    targetSelect?.addEventListener("change", updateCommand);
-    renderCommand();
-    tokenReveal.querySelectorAll("[data-copy]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const source = tokenReveal.querySelector(button.getAttribute("data-copy"));
-        if (!source?.textContent) return;
-        const originalLabel = button.textContent;
-        try {
-          await navigator.clipboard.writeText(source.textContent);
-          button.textContent = "Kopiert";
-        } catch {
-          const range = document.createRange();
-          range.selectNodeContents(source);
-          const selection = window.getSelection();
-          selection?.removeAllRanges();
-          selection?.addRange(range);
-          button.textContent = "Markiert";
-        }
-        window.setTimeout(() => { button.textContent = originalLabel; }, 1800);
-      });
-    });
-})();`;
-
-export const adminFiltersClientScript = `(() => {
-  const filters = document.querySelector("[data-admin-filters]");
-  const user = filters?.querySelector("[name=user]");
-  const uploader = filters?.querySelector("[name=uploader]");
-  if (!(user instanceof HTMLSelectElement) || !(uploader instanceof HTMLSelectElement)) return;
-
-  const syncUploaders = () => {
-    for (const option of Array.from(uploader.options).slice(1)) {
-      const available = !user.value || option.dataset.user === user.value;
-      option.disabled = !available;
-      option.hidden = !available;
-    }
-    if (uploader.selectedOptions[0]?.disabled) uploader.value = "";
-  };
-
-  user.addEventListener("change", syncUploaders);
-  syncUploaders();
-})();`;
-
-export const accountClientScript = `(() => {
-  const shell = document.querySelector("[data-account-login]");
-  if (!shell || !window.Shoo) return;
-  const error = document.getElementById("auth-error");
-  const showError = (message) => {
-    if (!error) return;
-    error.hidden = false;
-    error.textContent = message;
-  };
-  if (shell.hasAttribute("data-signed-out")) {
-    window.Shoo.clearIdentity();
-    history.replaceState({}, "", "/account");
-    return;
-  }
-  const establishSession = async () => {
-    const identity = window.Shoo.getIdentity();
-    if (!identity?.token) return false;
-    const response = await fetch("/auth/shoo", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idToken: identity.token }),
-    });
-    if (!response.ok) {
-      const result = await response.json().catch(() => ({}));
-      throw new Error(result.message || "Anmeldung fehlgeschlagen.");
-    }
-    location.replace("/account");
-    return true;
-  };
-  const link = document.getElementById("shoo-sign-in");
-  link?.addEventListener("click", (event) => {
-    event.preventDefault();
-    window.Shoo.startSignIn({ returnTo: "/account", requestPii: true });
-  });
-  establishSession().catch((cause) => showError(cause instanceof Error ? cause.message : "Anmeldung fehlgeschlagen."));
-})();`;
-
 function renderTokenSetup(token: string, title = "Token jetzt einrichten"): string {
   return `<aside class="token-reveal" data-token-reveal>
     <div class="token-reveal-heading"><div><strong>${escapeHtml(title)}</strong><p>Dieser Wert wird nur einmal angezeigt.</p></div><button class="copy-button" type="button" data-copy="[data-token-value]">Token kopieren</button></div>
@@ -377,9 +244,11 @@ export function renderAdmin(input: {
   actorId: string;
   actorName: string;
   filters: AdminFilters;
+  pagination?: ReturnType<typeof selectAdminPublications>;
   newToken?: string;
 }): string {
-  const uploaders = uniqueUploaders(input.pages, input.files, input.guides);
+  const uploaders =
+    input.pagination?.uploaders ?? uniqueUploaders(input.pages, input.files, input.guides);
   const guides =
     input.filters.kind === "all" || input.filters.kind === "guides"
       ? input.guides.filter((guide) => guideMatches(guide, input.filters))
@@ -468,7 +337,8 @@ export function renderAdmin(input: {
         <label>Lebensdauer<select name="lifetime"><option value="all"${selected(input.filters.lifetime, "all")}>Alle</option><option value="permanent"${selected(input.filters.lifetime, "permanent")}>Dauerhaft</option><option value="anonymous-active"${selected(input.filters.lifetime, "anonymous-active")}>Anonym aktiv</option></select></label>
         <button type="submit">Filtern</button><a href="/admin">Zurücksetzen</a>
       </form>
-      <nav class="tabs" aria-label="Bereiche"><a href="#operations">Betrieb</a><a href="#guides">Guides <span>${guides.length}</span></a><a href="#pages">Seiten <span>${pages.length}</span></a><a href="#files">Dateien <span>${files.length}</span></a><a href="#users">Nutzer <span>${input.users.length}</span></a><a href="#tokens">Tokens <span>${input.tokens.length}</span></a></nav>
+      ${input.pagination ? `<nav class="pagination" aria-label="Publikationsseiten"><span>${input.pagination.total} Treffer · Seite ${input.pagination.page} von ${input.pagination.pageCount} · höchstens 50 Publikationen pro Seite</span> ${input.pagination.page > 1 ? `<a href="/admin?${escapeHtml(new URLSearchParams({ ...input.filters, page: String(input.pagination.page - 1) }).toString())}">Zurück</a>` : ""} ${input.pagination.page < input.pagination.pageCount ? `<a href="/admin?${escapeHtml(new URLSearchParams({ ...input.filters, page: String(input.pagination.page + 1) }).toString())}">Weiter</a>` : ""}</nav>` : ""}
+      <nav class="tabs" aria-label="Bereiche"><a href="#operations">Betrieb</a><a href="#guides">Guides <span>${input.pagination?.totals.guides ?? guides.length}</span></a><a href="#pages">Seiten <span>${input.pagination?.totals.pages ?? pages.length}</span></a><a href="#files">Dateien <span>${input.pagination?.totals.files ?? files.length}</span></a><a href="#users">Nutzer <span>${input.users.length}</span></a><a href="#tokens">Tokens <span>${input.tokens.length}</span></a></nav>
       <section id="operations"><div class="section-heading"><h2>Betrieb</h2><p>Zugänge und Publishing im Notfall gezielt sperren.</p></div><div class="operation-list"><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="writesLocked" value="${input.settings.writesLocked ? "false" : "true"}"><div><strong>${input.settings.writesLocked ? "Publishing gesperrt" : "Publishing aktiv"}</strong><span class="sub">${input.settings.writesLocked ? "Nur Lesezugriffe und Admin-Wiederherstellung sind möglich." : "Uploads und Seiten-Updates werden angenommen."}</span></div><button class="${input.settings.writesLocked ? "" : "danger"}" type="submit">${input.settings.writesLocked ? "Lockdown aufheben" : "Lockdown aktivieren"}</button></form><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="interactivePublishingEnabled" value="${input.settings.interactivePublishingEnabled ? "false" : "true"}"><div><strong>Interaktives Publishing ${input.settings.interactivePublishingEnabled ? "aktiv" : "gesperrt"}</strong><span class="sub">Erfordert zusätzlich eine Freigabe pro Nutzer und einen eigenen Interactive-Token.</span></div><button class="${input.settings.interactivePublishingEnabled ? "danger" : ""}" type="submit">${input.settings.interactivePublishingEnabled ? "Instanzweit sperren" : "Instanzweit aktivieren"}</button></form><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="signupsEnabled" value="${input.settings.signupsEnabled ? "false" : "true"}"><div><strong>Registrierungen ${input.settings.signupsEnabled ? "aktiv" : "gesperrt"}</strong><span class="sub">Steuert, ob eine neue Shoo-Identität ein Konto anlegen darf.</span></div><button class="${input.settings.signupsEnabled ? "danger" : ""}" type="submit">${input.settings.signupsEnabled ? "Registrierungen sperren" : "Registrierungen erlauben"}</button></form><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="loginsEnabled" value="${input.settings.loginsEnabled ? "false" : "true"}"><div><strong>Anmeldungen ${input.settings.loginsEnabled ? "aktiv" : "gesperrt"}</strong><span class="sub">Beim Sperren werden alle aktiven Nutzersitzungen beendet.</span></div><button class="${input.settings.loginsEnabled ? "danger" : ""}" type="submit">${input.settings.loginsEnabled ? "Anmeldungen sperren" : "Anmeldungen erlauben"}</button></form></div></section>
       <section id="guides"><div class="section-heading"><h2>Guides</h2><p>Aufnahmen, Entwürfe und unveränderliche öffentliche Revisionen.</p></div><div class="table-wrap"><table><thead><tr><th>Guide</th><th>Status</th><th>Revision</th><th>Schritte</th><th>Uploader</th><th>Geändert</th><th>Aktion</th></tr></thead><tbody>${guideRows || emptyRow(7, "Keine passenden Guides gefunden.")}</tbody></table></div></section>
       <section id="pages"><div class="section-heading"><h2>Seiten</h2><p>Anonyme Seiten verschwinden nach einer Stunde; gespeichert bleiben sie 30 Tage.</p></div><div class="table-wrap"><table><thead><tr><th>Slug</th><th>Aktuell</th><th>Versionen</th><th>Uploader</th><th>Status</th><th>Größe</th><th>Geändert</th><th>Aktion</th></tr></thead><tbody>${pageRows || emptyRow(8, "Keine passenden Seiten gefunden.")}</tbody></table></div></section>
@@ -495,7 +365,7 @@ export function renderInteractiveWarning(input: {
       <p class="kicker">Interaktive Seite</p>
       <h1>Diese Seite führt Code aus.</h1>
       <p class="lede">Veröffentlicht von ${escapeHtml(input.publisher)} · ${escapeHtml(input.slug)} · Version ${input.version}</p>
-      <p>Schaffa isoliert die Seite: Netzwerkzugriffe, Formulare, Browser-Speicher, Pop-ups und Navigation sind gesperrt. Trotzdem kann sie irreführende Inhalte zeigen oder den Tab stark belasten.</p>
+      <p>Schaffa beschränkt die Seite mit einer Browser-Sandbox. Formulare, Browser-Speicher und Pop-ups sind gesperrt; Netzwerkisolation ist nicht in jedem Browser garantiert. Die Seite kann irreführende Inhalte zeigen oder den Tab stark belasten.</p>
       ${input.executionAllowed ? `<div class="row-actions"><a class="primary-link" href="${escapeHtml(input.runUrl)}">Seite isoliert starten</a><a href="/">Zurück zu Schaffa</a></div>` : `<p class="error">Die Ausführung wurde vom Betreiber oder für diesen Publisher deaktiviert.</p><a href="/">Zurück zu Schaffa</a>`}
     </section></main>`,
   );

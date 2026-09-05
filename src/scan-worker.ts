@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import { db, type FileRow, type PageVersionRow } from "./db.js";
 import { AppError } from "./errors.js";
 import { cleanImage, withImageProcessingPermit } from "./image-cleaner.js";
+import { assertStorageCapacity, serializeMetadataWrite } from "./service.js";
 import {
   promoteQuarantinedPage,
   promoteQuarantinedUpload,
@@ -44,10 +45,25 @@ export function resetInterruptedScans(): void {
 }
 
 export async function processNextPendingScan(): Promise<ScanRunResult> {
-  const page = claimPage();
-  if (page) return processPage(page);
-  const file = claimFile();
-  if (file) return processFile(file);
+  const next = db()
+    .prepare(`
+    SELECT type FROM (
+      SELECT 'page' AS type, scan_attempted_at, created_at, id FROM page_versions
+      WHERE scan_status = 'pending'
+      UNION ALL
+      SELECT 'file' AS type, scan_attempted_at, created_at, id FROM files
+      WHERE scan_status = 'pending'
+    ) WHERE scan_attempted_at IS NULL OR datetime(scan_attempted_at) <= datetime('now', '-2 seconds')
+    ORDER BY scan_attempted_at IS NOT NULL, scan_attempted_at, created_at, id LIMIT 1
+  `)
+    .get() as { type: string } | undefined;
+  if (next?.type === "page") {
+    const page = claimPage();
+    if (page) return processPage(page);
+  } else if (next?.type === "file") {
+    const file = claimFile();
+    if (file) return processFile(file);
+  }
   return { processed: false };
 }
 
@@ -139,9 +155,9 @@ async function processPage(page: PendingPage): Promise<ScanRunResult> {
 }
 
 async function processFile(file: FileRow): Promise<ScanRunResult> {
+  let publicPath: string | undefined;
   try {
     await scanStoredUpload(file.storage_path);
-    let publicPath: string;
     let bytes = file.bytes;
     let digest = file.sha256;
     if (file.process_as_image) {
@@ -155,18 +171,23 @@ async function processFile(file: FileRow): Promise<ScanRunResult> {
     } else {
       publicPath = await promoteQuarantinedUpload(file.storage_path, file.id, file.filename);
     }
-    const updated = db()
-      .prepare(
-        `UPDATE files
+    const destination = publicPath;
+    const updated = await serializeMetadataWrite(async () => {
+      assertStorageCapacity(Math.max(0, bytes - file.bytes));
+      return db()
+        .prepare(
+          `UPDATE files
          SET storage_path = ?, bytes = ?, sha256 = ?, scan_status = 'clean',
              scan_message = NULL, scanned_at = CURRENT_TIMESTAMP
          WHERE id = ? AND scan_status = 'scanning'`,
-      )
-      .run(publicPath, bytes, digest, file.id);
+        )
+        .run(destination, bytes, digest, file.id);
+    });
     await removeStoredFile(file.storage_path);
     if (updated.changes === 0) await removeStoredFile(publicPath);
     return { processed: true, status: "clean", type: "file" };
   } catch (error) {
+    if (publicPath) await removeStoredFile(publicPath);
     return handleFailure("files", file.id, file.storage_path, error, "file");
   }
 }

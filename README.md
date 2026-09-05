@@ -39,7 +39,7 @@ See [Deployment](docs/deployment.md) for the complete routing and runtime config
 
 ## Local test
 
-Node 22.5+ and pnpm are required:
+Node 24+ and pnpm are required for the server and local development. The standalone CLI requires Node 22.12.0+:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -122,7 +122,7 @@ Omit either `--export` option when that format should not be generated.
 
 The CLI defaults to `https://schaffa.dev`. Every new HTML page receives a random, non-semantic ID. New HTML pages work without a token and disappear after one hour. For permanent pages, files, presentations, and guides, set `SCHAFFA_TOKEN` or pass `--token <token>` directly.
 
-Trusted users can create a separate Interactive token in their account and publish inline JavaScript with `npx schaffa upload ./plan.html --interactive`. Visitors see a warning before the code runs in a sandbox without network, storage, forms, pop-ups, or navigation.
+Trusted users can create a separate Interactive token in their account and publish inline JavaScript with `npx schaffa upload ./plan.html --interactive`. Visitors see a warning before the code runs in an opaque browser sandbox. CSP blocks fetch requests and external resources; the sandbox restricts storage, forms, and pop-ups. Browser-dependent navigation and WebRTC behavior mean this is not complete network isolation.
 
 ## Releases
 

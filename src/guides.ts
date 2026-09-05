@@ -18,6 +18,7 @@ import {
   isLikelyImage,
   withImageProcessingPermit,
 } from "./image-cleaner.js";
+import { assertStorageCapacity, guideMetadataBytes } from "./service.js";
 import { removeGuide, removeStoredFile, sha256, storeGuideImage } from "./storage.js";
 import { scanUpload } from "./virus-scanner.js";
 
@@ -95,7 +96,7 @@ export interface GuidePreflight {
   errors: string[];
   warnings: string[];
   missingScreenshots: string[];
-  sensitiveFindings: Array<{ stepId: string; kind: string }>;
+  sensitiveFindings: Array<{ stepId?: string; field: string; kind: string }>;
 }
 
 interface RevisionRow {
@@ -118,12 +119,20 @@ export function createGuide(
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const slug = randomGuideSlug();
     if (db().prepare("SELECT 1 FROM guides WHERE slug = ?").get(slug)) continue;
-    db()
-      .prepare(
-        `INSERT INTO guides (id, slug, title, description, target_url, language, owner_token_id)
+    db().exec("BEGIN IMMEDIATE");
+    try {
+      db()
+        .prepare(
+          `INSERT INTO guides (id, slug, title, description, target_url, language, owner_token_id)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(randomUUID(), slug, title, description, targetUrl, language, tokenId);
+        )
+        .run(randomUUID(), slug, title, description, targetUrl, language, tokenId);
+      assertStorageCapacity(0);
+      db().exec("COMMIT");
+    } catch (error) {
+      db().exec("ROLLBACK");
+      throw error;
+    }
     return getOwnedGuide(slug, tokenId, false);
   }
   throw new Error("Could not allocate a unique guide slug.");
@@ -184,6 +193,11 @@ export async function addGuideStep(
   if (replay) return replay;
   assertEditRevision(guide, expectedRevision);
   const parsed = parseStep(input, false);
+  const count = db()
+    .prepare("SELECT COUNT(*) AS count FROM guide_steps WHERE guide_id = ?")
+    .get(guide.id) as { count: number };
+  if (count.count >= config.maxGuideSteps)
+    throw new AppError("The guide step limit has been reached.", 422, "guide_limit");
   const image = screenshot ? await prepareGuideImage(guide, screenshot, parsed.clickMarker) : null;
   const stepId = randomUUID();
   const row = db()
@@ -219,6 +233,7 @@ export async function addGuideStep(
     if (guide.current_revision > 0) publishEditedGuide(guide.id, expectedRevision + 1);
     const result = guideView(loadGuide(guide.id), currentSteps(guide.id));
     writeIdempotent(guide.id, idempotencyKey, "add-step", result);
+    assertGuideBudget(guide.id);
     db().exec("COMMIT");
     return result;
   } catch (error) {
@@ -303,6 +318,7 @@ export async function replaceGuideScreenshot(
       .run(image.id, step.id);
     advanceGuideRevision(guide.id, expectedRevision, guide.status);
     if (guide.current_revision > 0) publishEditedGuide(guide.id, expectedRevision + 1);
+    assertGuideBudget(guide.id);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -342,6 +358,7 @@ export function reorderGuideSteps(
     for (const id of order) update.run(order.indexOf(id) + 1, id, guide.id);
     advanceGuideRevision(guide.id, expectedRevision, guide.status);
     if (guide.current_revision > 0) publishEditedGuide(guide.id, expectedRevision + 1);
+    assertGuideBudget(guide.id);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -370,6 +387,7 @@ export async function deleteGuideStep(
     });
     advanceGuideRevision(guide.id, expectedRevision, guide.status);
     if (guide.current_revision > 0) publishEditedGuide(guide.id, expectedRevision + 1);
+    assertGuideBudget(guide.id);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -407,6 +425,7 @@ export function finishGuide(
       )
       .run(revision, guide.id, expectedRevision);
     if (result.changes !== 1) throw conflict();
+    assertGuideBudget(guide.id);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -456,6 +475,8 @@ function insertPublishedRevision(
   steps: GuideStepRow[],
   snapshot: GuideView,
 ): void {
+  if (snapshot.revision > config.maxGuideRevisions)
+    throw new AppError("The guide revision limit has been reached.", 422, "guide_limit");
   const revisionId = randomUUID();
   db()
     .prepare(
@@ -564,16 +585,20 @@ export type GuideSummary = GuideRow & {
   uploader_user_id: string | null;
 };
 
-export function listGuides(): GuideSummary[] {
+export function listGuides(ids?: string[]): GuideSummary[] {
   return db()
     .prepare(
       `SELECT g.*, (SELECT COUNT(*) FROM guide_steps gs WHERE gs.guide_id = g.id) AS step_count,
               g.owner_token_id AS uploader_id,
               COALESCE(t.name, 'Unknown uploader') AS uploader_name,
               t.user_id AS uploader_user_id
-       FROM guides g LEFT JOIN tokens t ON t.id = g.owner_token_id ORDER BY g.updated_at DESC`,
+       FROM guides g LEFT JOIN tokens t ON t.id = g.owner_token_id
+       WHERE (? IS NULL OR g.id IN (SELECT value FROM json_each(?))) ORDER BY g.updated_at DESC`,
     )
-    .all() as unknown as GuideSummary[];
+    .all(
+      ids ? JSON.stringify(ids) : null,
+      ids ? JSON.stringify(ids) : null,
+    ) as unknown as GuideSummary[];
 }
 
 export function guidePreflight(guide: GuideView): GuidePreflight {
@@ -589,21 +614,31 @@ export function guidePreflight(guide: GuideView): GuidePreflight {
     .map((step) => step.id);
   if (missingScreenshots.length)
     warnings.push(`${missingScreenshots.length} visible step(s) have no screenshot.`);
-  const sensitiveFindings: Array<{ stepId: string; kind: string }> = [];
-  for (const step of visible) {
-    const text = [
-      step.title,
-      step.description,
-      step.action?.target,
-      step.verification,
-      step.screenshotCaption,
-    ]
-      .filter(Boolean)
-      .join("\n");
+  const sensitiveFindings: GuidePreflight["sensitiveFindings"] = [];
+  const inspect = (field: string, value: string | null | undefined, stepId?: string) => {
+    if (!value) return;
+    let text = value;
+    try {
+      text += `\n${decodeURIComponent(value.replace(/\+/g, " "))}`;
+    } catch {
+      /* Keep malformed URL text for the ordinary checks. */
+    }
     for (const check of sensitivePatterns) {
       check.pattern.lastIndex = 0;
-      if (check.pattern.test(text)) sensitiveFindings.push({ stepId: step.id, kind: check.label });
+      if (check.pattern.test(text))
+        sensitiveFindings.push({ ...(stepId ? { stepId } : {}), field, kind: check.label });
     }
+  };
+  inspect("title", guide.title);
+  inspect("description", guide.description);
+  inspect("targetUrl", guide.targetUrl);
+  inspect("language", guide.language);
+  for (const step of visible) {
+    inspect("title", step.title, step.id);
+    inspect("description", step.description, step.id);
+    inspect("action.target", step.action?.target, step.id);
+    inspect("verification", step.verification, step.id);
+    inspect("screenshotCaption", step.screenshotCaption, step.id);
   }
   if (sensitiveFindings.length)
     errors.push("Possible sensitive text must be removed before publication.");
@@ -665,27 +700,15 @@ function renderGuideScreenshot(step: GuideStepView, index: number): string {
   if (!step.screenshotUrl)
     return `<aside class="text-step">Textschritt · kein Bild erforderlich</aside>`;
   const number = index + 1;
-  const paddedNumber = String(number).padStart(2, "0");
   const imageUrl = escapeHtml(step.screenshotUrl);
   const caption = escapeHtml(step.screenshotCaption || step.title);
-  const title = escapeHtml(step.title);
   return `<figure>
-    <a class="screenshot-link" href="#image-${number}" aria-label="Screenshot zu Schritt ${number} vergrößern" aria-describedby="image-caption-${number}">
+    <a class="screenshot-link" href="${imageUrl}" target="_blank" rel="noopener noreferrer" aria-label="Screenshot zu Schritt ${number} vergrößern, öffnet einen neuen Tab" aria-describedby="image-caption-${number}">
       <img src="${imageUrl}" alt="${caption}" loading="lazy">
       <span class="zoom-hint" aria-hidden="true">Bild vergrößern <span>↗</span></span>
     </a>
     <figcaption id="image-caption-${number}">${caption}</figcaption>
-  </figure>
-  <div class="lightbox" id="image-${number}" role="dialog" aria-modal="true" aria-labelledby="image-title-${number}" tabindex="-1">
-    <a class="lightbox-dismiss" href="#step-${number}" aria-label="Große Bildansicht schließen"></a>
-    <div class="lightbox-panel">
-      <div class="lightbox-toolbar">
-        <p id="image-title-${number}"><span>Schritt ${paddedNumber}</span>${title}</p>
-        <div><a href="${imageUrl}" target="_blank" rel="noopener noreferrer">Original öffnen ↗</a><a class="lightbox-close" href="#step-${number}" aria-label="Große Bildansicht schließen">Schließen ×</a></div>
-      </div>
-      <div class="lightbox-image"><img src="${imageUrl}" alt="${caption}" loading="lazy"></div>
-    </div>
-  </div>`;
+  </figure>`;
 }
 
 function guideView(guide: GuideRow, steps: GuideStepRow[]): GuideView {
@@ -851,16 +874,7 @@ async function readLimited(part: MultipartFile, limit: number): Promise<Buffer> 
 }
 
 function insertImage(image: GuideImageRow): void {
-  const usage = db()
-    .prepare(
-      `SELECT COALESCE((SELECT SUM(bytes) FROM page_versions), 0) +
-              COALESCE((SELECT SUM(bytes) FROM files), 0) +
-              COALESCE((SELECT SUM(bytes) FROM guide_images), 0) AS bytes`,
-    )
-    .get() as unknown as { bytes: number };
-  if (usage.bytes + image.bytes > config.maxStorageBytes) {
-    throw new AppError("The server storage quota has been reached.", 507, "storage_quota");
-  }
+  assertStorageCapacity(image.bytes);
   db()
     .prepare(
       `INSERT INTO guide_images (id, guide_id, storage_path, bytes, sha256, width, height)
@@ -955,6 +969,7 @@ function mutateGuide(
           .run(...(params as never[]));
     if (result.changes !== 1) throw conflict();
     if (guide.current_revision > 0) publishEditedGuide(guideId, expectedRevision + 1);
+    assertGuideBudget(guide.id);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -1107,5 +1122,11 @@ function guideNavigationUrl(action: GuideAction | null, targetUrl: string | null
 }
 
 const guideCss = `
-:root{--paper:#f3f0e8;--surface:#fffdf8;--ink:#20211e;--muted:#696961;--line:#cbc5b8;--accent:#a43f24;--gold:#d8b64b;font-family:"Avenir Next","Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;line-height:1.62}body:has(.lightbox:target){overflow:hidden}header{padding:52px max(24px,calc((100vw - 1120px)/2));border-bottom:2px solid var(--ink);background:var(--surface)}header>div{display:flex;justify-content:space-between;color:var(--muted);font-size:13px}.brand{font:700 22px Georgia,serif;color:var(--ink);text-decoration:none}h1,h2{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.035em}h1{max-width:920px;margin:50px 0 18px;font-size:clamp(44px,7vw,78px);line-height:.98}header>p{max-width:720px;color:#4b4c45;font-size:19px}header nav{display:flex;align-items:center;gap:18px;margin-top:28px}header nav a{color:var(--accent);font-weight:700;text-underline-offset:4px}.target-link,.step-action-link{display:inline-flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:var(--surface);font-weight:700;text-decoration:none}.target-link:focus-visible,.step-action-link:focus-visible{outline:3px solid var(--gold);outline-offset:3px}.step-action-link:hover{background:#7f2f1b;border-color:#7f2f1b}main{display:grid;grid-template-columns:240px minmax(0,820px);gap:56px;max-width:1120px;margin:auto;padding:52px 24px 100px}.toc{position:sticky;top:24px;align-self:start;border-top:3px solid var(--ink)}.toc a{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px;text-decoration:none}.toc span{font-family:ui-monospace,monospace;color:var(--accent)}.step{padding:0 0 64px;margin:0 0 60px;border-bottom:2px solid var(--ink)}.number{display:block;color:var(--accent);font:700 13px ui-monospace,monospace}.step h2{margin:8px 0 18px;font-size:36px;line-height:1.08}.step-copy>p{max-width:720px;font-size:17px}.step dl{display:grid;grid-template-columns:90px 1fr;margin:18px 0}.step dt{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}.step dd{margin:0}.step code{padding:3px 6px;background:#e4ded1;font-family:ui-monospace,monospace}figure{margin:30px 0 0}.screenshot-link{position:relative;display:block;color:inherit;text-decoration:none}.screenshot-link>img{display:block;width:100%;height:auto;border:2px solid var(--ink);background:#ddd;box-shadow:8px 8px 0 var(--gold)}.screenshot-link:focus-visible{outline:4px solid var(--accent);outline-offset:5px}.zoom-hint{position:absolute;right:14px;bottom:14px;display:inline-flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--surface);border-radius:7px;background:var(--ink);color:var(--surface);font-size:13px;font-weight:700;box-shadow:3px 3px 0 var(--gold)}.screenshot-link:hover .zoom-hint,.screenshot-link:focus-visible .zoom-hint{background:var(--accent)}figcaption{margin-top:13px;color:var(--muted);font-size:13px}.lightbox{position:fixed;inset:0;z-index:1000;display:none;padding:24px}.lightbox:target{display:grid;place-items:center}.lightbox-dismiss{position:absolute;inset:0;background:rgba(20,21,19,.9)}.lightbox-panel{position:relative;z-index:1;display:grid;grid-template-rows:auto minmax(0,1fr);width:min(96vw,1680px);height:min(94vh,1120px);border:2px solid var(--surface);background:#11120f;box-shadow:12px 12px 0 var(--gold)}.lightbox-toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:62px;padding:10px 14px;border-bottom:1px solid #44443f;background:var(--ink);color:var(--surface)}.lightbox-toolbar p{display:flex;gap:12px;margin:0;min-width:0;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lightbox-toolbar p span{color:var(--gold);font-family:ui-monospace,monospace}.lightbox-toolbar>div{display:flex;align-items:center;gap:14px;flex-shrink:0}.lightbox-toolbar a{color:var(--surface);font-size:13px;font-weight:700;text-underline-offset:4px}.lightbox-close{padding:7px 9px;border:1px solid #77776f;border-radius:7px;text-decoration:none}.lightbox-toolbar a:focus-visible{outline:3px solid var(--gold);outline-offset:3px}.lightbox-image{display:grid;place-items:center;overflow:auto;padding:18px}.lightbox-image img{display:block;width:auto;max-width:100%;height:auto;max-height:calc(94vh - 102px);background:#ddd}.text-step{margin-top:28px;padding:18px;border-left:4px solid var(--gold);background:var(--surface);color:var(--muted)}footer{padding:25px;border-top:2px solid var(--ink);text-align:center;color:var(--muted);font-size:13px}@media(max-width:760px){header{padding:34px 20px}header>div{align-items:center}.brand{font-size:20px}h1{margin-top:38px;font-size:46px}header nav{align-items:flex-start;flex-wrap:wrap}main{display:block;padding:34px 20px 70px}.toc{position:static;margin-bottom:50px}.step h2{font-size:31px}.step dl{grid-template-columns:1fr;gap:3px}.screenshot-link>img{box-shadow:5px 5px 0 var(--gold)}.zoom-hint{right:9px;bottom:9px}.lightbox{padding:8px}.lightbox-panel{width:100%;height:calc(100dvh - 16px);box-shadow:none}.lightbox-toolbar{align-items:flex-start}.lightbox-toolbar p{display:block;white-space:normal}.lightbox-toolbar p span{display:block}.lightbox-toolbar>div{gap:8px}.lightbox-toolbar>div>a:first-child{display:none}.lightbox-image{padding:8px}.lightbox-image img{max-height:calc(100dvh - 94px)}}@media print{header{padding:0 0 24px}.toc,header nav,footer,.zoom-hint,.lightbox{display:none}main{display:block;padding:20px 0}.step{break-inside:avoid}.screenshot-link>img{box-shadow:none}body{background:#fff;font-size:11pt}}
+:root{--paper:#f3f0e8;--surface:#fffdf8;--ink:#20211e;--muted:#696961;--line:#cbc5b8;--accent:#a43f24;--gold:#d8b64b;font-family:"Avenir Next","Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;line-height:1.62}header{padding:52px max(24px,calc((100vw - 1120px)/2));border-bottom:2px solid var(--ink);background:var(--surface)}header>div{display:flex;justify-content:space-between;color:var(--muted);font-size:13px}.brand{font:700 22px Georgia,serif;color:var(--ink);text-decoration:none}h1,h2{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.035em}h1{max-width:920px;margin:50px 0 18px;font-size:clamp(44px,7vw,78px);line-height:.98}header>p{max-width:720px;color:#4b4c45;font-size:19px}header nav{display:flex;align-items:center;gap:18px;margin-top:28px}header nav a{color:var(--accent);font-weight:700;text-underline-offset:4px}.target-link,.step-action-link{display:inline-flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:var(--surface);font-weight:700;text-decoration:none}.target-link:focus-visible,.step-action-link:focus-visible{outline:3px solid var(--gold);outline-offset:3px}.step-action-link:hover{background:#7f2f1b;border-color:#7f2f1b}main{display:grid;grid-template-columns:240px minmax(0,820px);gap:56px;max-width:1120px;margin:auto;padding:52px 24px 100px}.toc{position:sticky;top:24px;align-self:start;border-top:3px solid var(--ink)}.toc a{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px;text-decoration:none}.toc span{font-family:ui-monospace,monospace;color:var(--accent)}.step{padding:0 0 64px;margin:0 0 60px;border-bottom:2px solid var(--ink)}.number{display:block;color:var(--accent);font:700 13px ui-monospace,monospace}.step h2{margin:8px 0 18px;font-size:36px;line-height:1.08}.step-copy>p{max-width:720px;font-size:17px}.step dl{display:grid;grid-template-columns:90px 1fr;margin:18px 0}.step dt{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}.step dd{margin:0}.step code{padding:3px 6px;background:#e4ded1;font-family:ui-monospace,monospace}figure{margin:30px 0 0}.screenshot-link{position:relative;display:block;color:inherit;text-decoration:none}.screenshot-link>img{display:block;width:100%;height:auto;border:2px solid var(--ink);background:#ddd;box-shadow:8px 8px 0 var(--gold)}.screenshot-link:focus-visible{outline:4px solid var(--accent);outline-offset:5px}.zoom-hint{position:absolute;right:14px;bottom:14px;display:inline-flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--surface);border-radius:7px;background:var(--ink);color:var(--surface);font-size:13px;font-weight:700;box-shadow:3px 3px 0 var(--gold)}.screenshot-link:hover .zoom-hint,.screenshot-link:focus-visible .zoom-hint{background:var(--accent)}figcaption{margin-top:13px;color:var(--muted);font-size:13px}.text-step{margin-top:28px;padding:18px;border-left:4px solid var(--gold);background:var(--surface);color:var(--muted)}footer{padding:25px;border-top:2px solid var(--ink);text-align:center;color:var(--muted);font-size:13px}@media(max-width:760px){header{padding:34px 20px}header>div{align-items:center}.brand{font-size:20px}h1{margin-top:38px;font-size:46px}header nav{align-items:flex-start;flex-wrap:wrap}main{display:block;padding:34px 20px 70px}.toc{position:static;margin-bottom:50px}.step h2{font-size:31px}.step dl{grid-template-columns:1fr;gap:3px}.screenshot-link>img{box-shadow:5px 5px 0 var(--gold)}.zoom-hint{right:9px;bottom:9px}}@media print{header{padding:0 0 24px}.toc,header nav,footer,.zoom-hint{display:none}main{display:block;padding:20px 0}.step{break-inside:avoid}.screenshot-link>img{box-shadow:none}body{background:#fff;font-size:11pt}}
 `;
+
+function assertGuideBudget(guideId: string): void {
+  if (guideMetadataBytes(guideId) > config.maxGuideMetadataBytes)
+    throw new AppError("The guide metadata limit has been reached.", 422, "guide_limit");
+  assertStorageCapacity(0);
+}
