@@ -23,6 +23,14 @@ const { findBrowserExecutable, recordBrowserGuide } = (await import(
 )) as typeof import("../packages/cli/src/recorder.js");
 
 test("local presentation assets, screenshot keyboard navigation, and browser recording work in Chrome", {}, async (t) => {
+  let executablePath: string;
+  try {
+    executablePath = findBrowserExecutable(process.env.SCHAFFA_TEST_BROWSER);
+  } catch (error) {
+    if (process.env.CI || process.env.SCHAFFA_TEST_BROWSER) throw error;
+    t.skip("Install Chrome, Edge, or Chromium to run the browser integration test.");
+    return;
+  }
   const directory = await mkdtemp(path.join(os.tmpdir(), "schaffa-browser-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   config.baseHost = "127.0.0.1";
@@ -38,7 +46,6 @@ test("local presentation assets, screenshot keyboard navigation, and browser rec
   );
   const origin = await app.listen({ host: "127.0.0.1", port: 0 });
   config.baseUrl = origin;
-  const executablePath = findBrowserExecutable(process.env.SCHAFFA_TEST_BROWSER);
   const browser = await puppeteer.launch({
     executablePath,
     headless: true,
@@ -161,6 +168,10 @@ test("local presentation assets, screenshot keyboard navigation, and browser rec
     });
   }
   const imageUrl = draft.steps[0].screenshotUrl;
+  const imageResponse = await fetch(imageUrl);
+  const imageTag = imageResponse.headers.get("etag");
+  assert.ok(imageTag);
+  assert.equal((await fetch(imageUrl, { headers: { "if-none-match": imageTag } })).status, 304);
   assert.match((await fetch(imageUrl)).headers.get("cache-control") || "", /max-age=300/);
   assert.match((await fetch(result.revisionUrl)).headers.get("cache-control") || "", /max-age=300/);
   const recordingGuide = await (

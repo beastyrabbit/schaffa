@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
 
 declare global {
+  interface Navigator {
+    userAgentData?: { platform?: string };
+  }
   interface Window {
     Shoo?: {
       clearIdentity(): void;

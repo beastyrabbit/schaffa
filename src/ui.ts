@@ -244,23 +244,11 @@ export function renderAdmin(input: {
   actorId: string;
   actorName: string;
   filters: AdminFilters;
-  pagination?: ReturnType<typeof selectAdminPublications>;
+  pagination: ReturnType<typeof selectAdminPublications>;
   newToken?: string;
 }): string {
-  const uploaders =
-    input.pagination?.uploaders ?? uniqueUploaders(input.pages, input.files, input.guides);
-  const guides =
-    input.filters.kind === "all" || input.filters.kind === "guides"
-      ? input.guides.filter((guide) => guideMatches(guide, input.filters))
-      : [];
-  const pages =
-    input.filters.kind === "all" || input.filters.kind === "pages"
-      ? input.pages.filter((page) => pageMatches(page, input.filters))
-      : [];
-  const files =
-    input.filters.kind === "all" || input.filters.kind === "files"
-      ? input.files.filter((file) => fileMatches(file, input.filters))
-      : [];
+  const { uploaders } = input.pagination;
+  const { guides, pages, files } = input;
 
   const pageRows = pages
     .map(
@@ -337,8 +325,8 @@ export function renderAdmin(input: {
         <label>Lebensdauer<select name="lifetime"><option value="all"${selected(input.filters.lifetime, "all")}>Alle</option><option value="permanent"${selected(input.filters.lifetime, "permanent")}>Dauerhaft</option><option value="anonymous-active"${selected(input.filters.lifetime, "anonymous-active")}>Anonym aktiv</option></select></label>
         <button type="submit">Filtern</button><a href="/admin">Zurücksetzen</a>
       </form>
-      ${input.pagination ? `<nav class="pagination" aria-label="Publikationsseiten"><span>${input.pagination.total} Treffer · Seite ${input.pagination.page} von ${input.pagination.pageCount} · höchstens 50 Publikationen pro Seite</span> ${input.pagination.page > 1 ? `<a href="/admin?${escapeHtml(new URLSearchParams({ ...input.filters, page: String(input.pagination.page - 1) }).toString())}">Zurück</a>` : ""} ${input.pagination.page < input.pagination.pageCount ? `<a href="/admin?${escapeHtml(new URLSearchParams({ ...input.filters, page: String(input.pagination.page + 1) }).toString())}">Weiter</a>` : ""}</nav>` : ""}
-      <nav class="tabs" aria-label="Bereiche"><a href="#operations">Betrieb</a><a href="#guides">Guides <span>${input.pagination?.totals.guides ?? guides.length}</span></a><a href="#pages">Seiten <span>${input.pagination?.totals.pages ?? pages.length}</span></a><a href="#files">Dateien <span>${input.pagination?.totals.files ?? files.length}</span></a><a href="#users">Nutzer <span>${input.users.length}</span></a><a href="#tokens">Tokens <span>${input.tokens.length}</span></a></nav>
+      ${`<nav class="pagination" aria-label="Publikationsseiten"><span>${input.pagination.total} Treffer · Seite ${input.pagination.page} von ${input.pagination.pageCount} · höchstens 50 Publikationen pro Seite</span> ${input.pagination.page > 1 ? `<a href="/admin?${escapeHtml(new URLSearchParams({ ...input.filters, page: String(input.pagination.page - 1) }).toString())}">Zurück</a>` : ""} ${input.pagination.page < input.pagination.pageCount ? `<a href="/admin?${escapeHtml(new URLSearchParams({ ...input.filters, page: String(input.pagination.page + 1) }).toString())}">Weiter</a>` : ""}</nav>`}
+      <nav class="tabs" aria-label="Bereiche"><a href="#operations">Betrieb</a><a href="#guides">Guides <span>${input.pagination.totals.guides}</span></a><a href="#pages">Seiten <span>${input.pagination.totals.pages}</span></a><a href="#files">Dateien <span>${input.pagination.totals.files}</span></a><a href="#users">Nutzer <span>${input.users.length}</span></a><a href="#tokens">Tokens <span>${input.tokens.length}</span></a></nav>
       <section id="operations"><div class="section-heading"><h2>Betrieb</h2><p>Zugänge und Publishing im Notfall gezielt sperren.</p></div><div class="operation-list"><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="writesLocked" value="${input.settings.writesLocked ? "false" : "true"}"><div><strong>${input.settings.writesLocked ? "Publishing gesperrt" : "Publishing aktiv"}</strong><span class="sub">${input.settings.writesLocked ? "Nur Lesezugriffe und Admin-Wiederherstellung sind möglich." : "Uploads und Seiten-Updates werden angenommen."}</span></div><button class="${input.settings.writesLocked ? "" : "danger"}" type="submit">${input.settings.writesLocked ? "Lockdown aufheben" : "Lockdown aktivieren"}</button></form><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="interactivePublishingEnabled" value="${input.settings.interactivePublishingEnabled ? "false" : "true"}"><div><strong>Interaktives Publishing ${input.settings.interactivePublishingEnabled ? "aktiv" : "gesperrt"}</strong><span class="sub">Erfordert zusätzlich eine Freigabe pro Nutzer und einen eigenen Interactive-Token.</span></div><button class="${input.settings.interactivePublishingEnabled ? "danger" : ""}" type="submit">${input.settings.interactivePublishingEnabled ? "Instanzweit sperren" : "Instanzweit aktivieren"}</button></form><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="signupsEnabled" value="${input.settings.signupsEnabled ? "false" : "true"}"><div><strong>Registrierungen ${input.settings.signupsEnabled ? "aktiv" : "gesperrt"}</strong><span class="sub">Steuert, ob eine neue Shoo-Identität ein Konto anlegen darf.</span></div><button class="${input.settings.signupsEnabled ? "danger" : ""}" type="submit">${input.settings.signupsEnabled ? "Registrierungen sperren" : "Registrierungen erlauben"}</button></form><form class="operation-card" method="post" action="/admin/settings"><input type="hidden" name="loginsEnabled" value="${input.settings.loginsEnabled ? "false" : "true"}"><div><strong>Anmeldungen ${input.settings.loginsEnabled ? "aktiv" : "gesperrt"}</strong><span class="sub">Beim Sperren werden alle aktiven Nutzersitzungen beendet.</span></div><button class="${input.settings.loginsEnabled ? "danger" : ""}" type="submit">${input.settings.loginsEnabled ? "Anmeldungen sperren" : "Anmeldungen erlauben"}</button></form></div></section>
       <section id="guides"><div class="section-heading"><h2>Guides</h2><p>Aufnahmen, Entwürfe und unveränderliche öffentliche Revisionen.</p></div><div class="table-wrap"><table><thead><tr><th>Guide</th><th>Status</th><th>Revision</th><th>Schritte</th><th>Uploader</th><th>Geändert</th><th>Aktion</th></tr></thead><tbody>${guideRows || emptyRow(7, "Keine passenden Guides gefunden.")}</tbody></table></div></section>
       <section id="pages"><div class="section-heading"><h2>Seiten</h2><p>Anonyme Seiten verschwinden nach einer Stunde; gespeichert bleiben sie 30 Tage.</p></div><div class="table-wrap"><table><thead><tr><th>Slug</th><th>Aktuell</th><th>Versionen</th><th>Uploader</th><th>Status</th><th>Größe</th><th>Geändert</th><th>Aktion</th></tr></thead><tbody>${pageRows || emptyRow(8, "Keine passenden Seiten gefunden.")}</tbody></table></div></section>
@@ -399,50 +387,6 @@ function layout(
 
 function emptyRow(columns: number, message: string): string {
   return `<tr><td colspan="${columns}" class="empty">${escapeHtml(message)}</td></tr>`;
-}
-
-function pageMatches(page: PageSummary, filters: AdminFilters): boolean {
-  if (filters.user && page.uploader_user_id !== filters.user) return false;
-  if (filters.uploader && page.uploader_id !== filters.uploader) return false;
-  if (filters.lifetime === "permanent" && page.expires_at) return false;
-  if (filters.lifetime === "anonymous-active" && !page.expires_at) return false;
-  return matchesQuery(filters.q, [page.slug, page.title || "", page.uploader_name]);
-}
-
-function fileMatches(file: FileSummary, filters: AdminFilters): boolean {
-  if (filters.user && file.uploader_user_id !== filters.user) return false;
-  if (filters.uploader && file.uploader_id !== filters.uploader) return false;
-  if (filters.lifetime === "anonymous-active") return false;
-  return matchesQuery(filters.q, [file.filename, file.media_type, file.uploader_name]);
-}
-
-function guideMatches(guide: GuideSummary, filters: AdminFilters): boolean {
-  if (filters.user && guide.uploader_user_id !== filters.user) return false;
-  if (filters.uploader && guide.uploader_id !== filters.uploader) return false;
-  if (filters.lifetime === "anonymous-active") return false;
-  return matchesQuery(filters.q, [guide.slug, guide.title, guide.uploader_name]);
-}
-
-function matchesQuery(query: string, values: string[]): boolean {
-  const needle = query.toLocaleLowerCase("de-DE");
-  return !needle || values.some((value) => value.toLocaleLowerCase("de-DE").includes(needle));
-}
-
-function uniqueUploaders(
-  pages: PageSummary[],
-  files: FileSummary[],
-  guides: GuideSummary[],
-): Array<{ id: string; name: string; userId: string | null }> {
-  const uploaders = new Map<string, { name: string; userId: string | null }>();
-  for (const item of [...pages, ...files, ...guides]) {
-    uploaders.set(item.uploader_id, {
-      name: item.uploader_name,
-      userId: item.uploader_user_id,
-    });
-  }
-  return [...uploaders]
-    .map(([id, uploader]) => ({ id, ...uploader }))
-    .sort((a, b) => a.name.localeCompare(b.name, "de-DE"));
 }
 
 function userLabel(user: UserSummary): string {

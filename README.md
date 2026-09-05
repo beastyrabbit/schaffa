@@ -39,6 +39,11 @@ See [Deployment](docs/deployment.md) for the complete routing and runtime config
 
 ## Local test
 
+The browser integration test uses a local Chrome, Edge, or Chromium installation.
+Without one, local test runs report that case as skipped; the remaining tests still
+run. CI and an explicit `SCHAFFA_TEST_BROWSER` path require a working browser and
+fail if it is missing.
+
 Node 24+ and pnpm are required for the server and local development. The standalone CLI requires Node 22.12.0+:
 
 ```sh

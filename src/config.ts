@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { isIP } from "node:net";
 import path from "node:path";
 
 function readApplicationVersion(): string {
@@ -19,6 +20,25 @@ function positiveInteger(name: string, fallback: number): number {
     throw new Error(`${name} must be a positive integer.`);
   }
   return parsed;
+}
+
+export function parseTrustedProxies(value = ""): string[] {
+  const addresses = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  for (const address of addresses) {
+    const [ip = "", prefix, extra] = address.split("/");
+    const family = isIP(ip);
+    if (
+      !family ||
+      extra !== undefined ||
+      (prefix !== undefined &&
+        (!/^\d+$/.test(prefix) || Number(prefix) > (family === 4 ? 32 : 128)))
+    )
+      throw new Error("TRUSTED_PROXIES must contain comma-separated IP addresses or valid CIDRs.");
+  }
+  return addresses;
 }
 
 function boundedInteger(name: string, fallback: number, minimum: number, maximum: number): number {
@@ -76,10 +96,7 @@ export const config = {
   anonymousUploadsPerHour: boundedInteger("ANONYMOUS_UPLOADS_PER_HOUR", 20, 1, 1000),
   authenticatedUploadsPerHour: boundedInteger("AUTHENTICATED_UPLOADS_PER_HOUR", 120, 1, 10_000),
   userLoginsPerHour: boundedInteger("USER_LOGINS_PER_HOUR", 60, 1, 1000),
-  trustedProxies:
-    process.env.TRUSTED_PROXIES?.split(",")
-      .map((value) => value.trim())
-      .filter(Boolean) || [],
+  trustedProxies: parseTrustedProxies(process.env.TRUSTED_PROXIES),
   clamavHost: process.env.CLAMAV_HOST || "",
   clamavPort: boundedInteger("CLAMAV_PORT", 3310, 1, 65535),
   clamavTimeoutMs: boundedInteger("CLAMAV_TIMEOUT_MS", 15_000, 1000, 120_000),

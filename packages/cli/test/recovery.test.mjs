@@ -97,7 +97,9 @@ test("explicit manifest sync runs through the CLI without an active session", {}
   const directory = await mkdtemp(path.join(os.tmpdir(), "schaffa-recover-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   let guide = { ...initial, status: "published" };
+  const requests = [];
   const server = createServer(async (request, reply) => {
+    requests.push({ method: request.method, revision: request.headers["if-match"] });
     for await (const _chunk of request) {
       /* Drain the local fixture request. */
     }
@@ -150,7 +152,25 @@ test("explicit manifest sync runs through the CLI without an active session", {}
     },
   );
   assert.equal(JSON.parse(result.stdout).failedUploads, 0);
+  assert.equal(requests[0].method, "GET");
+  assert.equal(
+    requests.find((request) => request.method === "POST").revision,
+    String(initial.editRevision),
+  );
   assert.equal(JSON.parse(await readFile(manifest, "utf8")).steps[0].status, "uploaded");
+});
+
+test("presentation asset errors explain empty and malformed local references", {}, async (t) => {
+  const { inlinePresentationAssets } = await import("../dist/presentation-assets.js");
+  const directory = await mkdtemp(path.join(os.tmpdir(), "schaffa-assets-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  for (const [html, message] of [
+    ['<img src="">', /must not be empty/],
+    ['<div style="background:url()"></div>', /must not be empty/],
+    ['<img src="img%zz.png">', /invalid percent encoding/],
+    ['<img src=".">', /must refer to image files/],
+  ])
+    await assert.rejects(inlinePresentationAssets(html, path.join(directory, "deck.md")), message);
 });
 
 test("browser closure during initialization cannot miss completion", {

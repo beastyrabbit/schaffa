@@ -156,6 +156,7 @@ async function processPage(page: PendingPage): Promise<ScanRunResult> {
 
 async function processFile(file: FileRow): Promise<ScanRunResult> {
   let publicPath: string | undefined;
+  let committed = false;
   try {
     await scanStoredUpload(file.storage_path);
     let bytes = file.bytes;
@@ -183,10 +184,12 @@ async function processFile(file: FileRow): Promise<ScanRunResult> {
         )
         .run(destination, bytes, digest, file.id);
     });
+    committed = updated.changes > 0;
     await removeStoredFile(file.storage_path);
     if (updated.changes === 0) await removeStoredFile(publicPath);
     return { processed: true, status: "clean", type: "file" };
   } catch (error) {
+    if (committed) throw error;
     if (publicPath) await removeStoredFile(publicPath);
     return handleFailure("files", file.id, file.storage_path, error, "file");
   }

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { config } from "./config.js";
+import { initializeGuideMetadata } from "./guide-metadata.js";
 
 export type TokenScope = "upload" | "interactive" | "admin";
 export type PageKind = "static" | "interactive";
@@ -433,6 +434,7 @@ export function db(): DatabaseSync {
     UPDATE guides SET status = 'recording' WHERE status = 'draft';
   `);
 
+  initializeGuideMetadata(database);
   return database;
 }
 

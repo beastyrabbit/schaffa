@@ -68,7 +68,7 @@ import {
 } from "./service.js";
 import { getInstanceSettings, updateInstanceSettings } from "./settings.js";
 import { type ShooTokenVerifier, verifyShooToken } from "./shoo-auth.js";
-import { openStoredFile } from "./storage.js";
+import { openStoredFile, sha256 } from "./storage.js";
 import {
   type AdminFilters,
   accountClientScript,
@@ -663,17 +663,19 @@ export function buildServer(
   });
 
   app.get<{ Params: { slug: string } }>("/g/:slug", async (request, reply) =>
-    sendGuide(reply, request.params.slug),
+    sendGuide(request, reply, request.params.slug),
   );
   app.get<{ Params: { slug: string; revision: string } }>(
     "/g/:slug/:revision",
     async (request, reply) =>
-      sendGuide(reply, request.params.slug, Number(request.params.revision)),
+      sendGuide(request, reply, request.params.slug, Number(request.params.revision)),
   );
   app.get<{ Params: { slug: string } }>("/g/:slug.json", async (request, reply) => {
     const result = getPublishedGuide(request.params.slug);
     if (!result) throw new AppError("Guide not found.", 404, "not_found");
     publicGuideHeaders(reply, result.revision);
+    if (notModified(request, reply, sha256(Buffer.from(JSON.stringify(result.guide)))))
+      return reply.code(304).send();
     return reply.type("application/json; charset=utf-8").send(result.guide);
   });
   app.get<{ Params: { slug: string } }>("/g/:slug.md", async (request, reply) => {
@@ -681,6 +683,8 @@ export function buildServer(
     if (!result) throw new AppError("Guide not found.", 404, "not_found");
     publicGuideHeaders(reply, result.revision);
     reply.header("Content-Disposition", `attachment; filename="${request.params.slug}.md"`);
+    if (notModified(request, reply, sha256(Buffer.from(result.markdown))))
+      return reply.code(304).send();
     return reply.type("text/markdown; charset=utf-8").send(result.markdown);
   });
   app.get<{ Params: { slug: string; imageId: string } }>(
@@ -701,6 +705,7 @@ export function buildServer(
         "Content-Security-Policy": "default-src 'none'; sandbox",
         "Cross-Origin-Resource-Policy": "same-origin",
       });
+      if (notModified(request, reply, guideImage.sha256)) return reply.code(304).send();
       return reply.type("image/webp").send(openStoredFile(guideImage.storage_path));
     },
   );
@@ -1159,11 +1164,30 @@ function safeInlineType(mediaType: string): boolean {
   return /^(image\/(?!svg\+xml)|audio\/|video\/|text\/plain$)/i.test(mediaType);
 }
 
-async function sendGuide(reply: FastifyReply, slug: string, revision?: number) {
+async function sendGuide(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  slug: string,
+  revision?: number,
+) {
   const result = getPublishedGuide(slug, revision);
   if (!result) throw new AppError("Guide not found.", 404, "not_found");
   publicGuideHeaders(reply, result.revision, Boolean(revision));
+  if (notModified(request, reply, sha256(Buffer.from(result.html)))) return reply.code(304).send();
   return reply.type("text/html; charset=utf-8").send(result.html);
+}
+
+function notModified(request: FastifyRequest, reply: FastifyReply, digest: string): boolean {
+  const tag = `"${digest}"`;
+  reply.header("ETag", tag);
+  return (
+    headerValue(request.headers["if-none-match"])
+      ?.split(",")
+      .some((candidate) => {
+        const value = candidate.trim();
+        return value === "*" || value.replace(/^W\//, "") === tag;
+      }) ?? false
+  );
 }
 
 function publicGuideHeaders(reply: FastifyReply, revision: number, immutable = false): void {

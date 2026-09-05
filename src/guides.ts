@@ -352,6 +352,7 @@ export function reorderGuideSteps(
   }
   db().exec("BEGIN IMMEDIATE");
   try {
+    const previousBytes = guideMetadataBytes(guide.id);
     const update = db().prepare(
       "UPDATE guide_steps SET position = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND guide_id = ?",
     );
@@ -359,7 +360,7 @@ export function reorderGuideSteps(
     for (const id of order) update.run(order.indexOf(id) + 1, id, guide.id);
     advanceGuideRevision(guide.id, expectedRevision, guide.status);
     if (guide.current_revision > 0) publishEditedGuide(guide.id, expectedRevision + 1);
-    assertGuideBudget(guide.id);
+    assertGuideBudget(guide.id, previousBytes);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -380,6 +381,7 @@ export async function deleteGuideStep(
   const step = requireStep(guide.id, stepId);
   db().exec("BEGIN IMMEDIATE");
   try {
+    const previousBytes = guideMetadataBytes(guide.id);
     db().prepare("DELETE FROM guide_steps WHERE id = ? AND guide_id = ?").run(stepId, guide.id);
     const remaining = currentSteps(guide.id);
     const update = db().prepare("UPDATE guide_steps SET position = ? WHERE id = ?");
@@ -388,7 +390,7 @@ export async function deleteGuideStep(
     });
     advanceGuideRevision(guide.id, expectedRevision, guide.status);
     if (guide.current_revision > 0) publishEditedGuide(guide.id, expectedRevision + 1);
-    assertGuideBudget(guide.id);
+    assertGuideBudget(guide.id, previousBytes);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -477,7 +479,11 @@ function insertPublishedRevision(
   snapshot: GuideView,
 ): void {
   if (snapshot.revision > config.maxGuideRevisions)
-    throw new AppError("The guide revision limit has been reached.", 422, "guide_limit");
+    throw new AppError(
+      "The guide revision limit has been reached. Ask the administrator to raise MAX_GUIDE_REVISIONS or take down the guide; existing revisions remain public.",
+      422,
+      "guide_limit",
+    );
   const revisionId = randomUUID();
   db()
     .prepare(
@@ -950,6 +956,7 @@ function mutateGuide(
   db().exec("BEGIN IMMEDIATE");
   try {
     const guide = loadGuide(guideId);
+    const previousBytes = guideMetadataBytes(guideId);
     const stepMutation = !sql.trimStart().startsWith("UPDATE guides");
     if (stepMutation) {
       const stepResult = db()
@@ -970,7 +977,7 @@ function mutateGuide(
           .run(...(params as never[]));
     if (result.changes !== 1) throw conflict();
     if (guide.current_revision > 0) publishEditedGuide(guideId, expectedRevision + 1);
-    assertGuideBudget(guide.id);
+    assertGuideBudget(guide.id, previousBytes);
     db().exec("COMMIT");
   } catch (error) {
     if (db().isTransaction) db().exec("ROLLBACK");
@@ -1126,8 +1133,15 @@ const guideCss = `
 :root{--paper:#f3f0e8;--surface:#fffdf8;--ink:#20211e;--muted:#696961;--line:#cbc5b8;--accent:#a43f24;--gold:#d8b64b;font-family:"Avenir Next","Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;line-height:1.62}header{padding:52px max(24px,calc((100vw - 1120px)/2));border-bottom:2px solid var(--ink);background:var(--surface)}header>div{display:flex;justify-content:space-between;color:var(--muted);font-size:13px}.brand{font:700 22px Georgia,serif;color:var(--ink);text-decoration:none}h1,h2{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.035em}h1{max-width:920px;margin:50px 0 18px;font-size:clamp(44px,7vw,78px);line-height:.98}header>p{max-width:720px;color:#4b4c45;font-size:19px}header nav{display:flex;align-items:center;gap:18px;margin-top:28px}header nav a{color:var(--accent);font-weight:700;text-underline-offset:4px}.target-link,.step-action-link{display:inline-flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid var(--accent);border-radius:8px;background:var(--accent);color:var(--surface);font-weight:700;text-decoration:none}.target-link:focus-visible,.step-action-link:focus-visible{outline:3px solid var(--gold);outline-offset:3px}.step-action-link:hover{background:#7f2f1b;border-color:#7f2f1b}main{display:grid;grid-template-columns:240px minmax(0,820px);gap:56px;max-width:1120px;margin:auto;padding:52px 24px 100px}.toc{position:sticky;top:24px;align-self:start;border-top:3px solid var(--ink)}.toc a{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px;text-decoration:none}.toc span{font-family:ui-monospace,monospace;color:var(--accent)}.step{padding:0 0 64px;margin:0 0 60px;border-bottom:2px solid var(--ink)}.number{display:block;color:var(--accent);font:700 13px ui-monospace,monospace}.step h2{margin:8px 0 18px;font-size:36px;line-height:1.08}.step-copy>p{max-width:720px;font-size:17px}.step dl{display:grid;grid-template-columns:90px 1fr;margin:18px 0}.step dt{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}.step dd{margin:0}.step code{padding:3px 6px;background:#e4ded1;font-family:ui-monospace,monospace}figure{margin:30px 0 0}.screenshot-link{position:relative;display:block;color:inherit;text-decoration:none}.screenshot-link>img{display:block;width:100%;height:auto;border:2px solid var(--ink);background:#ddd;box-shadow:8px 8px 0 var(--gold)}.screenshot-link:focus-visible{outline:4px solid var(--accent);outline-offset:5px}.zoom-hint{position:absolute;right:14px;bottom:14px;display:inline-flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--surface);border-radius:7px;background:var(--ink);color:var(--surface);font-size:13px;font-weight:700;box-shadow:3px 3px 0 var(--gold)}.screenshot-link:hover .zoom-hint,.screenshot-link:focus-visible .zoom-hint{background:var(--accent)}figcaption{margin-top:13px;color:var(--muted);font-size:13px}.text-step{margin-top:28px;padding:18px;border-left:4px solid var(--gold);background:var(--surface);color:var(--muted)}footer{padding:25px;border-top:2px solid var(--ink);text-align:center;color:var(--muted);font-size:13px}@media(max-width:760px){header{padding:34px 20px}header>div{align-items:center}.brand{font-size:20px}h1{margin-top:38px;font-size:46px}header nav{align-items:flex-start;flex-wrap:wrap}main{display:block;padding:34px 20px 70px}.toc{position:static;margin-bottom:50px}.step h2{font-size:31px}.step dl{grid-template-columns:1fr;gap:3px}.screenshot-link>img{box-shadow:5px 5px 0 var(--gold)}.zoom-hint{right:9px;bottom:9px}}@media print{header{padding:0 0 24px}.toc,header nav,footer,.zoom-hint{display:none}main{display:block;padding:20px 0}.step{break-inside:avoid}.screenshot-link>img{box-shadow:none}body{background:#fff;font-size:11pt}}
 `;
 
-function assertGuideBudget(guideId: string): void {
-  if (guideMetadataBytes(guideId) > config.maxGuideMetadataBytes)
-    throw new AppError("The guide metadata limit has been reached.", 422, "guide_limit");
+function assertGuideBudget(guideId: string, previousBytes?: number): void {
+  const bytes = guideMetadataBytes(guideId);
+  // Non-growing edits cannot worsen an excess after an operator lowers limits.
+  if (previousBytes !== undefined && bytes <= previousBytes) return;
+  if (bytes > config.maxGuideMetadataBytes)
+    throw new AppError(
+      "The guide metadata limit has been reached. Reduce draft text or ask the administrator to raise MAX_GUIDE_METADATA_BYTES or take down the guide; published history is retained.",
+      422,
+      "guide_limit",
+    );
   assertStorageCapacity(0);
 }

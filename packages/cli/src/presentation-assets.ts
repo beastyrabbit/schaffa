@@ -8,21 +8,28 @@ export async function inlinePresentationAssets(html: string, source: string): Pr
   const directory = await realpath(path.dirname(source));
   const cache = new Map<string, string>();
   const inline = async (reference: string): Promise<string> => {
+    if (!reference.trim()) throw new Error("Presentation asset URLs must not be empty.");
     if (reference.startsWith("data:") || reference.startsWith("#")) return reference;
     if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(reference) && !reference.startsWith("file:")) {
       throw new Error("Presentation images must be local raster files or embedded data.");
     }
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(reference);
+    } catch {
+      throw new Error("Presentation asset URLs contain invalid percent encoding.");
+    }
     const filename = await realpath(
-      reference.startsWith("file:")
-        ? fileURLToPath(reference)
-        : path.resolve(directory, decodeURIComponent(reference)),
+      reference.startsWith("file:") ? fileURLToPath(reference) : path.resolve(directory, decoded),
     );
     const relative = path.relative(directory, filename);
     if (relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative))
       throw new Error("Presentation images must be inside the source directory.");
     const existing = cache.get(filename);
     if (existing) return existing;
-    if ((await stat(filename)).size > 2 * 1024 * 1024)
+    const info = await stat(filename);
+    if (!info.isFile()) throw new Error("Presentation assets must refer to image files.");
+    if (info.size > 2 * 1024 * 1024)
       throw new Error("A presentation image exceeds 2 MiB. Resize it before publishing.");
     const data = await readFile(filename);
     const type = data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))

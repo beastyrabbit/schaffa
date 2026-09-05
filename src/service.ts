@@ -725,18 +725,9 @@ export function assertStorageCapacity(additionalBytes: number): void {
 
 export function guideMetadataBytes(guideId: string | null = null): number {
   const row = db()
-    .prepare(`SELECT COALESCE(SUM(bytes), 0) AS bytes FROM (
-    SELECT length(CAST(title || COALESCE(description, '') || COALESCE(target_url, '') || language AS BLOB)) AS bytes
-      FROM guides WHERE $guideId IS NULL OR id = $guideId
-    UNION ALL SELECT length(CAST(title || description || COALESCE(action_type, '') || COALESCE(action_target, '') || COALESCE(verification, '') || COALESCE(screenshot_caption, '') AS BLOB))
-      FROM guide_steps WHERE $guideId IS NULL OR guide_id = $guideId
-    UNION ALL SELECT length(CAST(json_snapshot || markdown_snapshot || html_snapshot AS BLOB))
-      FROM guide_revisions WHERE $guideId IS NULL OR guide_id = $guideId
-    UNION ALL SELECT length(CAST(key || operation || response_json AS BLOB))
-      FROM guide_idempotency WHERE $guideId IS NULL OR guide_id = $guideId
-  )`)
-    .get({ $guideId: guideId }) as { bytes: number };
-  return row.bytes;
+    .prepare("SELECT bytes FROM guide_metadata_usage WHERE guide_id = ?")
+    .get(guideId ?? "*") as { bytes: number } | undefined;
+  return row?.bytes ?? 0;
 }
 
 async function makeAnonymousCapacity(additionalBytes: number): Promise<void> {

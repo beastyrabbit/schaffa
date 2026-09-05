@@ -96,7 +96,7 @@
       hint.textContent =
         availableTargets.find(([value]) => value === targetSelect.value)?.[2] || "";
   };
-  const platform = navigator.platform || navigator.platform || "";
+  const platform = navigator.userAgentData?.platform || navigator.platform || "";
   if (/win/i.test(platform)) osSelect.value = "windows";
   else if (/linux/i.test(platform)) osSelect.value = "linux";
   else osSelect.value = "macos";
