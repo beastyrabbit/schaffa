@@ -190,6 +190,20 @@ test("image conversion rejects positive quota growth and keeps converted bytes p
 test("guide metadata and step budgets roll back failed edits", async () => {
   const owner = createToken("guide budget fixture", ["upload"]);
   const headers = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const metadataBudget = config.maxGuideMetadataBytes;
+  config.maxGuideMetadataBytes = 1;
+  const rejected = await app.inject({
+    method: "POST",
+    url: "/api/guides",
+    headers,
+    payload: { title: "Over the configured creation budget" },
+  });
+  assert.equal(rejected.json().error, "guide_limit");
+  assert.equal(
+    db().prepare("SELECT id FROM guides WHERE owner_token_id = ?").get(owner.id),
+    undefined,
+  );
+  config.maxGuideMetadataBytes = metadataBudget;
   const created = await app.inject({
     method: "POST",
     url: "/api/guides",

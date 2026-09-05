@@ -119,6 +119,7 @@ export function createGuide(
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const slug = randomGuideSlug();
     if (db().prepare("SELECT 1 FROM guides WHERE slug = ?").get(slug)) continue;
+    const guideId = randomUUID();
     db().exec("BEGIN IMMEDIATE");
     try {
       db()
@@ -126,8 +127,8 @@ export function createGuide(
           `INSERT INTO guides (id, slug, title, description, target_url, language, owner_token_id)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(randomUUID(), slug, title, description, targetUrl, language, tokenId);
-      assertStorageCapacity(0);
+        .run(guideId, slug, title, description, targetUrl, language, tokenId);
+      assertGuideBudget(guideId);
       db().exec("COMMIT");
     } catch (error) {
       db().exec("ROLLBACK");
