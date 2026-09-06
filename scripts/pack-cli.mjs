@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,13 @@ try {
     ],
     workspace,
   );
+  // The deployment has no workspace parent for Corepack to find the pinned pnpm.
+  const manifestPath = path.join(stage, "package.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.packageManager = JSON.parse(
+    readFileSync(path.join(root, "package.json"), "utf8"),
+  ).packageManager;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   pnpm(
     [
       "--config.node-linker=hoisted",
