@@ -86,16 +86,16 @@ and rotate only as a planned migration.
 sudo install -d -m 0750 -o "$USER" -g docker /opt/schaffa
 cd /opt/schaffa
 curl --fail --location --output compose.yaml \
-  https://git.heerlab.com/beasty/schaffa/raw/tag/v0.2.1/compose.yaml
+  https://raw.githubusercontent.com/beastyrabbit/schaffa/v0.10.0/compose.yaml
 ```
 
-Read the selected release in Forgejo and copy its immutable container digest.
+Read the selected release in GitHub and copy its immutable container digest.
 Do not deploy `main`, an unpinned mutable tag, or the example digest below.
 
 Create `/opt/schaffa/deployment.env` containing non-secret settings only:
 
 ```dotenv
-SCHAFFA_IMAGE=git.heerlab.com/beasty/schaffa@sha256:REPLACE_WITH_RELEASE_DIGEST
+SCHAFFA_IMAGE=ghcr.io/beastyrabbit/schaffa@sha256:REPLACE_WITH_RELEASE_DIGEST
 SCHAFFA_BASE_URL=https://publish.example.com
 
 MAX_STORAGE_BYTES=21474836480

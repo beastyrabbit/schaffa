@@ -58,6 +58,14 @@ test("container tags are promoted only after the exact candidate passes its scan
     assert.ok(source.indexOf("pnpm audit --prod --audit-level high") < publish);
     assert.ok(source.indexOf("bash scripts/ci-gitleaks.sh") < publish);
   }
+  const githubRelease = await readFile(new URL(".github/workflows/publish.yml", root), "utf8");
+  assert.ok(
+    githubRelease.indexOf("bash scripts/ci-promote-image.sh") <
+      githubRelease.indexOf("pnpm publish"),
+  );
+  assert.match(githubRelease, /push-by-digest=true/);
+  assert.match(githubRelease, /gh release upload/);
+  assert.match(githubRelease, /org.opencontainers.image.revision/);
 });
 
 test("development worktrees start and stop separate scanner projects", {}, async (t) => {

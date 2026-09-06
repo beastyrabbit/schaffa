@@ -1,6 +1,6 @@
 services:
   schaffa:
-    image: ${SCHAFFA_IMAGE:?set an immutable git.heerlab.com/beasty/schaffa@sha256 reference}
+    image: ${SCHAFFA_IMAGE:?set an immutable ghcr.io/beastyrabbit/schaffa@sha256 reference}
     build: .
     restart: unless-stopped
     ports:

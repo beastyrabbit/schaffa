@@ -8,15 +8,15 @@ Release jobs run dependency and secret checks before publishing. Container build
 push a candidate digest, scan it, then promote that exact digest to release tags.
 The CLI is packed with `pnpm pack:cli <output-directory>`. This bundles the runtime
 dependencies from the workspace lockfile so npm consumers receive the patched
-versions, including overrides. Both registries publish the resulting tarball after
+versions, including overrides. npm publishes the resulting tarball after
 a clean install, dependency audit, and entry-point/import smoke test. Plain
 `pnpm --filter schaffa pack` does not produce the supported release artifact.
 
 Version tags publish a Linux AMD64 image and record its immutable digest in the
-matching Forgejo release:
+matching GitHub release:
 
 ```sh
-docker pull git.heerlab.com/beasty/schaffa:0.2.1
+docker pull ghcr.io/beastyrabbit/schaffa:0.10.0
 ```
 
 Production deployments should use the release's manifest digest. Release tags
@@ -94,7 +94,7 @@ The user dashboard uses Shoo for Google OAuth/PKCE and stores its own HMAC-hashe
 The included [compose.yaml](../compose.yaml) binds the app and ClamAV TCP port to loopback. ClamAV has no transport authentication, so port `3310` must never be exposed publicly:
 
 ```sh
-export SCHAFFA_IMAGE="git.heerlab.com/beasty/schaffa@sha256:<published-manifest-digest>"
+export SCHAFFA_IMAGE="ghcr.io/beastyrabbit/schaffa@sha256:<published-manifest-digest>"
 docker compose up -d --pull always --no-build
 docker compose ps
 curl --fail http://127.0.0.1:3000/healthz
@@ -113,6 +113,6 @@ SQLite metadata and stored files must be backed up together. Back up the complet
 For an update:
 
 1. Back up `/data`.
-2. Pull a pinned SHA tag or the desired `latest` image.
+2. Pull the new release image by its immutable digest.
 3. Recreate the container without deleting its volume.
 4. Verify `/healthz`, the admin login, one public page, and one public file.
