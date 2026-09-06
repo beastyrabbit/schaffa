@@ -4,11 +4,19 @@ Schaffa runs as an application container plus an isolated ClamAV container. The 
 
 ## Container image
 
+Release jobs run dependency and secret checks before publishing. Container builds
+push a candidate digest, scan it, then promote that exact digest to release tags.
+The CLI is packed with `pnpm pack:cli <output-directory>`. This bundles the runtime
+dependencies from the workspace lockfile so npm consumers receive the patched
+versions, including overrides. npm publishes the resulting tarball after
+a clean install, dependency audit, and entry-point/import smoke test. Plain
+`pnpm --filter schaffa pack` does not produce the supported release artifact.
+
 Version tags publish a Linux AMD64 image and record its immutable digest in the
-matching Forgejo release:
+matching GitHub release:
 
 ```sh
-docker pull git.heerlab.com/beasty/schaffa:0.2.1
+docker pull ghcr.io/beastyrabbit/schaffa:0.10.0
 ```
 
 Production deployments should use the release's manifest digest. Release tags
@@ -56,11 +64,11 @@ The `/admin` path has two deliberate gates:
 1. Pangolin authenticates the user before the admin page is reachable.
 2. Schaffa requires an admin token before it displays data or permits token management.
 
-Schaffa bearer tokens protect permanent pages, updates, files, and management operations even on bypassed API paths. A new static HTML page may be uploaded without a token; it is virus-scanned, visible for one hour, hidden afterward, and physically removed after 30 days. Interactive HTML requires the instance switch, a per-user admin grant, and a separate interactive-only token. Its run response uses an opaque CSP sandbox with scripts but without network, storage, forms, pop-ups, or navigation. Public page and file URLs are readable by anyone who has the URL. Schaffa also rejects application requests arriving on a hostname other than `SCHAFFA_BASE_URL`.
+Schaffa bearer tokens protect permanent pages, updates, files, and management operations even on bypassed API paths. A new static HTML page may be uploaded without a token; it is virus-scanned, visible for one hour, hidden afterward, and physically removed after 30 days. Interactive HTML requires the instance switch, a per-user admin grant, and a separate interactive-only token. Its run response uses an opaque CSP sandbox. CSP blocks fetch requests and external resources; the sandbox restricts storage, forms, and pop-ups. Navigation and WebRTC behavior varies by browser, so this is not complete network isolation. Public page and file URLs are readable by anyone who has the URL. Schaffa also rejects application requests arriving on a hostname other than `SCHAFFA_BASE_URL`.
 
 When `SCHAFFA_BASE_URL` uses HTTPS, Schaffa sends HSTS with a one-year lifetime and `includeSubDomains`. Confirm that every subdomain is HTTPS-capable before deploying that policy; TLS termination remains the reverse proxy's responsibility.
 
-Anonymous rate limiting uses the client address reported by the trusted reverse proxy. Schaffa trusts one proxy hop by default; set `TRUST_PROXY_HOPS` only when the deployment has a known additional proxy layer. Configure Pangolin to overwrite incoming forwarding headers rather than accepting a client-supplied `X-Forwarded-For` chain.
+Anonymous rate limiting uses the client address reported by the trusted reverse proxy. Schaffa trusts no forwarding headers by default. Set `TRUSTED_PROXIES` to the exact proxy IP addresses or narrow CIDRs seen by the server, separated by commas. Numeric `TRUST_PROXY_HOPS` is no longer supported. Keep direct origin access private. Configure Pangolin to overwrite incoming forwarding headers rather than accepting a client-supplied `X-Forwarded-For` chain.
 
 ## Required configuration
 
@@ -86,7 +94,7 @@ The user dashboard uses Shoo for Google OAuth/PKCE and stores its own HMAC-hashe
 The included [compose.yaml](../compose.yaml) binds the app and ClamAV TCP port to loopback. ClamAV has no transport authentication, so port `3310` must never be exposed publicly:
 
 ```sh
-export SCHAFFA_IMAGE="git.heerlab.com/beasty/schaffa@sha256:<published-manifest-digest>"
+export SCHAFFA_IMAGE="ghcr.io/beastyrabbit/schaffa@sha256:<published-manifest-digest>"
 docker compose up -d --pull always --no-build
 docker compose ps
 curl --fail http://127.0.0.1:3000/healthz
@@ -105,6 +113,6 @@ SQLite metadata and stored files must be backed up together. Back up the complet
 For an update:
 
 1. Back up `/data`.
-2. Pull a pinned SHA tag or the desired `latest` image.
+2. Pull the new release image by its immutable digest.
 3. Recreate the container without deleting its volume.
 4. Verify `/healthz`, the admin login, one public page, and one public file.

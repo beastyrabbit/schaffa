@@ -1,4 +1,4 @@
-name: Publish npm package
+name: Publish release
 
 on:
   workflow_dispatch:
@@ -39,7 +39,8 @@ jobs:
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
-      contents: read
+      contents: write
+      packages: write
       id-token: write
     runs-on: ubuntu-latest
     steps:
@@ -93,6 +94,60 @@ jobs:
       - name: Run type, lint, and test checks
         run: pnpm typecheck && pnpm lint && pnpm test
 
+      - name: Scan committed content for secrets
+        run: bash scripts/ci-gitleaks.sh
+
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
+
+      - name: Build and verify CLI artifact
+        run: |
+          pnpm pack:cli "$RUNNER_TEMP/package"
+          bash scripts/ci-check-cli.sh "$RUNNER_TEMP"/package/*.tgz
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Build candidate image by digest
+        id: image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          platforms: linux/amd64
+          outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.RELEASE_VERSION }}
+
+      - name: Scan candidate and promote its digest
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          export IMAGE_TAGS="ghcr.io/$GITHUB_REPOSITORY:$RELEASE_VERSION
+          ghcr.io/$GITHUB_REPOSITORY:sha-$GITHUB_SHA"
+          if [ "$RELEASE_PRERELEASE" = false ]; then
+            IMAGE_TAGS="$IMAGE_TAGS
+          ghcr.io/$GITHUB_REPOSITORY:latest"
+          fi
+          bash scripts/ci-promote-image.sh "ghcr.io/$GITHUB_REPOSITORY@$IMAGE_DIGEST"
+          printf 'ghcr.io/%s@%s\n' "$GITHUB_REPOSITORY" "$IMAGE_DIGEST" > "$RUNNER_TEMP/package/container-digest.txt"
+
       - name: Publish CLI with npm Trusted Publishing
         if: env.PUBLISH_NPM != 'false'
-        run: pnpm --filter schaffa publish --no-git-checks --access public --tag "$RELEASE_DIST_TAG"
+        run: |
+          pnpm publish "$RUNNER_TEMP"/package/*.tgz --no-git-checks --access public --tag "$RELEASE_DIST_TAG"
+
+      - name: Attach verified release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/package"
+          sha256sum "schaffa-$RELEASE_VERSION.tgz" > "schaffa-$RELEASE_VERSION.tgz.sha256"
+          gh release upload "$RELEASE_TAG" "schaffa-$RELEASE_VERSION.tgz" \
+            "schaffa-$RELEASE_VERSION.tgz.sha256" container-digest.txt --repo "$GITHUB_REPOSITORY"

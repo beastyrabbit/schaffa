@@ -19,7 +19,11 @@ export interface UploadResult {
 export class SchaffaRequestError extends Error {
   readonly status: number;
 
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    readonly code?: string,
+  ) {
     super(message);
     this.name = "SchaffaRequestError";
     this.status = status;
@@ -50,7 +54,7 @@ export interface GuidePreflightResult {
   errors: string[];
   warnings: string[];
   missingScreenshots: string[];
-  sensitiveFindings: Array<{ stepId: string; kind: string }>;
+  sensitiveFindings: Array<{ stepId?: string; field: string; kind: string }>;
 }
 
 export interface GuideOperationResult {
@@ -133,6 +137,7 @@ export async function upload(options: UploadOptions): Promise<UploadResult> {
     throw new SchaffaRequestError(
       response.status,
       `Schaffa request failed with HTTP ${response.status}.${detail}`,
+      typeof result.error === "string" ? result.error : undefined,
     );
   }
   if (typeof result.publicUrl !== "string") {
@@ -342,6 +347,7 @@ async function guideRequest<T = GuideResult>(
     throw new SchaffaRequestError(
       response.status,
       `Schaffa request failed with HTTP ${response.status}.${detail}`,
+      typeof result.error === "string" ? result.error : undefined,
     );
   }
   return result as T;

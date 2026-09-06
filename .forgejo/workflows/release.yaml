@@ -51,9 +51,10 @@ jobs:
           set -euo pipefail
           release_dir="$RUNNER_TEMP/release"
           mkdir -p "$release_dir"
-          pnpm --filter schaffa pack --pack-destination "$release_dir"
+          pnpm pack:cli "$release_dir"
           package_file="$(find "$release_dir" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
           : "${package_file:?pnpm pack did not create a tarball}"
+          bash scripts/ci-check-cli.sh "$package_file"
           package_name="$(basename "$package_file")"
           (
             cd "$release_dir"
@@ -93,19 +94,20 @@ jobs:
             type=semver,pattern={{major}}
             type=sha
 
-      - name: Build and publish image
+      - name: Build candidate image by digest
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          outputs: type=image,name=git.heerlab.com/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Scan published image
+      - name: Scan candidate and promote its digest
         env:
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
-        run: bash scripts/ci-trivy.sh "git.heerlab.com/$FORGEJO_REPOSITORY@$IMAGE_DIGEST"
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: bash scripts/ci-promote-image.sh "git.heerlab.com/$FORGEJO_REPOSITORY@$IMAGE_DIGEST"
 
       - name: Publish CLI package
         run: |
@@ -124,7 +126,7 @@ jobs:
             fi
             echo "schaffa@$RELEASE_VERSION is already published; keeping the immutable package."
           elif grep -Eq '(^|[[:space:]])E404([[:space:]]|$)' "$error_file"; then
-            pnpm --filter schaffa publish --no-git-checks \
+            pnpm publish "$PACKAGE_FILE" --no-git-checks \
               --registry "$FORGEJO_NPM_REGISTRY" --tag "$RELEASE_DIST_TAG"
           else
             cat "$error_file" >&2

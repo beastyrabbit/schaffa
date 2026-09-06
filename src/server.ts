@@ -6,6 +6,7 @@ import type { MultipartFile } from "@fastify/multipart";
 import multipart from "@fastify/multipart";
 import scalarApiReference from "@scalar/fastify-api-reference";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import { selectAdminPublications } from "./admin-publications.js";
 import {
   anonymousActorId,
   authenticateToken,
@@ -67,7 +68,7 @@ import {
 } from "./service.js";
 import { getInstanceSettings, updateInstanceSettings } from "./settings.js";
 import { type ShooTokenVerifier, verifyShooToken } from "./shoo-auth.js";
-import { openStoredFile } from "./storage.js";
+import { openStoredFile, sha256 } from "./storage.js";
 import {
   type AdminFilters,
   accountClientScript,
@@ -78,6 +79,7 @@ import {
   renderAdminLogin,
   renderInteractiveWarning,
   renderLanding,
+  renderManagementError,
   renderPublicNotFound,
   renderScanStatusPage,
   renderSkills,
@@ -147,7 +149,7 @@ export function buildServer(
   resetInterruptedScans();
 
   const app = Fastify({
-    trustProxy: config.trustedProxyHops,
+    trustProxy: config.trustedProxies,
     bodyLimit: Math.max(config.maxPageBytes, 1024 * 1024),
     logger: {
       level: config.logLevel,
@@ -190,11 +192,16 @@ export function buildServer(
   });
 
   let activeScan: Promise<void> | null = null;
+  let closing = false;
   const scanIntervalMs = options.scanIntervalMs ?? 2_000;
   const runScan = () => {
-    if (activeScan) return activeScan;
-    activeScan = processNextPendingScan()
-      .then(() => undefined)
+    if (activeScan || closing) return activeScan;
+    activeScan = (async () => {
+      while (!closing) {
+        const result = await processNextPendingScan();
+        if (!result.processed) break;
+      }
+    })()
       .catch((error: unknown) => {
         app.log.error({ err: error }, "pending virus scan failed");
       })
@@ -656,17 +663,19 @@ export function buildServer(
   });
 
   app.get<{ Params: { slug: string } }>("/g/:slug", async (request, reply) =>
-    sendGuide(reply, request.params.slug),
+    sendGuide(request, reply, request.params.slug),
   );
   app.get<{ Params: { slug: string; revision: string } }>(
     "/g/:slug/:revision",
     async (request, reply) =>
-      sendGuide(reply, request.params.slug, Number(request.params.revision)),
+      sendGuide(request, reply, request.params.slug, Number(request.params.revision)),
   );
   app.get<{ Params: { slug: string } }>("/g/:slug.json", async (request, reply) => {
     const result = getPublishedGuide(request.params.slug);
     if (!result) throw new AppError("Guide not found.", 404, "not_found");
     publicGuideHeaders(reply, result.revision);
+    if (notModified(request, reply, sha256(Buffer.from(JSON.stringify(result.guide)))))
+      return reply.code(304).send();
     return reply.type("application/json; charset=utf-8").send(result.guide);
   });
   app.get<{ Params: { slug: string } }>("/g/:slug.md", async (request, reply) => {
@@ -674,6 +683,8 @@ export function buildServer(
     if (!result) throw new AppError("Guide not found.", 404, "not_found");
     publicGuideHeaders(reply, result.revision);
     reply.header("Content-Disposition", `attachment; filename="${request.params.slug}.md"`);
+    if (notModified(request, reply, sha256(Buffer.from(result.markdown))))
+      return reply.code(304).send();
     return reply.type("text/markdown; charset=utf-8").send(result.markdown);
   });
   app.get<{ Params: { slug: string; imageId: string } }>(
@@ -690,10 +701,11 @@ export function buildServer(
       );
       if (!guideImage) throw new AppError("Guide image not found.", 404, "not_found");
       reply.headers({
-        "Cache-Control": token ? "private, no-store" : "public, max-age=31536000, immutable",
+        "Cache-Control": token ? "private, no-store" : "public, max-age=300, must-revalidate",
         "Content-Security-Policy": "default-src 'none'; sandbox",
         "Cross-Origin-Resource-Policy": "same-origin",
       });
+      if (notModified(request, reply, guideImage.sha256)) return reply.code(304).send();
       return reply.type("image/webp").send(openStoredFile(guideImage.storage_path));
     },
   );
@@ -746,15 +758,12 @@ export function buildServer(
     if (!auth?.scopes.has("admin")) return reply.type("text/html").send(renderAdminLogin());
     return reply.type("text/html").send(
       renderAdmin({
-        pages: listPages(),
-        files: listFiles(),
-        guides: listGuides(),
+        ...adminPublicationView(request.query),
         tokens: listTokens(),
         users: listUsers(),
         settings: getInstanceSettings(),
         actorId: auth.id,
         actorName: auth.name,
-        filters: adminFilters(request.query),
       }),
     );
   });
@@ -843,15 +852,12 @@ export function buildServer(
     const created = createToken(request.body?.name || "Unnamed client", [scope]);
     return reply.type("text/html").send(
       renderAdmin({
-        pages: listPages(),
-        files: listFiles(),
-        guides: listGuides(),
+        ...adminPublicationView({}),
         tokens: listTokens(),
         users: listUsers(),
         settings: getInstanceSettings(),
         actorId: auth.id,
         actorName: auth.name,
-        filters: adminFilters({}),
         newToken: created.token,
       }),
     );
@@ -878,6 +884,21 @@ export function buildServer(
   });
   app.setErrorHandler(async (error, request, reply) => {
     if (error instanceof AppError) {
+      if (
+        request.headers.accept?.includes("text/html") &&
+        /^\/(admin|account)(?:\/|\?|$)/.test(request.url)
+      ) {
+        adminHeaders(reply);
+        return reply
+          .code(error.statusCode)
+          .type("text/html")
+          .send(
+            renderManagementError(
+              error.message,
+              request.url.startsWith("/admin") ? "/admin" : "/account",
+            ),
+          );
+      }
       return reply.code(error.statusCode).send({ error: error.code, message: error.message });
     }
     if (
@@ -907,6 +928,7 @@ export function buildServer(
     return reply.code(500).send({ error: "internal_error", message: "Internal server error." });
   });
   app.addHook("onClose", async () => {
+    closing = true;
     clearInterval(cleanupTimer);
     if (scanTimer) clearInterval(scanTimer);
     await activeScan;
@@ -1142,11 +1164,30 @@ function safeInlineType(mediaType: string): boolean {
   return /^(image\/(?!svg\+xml)|audio\/|video\/|text\/plain$)/i.test(mediaType);
 }
 
-async function sendGuide(reply: FastifyReply, slug: string, revision?: number) {
+async function sendGuide(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  slug: string,
+  revision?: number,
+) {
   const result = getPublishedGuide(slug, revision);
   if (!result) throw new AppError("Guide not found.", 404, "not_found");
   publicGuideHeaders(reply, result.revision, Boolean(revision));
+  if (notModified(request, reply, sha256(Buffer.from(result.html)))) return reply.code(304).send();
   return reply.type("text/html; charset=utf-8").send(result.html);
+}
+
+function notModified(request: FastifyRequest, reply: FastifyReply, digest: string): boolean {
+  const tag = `"${digest}"`;
+  reply.header("ETag", tag);
+  return (
+    headerValue(request.headers["if-none-match"])
+      ?.split(",")
+      .some((candidate) => {
+        const value = candidate.trim();
+        return value === "*" || value.replace(/^W\//, "") === tag;
+      }) ?? false
+  );
 }
 
 function publicGuideHeaders(reply: FastifyReply, revision: number, immutable = false): void {
@@ -1155,7 +1196,7 @@ function publicGuideHeaders(reply: FastifyReply, revision: number, immutable = f
     "Cross-Origin-Opener-Policy": "same-origin",
     "X-Frame-Options": "DENY",
     "X-Schaffa-Guide-Revision": String(revision),
-    "Cache-Control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
+    "Cache-Control": immutable ? "public, max-age=300, must-revalidate" : "no-cache",
   });
 }
 
@@ -1300,11 +1341,24 @@ function hasActiveAdminToken(): boolean {
 }
 
 interface AdminQuery {
+  page?: string;
   q?: string;
   user?: string;
   uploader?: string;
   kind?: string;
   lifetime?: string;
+}
+
+function adminPublicationView(query: AdminQuery) {
+  const filters = adminFilters(query);
+  const pagination = selectAdminPublications(filters, Number(query.page || 1));
+  return {
+    filters,
+    pagination,
+    pages: listPages(pagination.ids.pages),
+    files: listFiles(pagination.ids.files),
+    guides: listGuides(pagination.ids.guides),
+  };
 }
 
 function adminFilters(query: AdminQuery): AdminFilters {

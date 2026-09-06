@@ -4,8 +4,8 @@ Schaffa is the workhorse that connects an AI agent's output to the web. Its name
 
 Schaffa is heavily inspired by [PostPlan](https://postplan.dev) and [UploadThing](https://uploadthing.com), but built to be self-hosted.
 
-- Source: [git.heerlab.com/beasty/schaffa](https://git.heerlab.com/beasty/schaffa)
-- Image: `git.heerlab.com/beasty/schaffa:<version>` (`linux/amd64`)
+- Source: [github.com/beastyrabbit/schaffa](https://github.com/beastyrabbit/schaffa)
+- Image: `ghcr.io/beastyrabbit/schaffa:<version>` (`linux/amd64`)
 - License: MIT
 
 ## What it does
@@ -39,7 +39,12 @@ See [Deployment](docs/deployment.md) for the complete routing and runtime config
 
 ## Local test
 
-Node 22.5+ and pnpm are required:
+The browser integration test uses a local Chrome, Edge, or Chromium installation.
+Without one, local test runs report that case as skipped; the remaining tests still
+run. CI and an explicit `SCHAFFA_TEST_BROWSER` path require a working browser and
+fail if it is missing.
+
+Node 24+ and pnpm are required for the server and local development. The standalone CLI requires Node 22.12.0+:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -122,20 +127,20 @@ Omit either `--export` option when that format should not be generated.
 
 The CLI defaults to `https://schaffa.dev`. Every new HTML page receives a random, non-semantic ID. New HTML pages work without a token and disappear after one hour. For permanent pages, files, presentations, and guides, set `SCHAFFA_TOKEN` or pass `--token <token>` directly.
 
-Trusted users can create a separate Interactive token in their account and publish inline JavaScript with `npx schaffa upload ./plan.html --interactive`. Visitors see a warning before the code runs in a sandbox without network, storage, forms, pop-ups, or navigation.
+Trusted users can create a separate Interactive token in their account and publish inline JavaScript with `npx schaffa upload ./plan.html --interactive`. Visitors see a warning before the code runs in an opaque browser sandbox. CSP blocks fetch requests and external resources; the sandbox restricts storage, forms, and pop-ups. Browser-dependent navigation and WebRTC behavior mean this is not complete network isolation.
 
 ## Releases
 
 Pushes and pull requests run CI without publishing. A semantic version tag such
-as `v0.2.1` publishes the matching CLI package to npmjs.org and Forgejo plus an
-immutable container image,
-then creates a Forgejo release with checksums and the image digest:
+as `v0.10.0` publishes the matching CLI package to npmjs.org and an immutable
+GHCR container image. Create the GitHub release with reviewed notes; the tag job
+attaches the CLI tarball, checksum, and image digest:
 
 ```sh
-docker pull git.heerlab.com/beasty/schaffa:0.2.1
+docker pull ghcr.io/beastyrabbit/schaffa:0.10.0
 ```
 
-Production deployments should pin the digest recorded in the Forgejo release.
+Production deployments should pin the digest recorded in the GitHub release.
 
 ## Documentation
 

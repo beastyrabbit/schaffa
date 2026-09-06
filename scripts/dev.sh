@@ -27,13 +27,14 @@ if [ -z "${CLAMAV_DEV_PORT:-}" ]; then
   export CLAMAV_DEV_PORT
 fi
 export CLAMAV_PORT="${CLAMAV_PORT:-$CLAMAV_DEV_PORT}"
+dev_project="schaffa-dev-$(node -e 'process.stdout.write(require("node:crypto").createHash("sha256").update(require("node:fs").realpathSync(process.cwd())).digest("hex").slice(0,12))')"
 
 dev_compose() {
   # Compose interpolates every service before selecting clamav. Keep its
   # production-only requirements scoped away from the local application.
   SCHAFFA_IMAGE="${SCHAFFA_IMAGE:-schaffa-local-dev}" \
     SCHAFFA_BASE_URL="${SCHAFFA_BASE_URL:-http://schaffa.localhost:1355}" \
-    docker compose -p schaffa-dev "$@"
+    docker compose -p "$dev_project" "$@"
 }
 
 cleanup() {

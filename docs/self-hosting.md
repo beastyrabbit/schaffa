@@ -86,16 +86,16 @@ and rotate only as a planned migration.
 sudo install -d -m 0750 -o "$USER" -g docker /opt/schaffa
 cd /opt/schaffa
 curl --fail --location --output compose.yaml \
-  https://git.heerlab.com/beasty/schaffa/raw/tag/v0.2.1/compose.yaml
+  https://raw.githubusercontent.com/beastyrabbit/schaffa/v0.10.0/compose.yaml
 ```
 
-Read the selected release in Forgejo and copy its immutable container digest.
+Read the selected release in GitHub and copy its immutable container digest.
 Do not deploy `main`, an unpinned mutable tag, or the example digest below.
 
 Create `/opt/schaffa/deployment.env` containing non-secret settings only:
 
 ```dotenv
-SCHAFFA_IMAGE=git.heerlab.com/beasty/schaffa@sha256:REPLACE_WITH_RELEASE_DIGEST
+SCHAFFA_IMAGE=ghcr.io/beastyrabbit/schaffa@sha256:REPLACE_WITH_RELEASE_DIGEST
 SCHAFFA_BASE_URL=https://publish.example.com
 
 MAX_STORAGE_BYTES=21474836480
@@ -104,7 +104,7 @@ MAX_ANONYMOUS_PAGES=5000
 ANONYMOUS_PAGE_TTL_SECONDS=3600
 ANONYMOUS_PAGE_RETENTION_DAYS=30
 MAX_PAGE_VERSIONS=25
-TRUST_PROXY_HOPS=1
+TRUSTED_PROXIES=127.0.0.1,::1
 ```
 
 This file is not secret, but keep it host-local so environment-specific DNS
@@ -140,19 +140,25 @@ set -a
 . /opt/schaffa/deployment.env
 set +a
 
-infisical run \
-  --projectId YOUR_SCHAFFA_PROJECT_ID \
-  --env prod \
-  --path /runtime \
-  -- docker compose up -d --pull always --no-build
+schaffa_compose() {
+  infisical run \
+    --projectId YOUR_SCHAFFA_PROJECT_ID \
+    --env prod \
+    --path /runtime \
+    -- docker compose -p schaffa "$@"
+}
+schaffa_compose up -d --pull always --no-build
 ```
+
+Keep this function and the non-secret environment loaded for every maintenance
+command. In a new shell, repeat this setup and authenticate to Infisical first.
 
 Verify both containers:
 
 ```sh
-docker compose ps
+schaffa_compose ps
 curl --fail http://127.0.0.1:3000/healthz
-docker compose logs --tail=100 schaffa clamav
+schaffa_compose logs --tail=100 schaffa clamav
 ```
 
 The first ClamAV startup can take several minutes while signatures download.
@@ -169,8 +175,11 @@ deployment operation.
 
 Proxy `https://publish.example.com` to `http://127.0.0.1:3000` and preserve the
 original `Host` header. Overwrite client-supplied forwarding headers. Set
-`TRUST_PROXY_HOPS` to the exact number of trusted proxy hops between the client
-and Schaffa; the default is one.
+`TRUSTED_PROXIES` to a comma-separated list of the proxy IP addresses or CIDRs
+that Schaffa actually sees. The default trusts no forwarding headers. The
+loopback example applies only when the peer is loopback; Docker may present a
+bridge gateway instead. Trust that exact gateway only after checking the
+deployment. Keep the origin private and never trust all addresses.
 
 The following paths are intentionally public:
 
@@ -213,7 +222,7 @@ Create a harmless anonymous page:
 ```sh
 printf '<!doctype html><title>Schaffa works</title><h1>It works</h1>\n' \
   > /tmp/schaffa-smoke.html
-npx schaffa upload /tmp/schaffa-smoke.html
+SCHAFFA_URL="$SCHAFFA_BASE_URL" npx schaffa upload /tmp/schaffa-smoke.html
 ```
 
 Open the returned URL, then remove the smoke page through the admin UI. Also
@@ -229,13 +238,16 @@ Back up the entire `schaffa-data` volume as one consistency unit. A practical
 maintenance-window backup is:
 
 ```sh
-docker compose stop schaffa
+set -eu
+schaffa_compose stop schaffa
+trap 'schaffa_compose start schaffa' EXIT
 docker run --rm \
   --volume schaffa_schaffa-data:/source:ro \
   --volume /srv/backups/schaffa:/backup \
   alpine:3.22 \
   tar -C /source -czf /backup/schaffa-data-$(date +%F).tar.gz .
-docker compose start schaffa
+schaffa_compose start schaffa
+trap - EXIT
 ```
 
 Store backups encrypted and off-host. Test restores regularly on an isolated

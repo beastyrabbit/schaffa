@@ -16,12 +16,9 @@ import { createServer, type ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  addGuideStep,
-  type GuideClickMarker,
-  type GuideResult,
-  SchaffaRequestError,
-} from "./client.js";
+import type { GuideClickMarker, GuideResult } from "./client.js";
+
+import { recordingUploadQueue } from "./recording-upload.js";
 
 export interface DesktopClick {
   type: "click";
@@ -459,12 +456,10 @@ async function recordDesktopGuideLocked(
   };
   await persistManifest(manifestPath, manifest);
 
-  let guide = options.guide;
+  const guide = options.guide;
   let sequence = 0;
   let terminated = false;
-  let uploadsBlocked = false;
   let captureQueue = Promise.resolve();
-  let uploadQueue = Promise.resolve();
   let manifestWriteQueue = Promise.resolve();
   const terminationController = new AbortController();
   let terminationTimer: NodeJS.Timeout | undefined;
@@ -495,91 +490,25 @@ async function recordDesktopGuideLocked(
     });
   };
 
-  const queueUpload = (step: RecordedStep, screenshotPath?: string) => {
-    if (terminated) return;
-    uploadQueue = uploadQueue.then(async () => {
-      if (terminated) return;
-      if (uploadsBlocked) {
-        step.status = "pending";
-        step.uploadError =
-          "Waiting for an earlier failed upload. Run `schaffa guide sync` to retry.";
-        await saveManifestSafely();
-        return;
-      }
-      const input = {
-        slug: guide.slug,
-        editRevision: guide.editRevision,
-        title: step.title,
-        description: step.description,
-        actionType: step.actionType,
-        actionTarget: step.target,
-        clickMarker: step.click,
-        ...(screenshotPath ? { screenshot: screenshotPath } : { capture: false }),
-        token: options.token,
-        ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
-        fetch: uploadFetch,
-        idempotencyKey: recorderIdempotencyKey(manifest, step.sequence),
-      };
-      try {
-        guide = await addGuideStep(input);
-        step.status = "uploaded";
-        const stepId = guide.steps.at(-1)?.id;
-        if (stepId) step.stepId = stepId;
-        delete step.uploadError;
-        options.onMessage?.(`Step ${step.sequence} uploaded: ${step.target}`);
-      } catch (error) {
-        if (terminated) {
-          step.status = "pending";
-          delete step.uploadError;
-          return;
-        }
-        let failure: unknown = error;
-        if (
-          screenshotPath &&
-          error instanceof SchaffaRequestError &&
-          (error.status === 413 || error.status === 422)
-        ) {
-          try {
-            guide = await addGuideStep({
-              slug: guide.slug,
-              editRevision: guide.editRevision,
-              title: step.title,
-              description: step.description,
-              actionType: step.actionType,
-              actionTarget: step.target,
-              capture: false,
-              token: options.token,
-              ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
-              fetch: uploadFetch,
-              idempotencyKey: recorderIdempotencyKey(manifest, step.sequence),
-            });
-            step.status = "uploaded";
-            step.captureError = `The server rejected the screenshot (HTTP ${error.status}); the text step was preserved.`;
-            const stepId = guide.steps.at(-1)?.id;
-            if (stepId) step.stepId = stepId;
-            delete step.uploadError;
-            failure = null;
-          } catch (fallbackError) {
-            failure = fallbackError;
-          }
-        }
-        if (terminated) {
-          step.status = "pending";
-          delete step.uploadError;
-          return;
-        }
-        if (failure) {
-          uploadsBlocked = true;
-          step.status = "failed";
-          step.uploadError = failure instanceof Error ? failure.message : "Unknown upload error.";
-          options.onMessage?.(
-            `Step ${step.sequence} kept locally; upload failed: ${step.uploadError}`,
-          );
-        }
-      }
-      await saveManifestSafely();
+  const uploads = recordingUploadQueue({
+    guide,
+    stopped: () => terminated,
+    save: saveManifestSafely,
+    onMessage: options.onMessage,
+  });
+  const queueUpload = (step: RecordedStep, screenshotPath?: string) =>
+    uploads.enqueue(step, {
+      title: step.title,
+      description: step.description,
+      actionType: step.actionType,
+      actionTarget: step.target,
+      clickMarker: step.click,
+      ...(screenshotPath ? { screenshot: screenshotPath } : { capture: false }),
+      token: options.token,
+      ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
+      fetch: uploadFetch,
+      idempotencyKey: recorderIdempotencyKey(manifest, step.sequence),
     });
-  };
 
   const captureClick = async (click: DesktopClick) => {
     const currentSequence = ++sequence;
@@ -750,7 +679,7 @@ async function recordDesktopGuideLocked(
     await startupQueue;
     await bindingQueue;
     await captureQueue;
-    await uploadQueue;
+    await uploads.drain();
     if (terminationTimer) clearTimeout(terminationTimer);
     await saveManifestSafely();
     unregisterSignals();
@@ -767,7 +696,7 @@ async function recordDesktopGuideLocked(
     throw new Error("The requested recording window closed before it could be bound.");
   }
   return {
-    guide,
+    guide: uploads.guide,
     manifestPath,
     failedUploads: manifest.steps.filter((step) => step.status !== "uploaded").length,
   };

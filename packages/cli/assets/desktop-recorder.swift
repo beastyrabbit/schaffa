@@ -3,6 +3,20 @@ import ApplicationServices
 import Darwin
 import Foundation
 
+// CAPTURE_HARNESS_BEGIN
+func runCaptureProcess(_ process: Process, timeout: TimeInterval = 2) throws -> Bool {
+    let finished = DispatchSemaphore(value: 0)
+    process.terminationHandler = { _ in finished.signal() }
+    try process.run()
+    if finished.wait(timeout: .now() + timeout) == .timedOut {
+        // Return to the replay queue even if the child ignores termination.
+        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        return false
+    }
+    return process.terminationStatus == 0
+}
+// CAPTURE_HARNESS_END
+
 struct WindowInfo {
     let id: CGWindowID
     let bounds: CGRect
@@ -775,10 +789,11 @@ final class DesktopRecorder {
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = ["-x", "-o", "-l", String(window.id), destination.path]
         do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0,
-                  FileManager.default.fileExists(atPath: destination.path) else { return nil }
+            guard try runCaptureProcess(process),
+                  FileManager.default.fileExists(atPath: destination.path) else {
+                try? FileManager.default.removeItem(at: destination)
+                return nil
+            }
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
             return destination.path
         } catch {
