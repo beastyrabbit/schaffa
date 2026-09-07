@@ -43,6 +43,7 @@ import {
   recordBrowserGuide,
   syncRecording,
 } from "./recorder.js";
+import { resolveToken } from "./token.js";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -74,11 +75,18 @@ Automatic recordings also keep every original screenshot and a manifest under
 .schaffa/recordings/<slug>/ before uploading each captured click immediately.
 
 Options:
-  --token <token>  Use this bearer token instead of SCHAFFA_TOKEN.
+  --token <token>  Use this bearer token instead of automatic token lookup.
                    Command-line tokens may be stored in shell history.
+  --ignore-token   Skip all token lookup and publish anonymously. Cannot be combined with --token.
   --interactive    Run inline JavaScript in Schaffa's restricted sandbox.
   --json           Print the complete JSON response.
   -h, --help       Show this help.
+
+Tokens are read from SCHAFFA_TOKEN, then .env.local and .env in the current
+directory, then token, config.json, and .env in each of .schaffa/,
+$XDG_CONFIG_HOME/schaffa/ (default ~/.config/schaffa/), and ~/.schaffa/.
+The first nonempty token wins. Config JSON accepts token or SCHAFFA_TOKEN.
+Anonymous publishing supports static HTML only.
 `;
 
 export interface CliOptions {
@@ -103,13 +111,14 @@ export function parseCliArgs(
       json: { type: "boolean" },
       interactive: { type: "boolean" },
       token: { type: "string" },
+      "ignore-token": { type: "boolean" },
     },
   });
   if (values.help) return { help: true };
   if (positionals[0] !== "upload" || !positionals[1] || positionals.length !== 2) {
     throw new Error(`Invalid command.\n\n${help}`);
   }
-  const token = values.token !== undefined ? values.token : environment.SCHAFFA_TOKEN;
+  const token = resolveToken(values, { environment });
   return {
     command: "upload",
     filePath: positionals[1],
@@ -152,11 +161,12 @@ async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<vo
       browser: { type: "string" },
       "browser-executable": { type: "string" },
       token: { type: "string" },
+      "ignore-token": { type: "boolean" },
     },
   });
   if (values.help) return void process.stdout.write(help);
   if (!values.title) throw new Error("record requires --title.");
-  const selectedToken = values.token || process.env.SCHAFFA_TOKEN;
+  const selectedToken = resolveToken(values);
   if (!selectedToken) throw new Error("SCHAFFA_TOKEN is required for guide operations.");
   const chromeUrl = values.chrome;
   const browserUrl = legacy ? values.url : values.browser || values.url;
@@ -283,11 +293,12 @@ async function runGuide(args: string[]): Promise<void> {
       browser: { type: "string" },
       manifest: { type: "string" },
       token: { type: "string" },
+      "ignore-token": { type: "boolean" },
     },
   });
   if (values.help) return void process.stdout.write(help);
   const command = positionals[0];
-  const selectedToken = values.token || process.env.SCHAFFA_TOKEN;
+  const selectedToken = resolveToken(values);
   const common = {
     ...(selectedToken ? { token: selectedToken } : {}),
     ...(process.env.SCHAFFA_URL ? { baseUrl: process.env.SCHAFFA_URL } : {}),
@@ -410,6 +421,7 @@ async function runPresentation(args: string[]): Promise<void> {
       kind: { type: "string" },
       export: { type: "string", multiple: true },
       token: { type: "string" },
+      "ignore-token": { type: "boolean" },
     },
   });
   if (values.help) return void process.stdout.write(help);
@@ -417,7 +429,7 @@ async function runPresentation(args: string[]): Promise<void> {
   if (!source || positionals.length !== 1 || values.kind !== "presentation") {
     throw new Error("publish requires one Markdown file and --kind presentation.");
   }
-  const token = values.token || process.env.SCHAFFA_TOKEN;
+  const token = resolveToken(values);
   if (!token) throw new Error("SCHAFFA_TOKEN is required for presentation publishing.");
   const exportKinds = [...new Set(values.export || [])];
   for (const kind of exportKinds) {

@@ -60,7 +60,7 @@ The earlier `schaffa guide record --title ... --url ...` form remains supported.
 The short command is `npx schaffa record`, not literal `npx record`: the latter
 would require a separate generic npm package named `record`.
 
-The optional `--url` adds a prominent “Ziel öffnen” link to the published guide so readers can jump directly to the guided application. Guide commands persist the active random slug and edit revision under `.schaffa/guide-session.json`. Keep these working files out of source control. The bearer token remains in `SCHAFFA_TOKEN` and is never written to the session file.
+The optional `--url` adds a prominent “Ziel öffnen” link to the published guide so readers can jump directly to the guided application. Guide commands persist the active random slug and edit revision under `.schaffa/guide-session.json`. Keep these working files out of source control. The bearer token is never written to the session file.
 
 The command prints the stable public URL immediately. Until the asynchronous virus scan completes, that URL shows a self-refreshing status page; clean content appears at the same URL. New HTML pages can be published without an account; anonymous pages remain public for one hour and are deleted after 30 days.
 
@@ -83,7 +83,22 @@ npx schaffa upload ./plan.html
 npx schaffa upload ./plan.html --token "sfa_…"
 ```
 
-`--token` takes precedence when both methods are used. Command-line arguments may be retained in shell history, so prefer `SCHAFFA_TOKEN` when that is a concern.
+All CLI commands look for a token automatically, in this order:
+
+1. `--token <token>`.
+2. The `SCHAFFA_TOKEN` environment variable.
+3. `.env.local`, then `.env`, in the current directory.
+4. `token`, `config.json`, then `.env` inside each of these directories: `./.schaffa/`, `$XDG_CONFIG_HOME/schaffa/` or `~/.config/schaffa/` by default, then `~/.schaffa/`.
+
+The first nonempty token wins. A `token` file contains the plain token. JSON accepts `{"token":"sfa_…"}` or `{"SCHAFFA_TOKEN":"sfa_…"}`. Environment files use `SCHAFFA_TOKEN=sfa_…`; quotes, comments, and an `export` prefix are supported. Files are parsed without running shell commands or loading unrelated environment variables. Lookup stays in the listed locations and does not search parent directories. Unreadable files or invalid config JSON stop the command.
+
+To skip all token lookup and publish a temporary anonymous HTML page:
+
+```sh
+npx schaffa upload ./plan.html --ignore-token
+```
+
+`--ignore-token` cannot be combined with `--token`. Files, presentations, guides, and interactive pages still require authentication. Keep token files out of Git. Command-line arguments may be retained in shell history, so prefer the environment or a local config file.
 
 Every new page receives a random, non-semantic ID. Add `--json` to print the complete API response instead of only the public URL.
 
