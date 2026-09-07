@@ -140,3 +140,35 @@ test("CLI sends discovered tokens and omits authorization with --ignore-token", 
     new RegExp(fixtureToken),
   );
 });
+
+test("malformed discovered tokens fail without exposing credentials in stderr", async () => {
+  const { context, put } = await setup();
+  const malformed = `${fixtureToken}\ncomment`;
+  const candidates = [
+    [path.join(context.cwd, ".schaffa/token"), malformed],
+    [path.join(context.cwd, ".schaffa/config.json"), JSON.stringify({ token: malformed })],
+    [path.join(context.cwd, ".env"), `SCHAFFA_TOKEN="${malformed}"\n`],
+  ];
+  for (const [file, content] of candidates) {
+    await put(file, content);
+    await assert.rejects(
+      exec(process.execPath, [path.resolve("dist/cli.js"), "guide", "start", "--title", "Test"], {
+        cwd: context.cwd,
+        env: { PATH: process.env.PATH, HOME: context.home, USERPROFILE: context.home },
+      }),
+      (error) => {
+        assert.match(error.stderr, /SCHAFFA_TOKEN must contain only printable ASCII/);
+        assert.ok(!error.stderr.includes(fixtureToken));
+        return true;
+      },
+    );
+    await rm(file);
+  }
+  for (const token of [malformed, `${fixtureToken}\u0000`, `${fixtureToken}é`]) {
+    assert.throws(() => resolveToken({ token }, context), /printable ASCII/);
+    assert.throws(
+      () => resolveToken({}, { ...context, environment: { SCHAFFA_TOKEN: token } }),
+      /printable ASCII/,
+    );
+  }
+});

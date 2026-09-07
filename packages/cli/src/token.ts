@@ -24,9 +24,9 @@ export function resolveToken(
     }
     return undefined;
   }
-  if (options.token !== undefined) return options.token;
+  if (options.token !== undefined) return checkedToken(options.token);
   const environment = context.environment ?? process.env;
-  if (environment.SCHAFFA_TOKEN?.trim()) return environment.SCHAFFA_TOKEN.trim();
+  if (environment.SCHAFFA_TOKEN?.trim()) return checkedToken(environment.SCHAFFA_TOKEN.trim());
 
   const cwd = context.cwd ?? process.cwd();
   const home = context.home ?? os.homedir();
@@ -64,7 +64,14 @@ export function resolveToken(
     } else {
       token = parseEnv(content).SCHAFFA_TOKEN;
     }
-    if (typeof token === "string" && token.trim()) return token.trim();
+    if (typeof token === "string" && token.trim()) return checkedToken(token.trim());
   }
   return undefined;
+}
+
+function checkedToken(token: string): string {
+  if (/[^!-~]/u.test(token)) {
+    throw new Error("SCHAFFA_TOKEN must contain only printable ASCII characters without spaces.");
+  }
+  return token;
 }
