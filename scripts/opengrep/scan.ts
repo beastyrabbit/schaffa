@@ -159,8 +159,9 @@ try {
   });
   // Raw output stays in memory: it can contain source code and must never enter CI logs/artifacts.
   if (scan.error) {
-    if (scan.error.code === "ENOBUFS") stage = "engine-output-buffer-limit";
-    if (scan.error.code === "ETIMEDOUT") stage = "engine-timeout";
+    const code = "code" in scan.error ? scan.error.code : undefined;
+    if (code === "ENOBUFS") stage = "engine-output-buffer-limit";
+    if (code === "ETIMEDOUT") stage = "engine-timeout";
     throw new Error("Scanner failed");
   }
   stage = `engine-output (exit ${scan.status ?? "signal"})`;
