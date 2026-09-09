@@ -152,16 +152,7 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
     const page = videoPage;
     const revision = pauseRevision;
     const safe = async () =>
-      !paused &&
-      !stopping &&
-      !page.isClosed() &&
-      !isSensitiveLocation(page.url()) &&
-      (await page.evaluate(
-        () =>
-          !document.querySelector(
-            'input[type="password"], [data-private], [data-sensitive], input[autocomplete^="cc-"], input[autocomplete="one-time-code"]',
-          ),
-      ));
+      !paused && !stopping && !page.isClosed() && (await isVideoPageSafe(page));
     videoBusy = true;
     videoWork = (async () => {
       try {
@@ -820,6 +811,37 @@ function installClickRecorder(): void {
     },
     true,
   );
+}
+
+export async function isVideoPageSafe(page: Page): Promise<boolean> {
+  try {
+    const frames = page.frames();
+    const urls = frames.map((frame) => frame.url());
+    if (urls.some(isSensitiveLocation)) return false;
+    const safe = await Promise.all(
+      frames.map((frame) =>
+        frame.evaluate(() => {
+          const privateSelector =
+            'input[type="password"], [data-private], [data-sensitive], input[autocomplete*="password" i], input[autocomplete*="cc-" i], input[autocomplete*="one-time-code" i]';
+          const hasPrivateControl = (root: Document | ShadowRoot): boolean => {
+            if (root.querySelector(privateSelector)) return true;
+            return Array.from(root.querySelectorAll("*")).some(
+              (element) => element.shadowRoot && hasPrivateControl(element.shadowRoot),
+            );
+          };
+          return !hasPrivateControl(document);
+        }),
+      ),
+    );
+    const current = page.frames();
+    return (
+      safe.every(Boolean) &&
+      current.length === frames.length &&
+      frames.every((frame, index) => current.includes(frame) && frame.url() === urls[index])
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isSensitiveLocation(value: string): boolean {

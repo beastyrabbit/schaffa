@@ -77,3 +77,12 @@ test("scan polling refuses other origins and accepts only clean results", async 
     /rejected/,
   );
 });
+
+test("capture failure stays failed when reopening the saved manifest", {}, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "schaffa-video-limit-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const capture = await createVideoCapture(directory, undefined, 4);
+  capture.frame(Buffer.from("too large"));
+  await assert.rejects(capture.finish(), /size limit/);
+  await assert.rejects(readVideoTimeline(path.join(directory, "video.json")), /incomplete/);
+});

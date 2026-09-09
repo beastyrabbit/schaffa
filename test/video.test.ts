@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +17,7 @@ import {
   test,
 } from "./server-fixture.js";
 
-const { findBrowserExecutable, recordBrowserGuide } = await import(
+const { findBrowserExecutable, isVideoPageSafe, recordBrowserGuide } = await import(
   "../packages/cli/dist/recorder.js"
 );
 const { exportVideo } = await import("../packages/cli/dist/video.js");
@@ -30,6 +31,12 @@ test("continuous guide and standalone recording export paced video that plays in
   const directory = await mkdtemp(path.join(os.tmpdir(), "schaffa-video-browser-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   config.baseHost = "127.0.0.1";
+  let embeddedUrl = "";
+  app.get("/video-embedded", async (_request, reply) =>
+    reply
+      .type("text/html")
+      .send(`<iframe style="width:600px;height:300px;border:0" src="${embeddedUrl}"></iframe>`),
+  );
   app.get("/video-fixture", async (_request, reply) =>
     reply
       .type("text/html")
@@ -247,5 +254,69 @@ test("continuous guide and standalone recording export paced video that plays in
       .raw()
       .toBuffer();
     assert.ok((pixel[1] || 0) > 200, "the red private screen was never saved while paused");
+  }
+  await page.setContent('<iframe srcdoc="<input autocomplete=cc-number>"></iframe>');
+  await page.waitForFunction(() =>
+    Boolean(document.querySelector("iframe")?.contentDocument?.querySelector("input")),
+  );
+  assert.equal(await isVideoPageSafe(page), false, "same-origin private iframe is excluded");
+  await page.setContent('<div id="host"></div>');
+  await page.$eval("#host", (element) => {
+    element.attachShadow({ mode: "open" }).innerHTML = '<input type="password">';
+  });
+  assert.equal(await isVideoPageSafe(page), false, "private shadow control is excluded");
+
+  const embedded = createServer((_request, response) => {
+    response.setHeader("Content-Type", "text/html");
+    response.end(
+      '<style>body{background:rgb(255,0,0)}</style><input autocomplete="cc-number" value="synthetic-field">',
+    );
+  });
+  await new Promise<void>((resolve) => embedded.listen(0, "127.0.0.1", resolve));
+  t.after(
+    () =>
+      new Promise<void>((resolve, reject) =>
+        embedded.close((error) => (error ? reject(error) : resolve())),
+      ),
+  );
+  const address = embedded.address();
+  assert.ok(address && typeof address !== "string");
+  embeddedUrl = `http://127.0.0.1:${address.port}/form`;
+  const privateBrowser = await puppeteer.launch({ executablePath, headless: true });
+  t.after(() => privateBrowser.close());
+  const privateRecording = await recordBrowserGuide({
+    guide,
+    token: "",
+    localOnly: true,
+    video: true,
+    url: `${origin}/video-embedded`,
+    outputDirectory: path.join(directory, "embedded"),
+    profileDirectory: path.join(directory, "private-profile"),
+    browserExecutable: executablePath,
+    launchBrowser: async () => privateBrowser,
+    onMessage: (message: string) => {
+      if (message.startsWith("Recording."))
+        actions = (async () => {
+          const [tab] = await privateBrowser.pages();
+          assert.ok(tab);
+          const child = await tab.waitForFrame((frame) => frame.url() === embeddedUrl);
+          await child.waitForSelector("input");
+          assert.equal(await isVideoPageSafe(tab), false);
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          await privateBrowser.close();
+        })();
+    },
+  });
+  assert.ok(privateRecording.videoManifest);
+  await actions;
+  for (const frame of JSON.parse(await readFile(privateRecording.videoManifest, "utf8")).frames) {
+    const pixel: Buffer = await sharp(
+      path.join(path.dirname(privateRecording.videoManifest), frame.file),
+    )
+      .extract({ left: 200, top: 150, width: 1, height: 1 })
+      .removeAlpha()
+      .raw()
+      .toBuffer();
+    assert.ok((pixel[1] || 0) > 200, "cross-origin embedded card fields never enter video frames");
   }
 });

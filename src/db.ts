@@ -406,13 +406,20 @@ export function db(): DatabaseSync {
     database.exec("ALTER TABLE guides ADD COLUMN target_url TEXT");
   }
   if (!guideColumns.some((column) => column.name === "video_url")) {
-    database.exec("ALTER TABLE guides ADD COLUMN video_url TEXT");
-    // Rebuild metadata counters and triggers to include the new field.
-    for (const table of ["guides", "guide_steps", "guide_revisions", "guide_idempotency"]) {
-      for (const operation of ["insert", "update", "delete"])
-        database.exec(`DROP TRIGGER IF EXISTS ${table}_metadata_${operation}`);
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      database.exec("ALTER TABLE guides ADD COLUMN video_url TEXT");
+      // Keep the schema change and counter reset atomic so an interrupted upgrade retries safely.
+      for (const table of ["guides", "guide_steps", "guide_revisions", "guide_idempotency"]) {
+        for (const operation of ["insert", "update", "delete"])
+          database.exec(`DROP TRIGGER IF EXISTS ${table}_metadata_${operation}`);
+      }
+      database.exec("DROP TABLE IF EXISTS guide_metadata_usage");
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
     }
-    database.exec("DROP TABLE IF EXISTS guide_metadata_usage");
   }
   database.exec(`
     UPDATE pages

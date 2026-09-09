@@ -23,6 +23,7 @@ export interface VideoFrame {
 }
 export interface VideoTimeline {
   schemaVersion: 1;
+  failure?: string;
   guideSlug?: string;
   frames: VideoFrame[];
 }
@@ -35,7 +36,11 @@ export function checkVideoEncoder(): void {
 }
 
 // Capture continuously, but keep at most ten frames per second and 512 MiB locally.
-export async function createVideoCapture(directory: string, guideSlug?: string) {
+export async function createVideoCapture(
+  directory: string,
+  guideSlug?: string,
+  maximumBytes = 512 * 1024 * 1024,
+) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const timeline: VideoTimeline = {
     schemaVersion: 1,
@@ -59,8 +64,8 @@ export async function createVideoCapture(directory: string, guideSlug?: string) 
       cut = false;
       last = now;
       bytes += data.length;
-      if (bytes > 512 * 1024 * 1024) {
-        failure = new Error("Video capture exceeded 512 MiB. Start a shorter recording.");
+      if (bytes > maximumBytes) {
+        failure = new Error("Video capture exceeded its size limit. Start a shorter recording.");
         return;
       }
       const file = `frame-${String(timeline.frames.length).padStart(7, "0")}.jpg`;
@@ -79,6 +84,7 @@ export async function createVideoCapture(directory: string, guideSlug?: string) 
     async finish() {
       active = false;
       await pending;
+      if (failure) timeline.failure = failure.message;
       const manifest = path.join(directory, "video.json");
       await writeFile(manifest, `${JSON.stringify(timeline)}\n`, { mode: 0o600 });
       if (failure) throw failure;
@@ -90,6 +96,8 @@ export async function createVideoCapture(directory: string, guideSlug?: string) 
 export async function readVideoTimeline(manifest: string): Promise<VideoTimeline> {
   const input = JSON.parse(await readFile(manifest, "utf8"));
   if (input.schemaVersion !== 1) throw new Error("Unsupported video manifest.");
+  if (input.failure !== undefined)
+    throw new Error("This video capture failed and is incomplete. Record a new video.");
   const frames = Array.isArray(input.frames)
     ? input.frames
     : Array.isArray(input.steps)
