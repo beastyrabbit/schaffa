@@ -32,10 +32,14 @@ function run(scenario) {
           : [{ rule: "homelab.web.eval", path: "app.js", line: 1, severity: "WARNING" }],
     };
     if (scenario === "wrong-repo") report.repository = "elsewhere/other";
+    if (scenario === "incomplete") {
+      report.status = "incomplete";
+      report.errorCount = 1;
+    }
     writeFileSync(join(root, "report.json"), JSON.stringify(report));
     const stub = `
       import { writeFileSync } from 'node:fs';
-      import { SUMMARY_MARKER, findingMarker } from ${JSON.stringify(model)};
+      import { SUMMARY_MARKER } from ${JSON.stringify(model)};
       const writes=[]; const scenario=${JSON.stringify(scenario)};
       globalThis.fetch=async (url,options={})=>{
         const path=new URL(url).pathname;
@@ -46,9 +50,7 @@ function run(scenario) {
         let body;
         if(path.endsWith('/pulls/2')) body={state:'open',user:{login:'beastyrabbit'},head:{sha:scenario==='stale'?'f'.repeat(40):'a'.repeat(40),repo:{full_name:'beastyrabbit/private-fixture'}},base:{sha:'b'.repeat(40),repo:{full_name:'beastyrabbit/private-fixture'}}};
         else if(path.startsWith('/users/')) body={id:42,login:'github-actions[bot]',type:'Bot'};
-        else if(path.endsWith('/issues/2/comments')) body=[{id:1,user:{id:99},body:SUMMARY_MARKER},{id:2,user:{id:42},body:SUMMARY_MARKER}];
-        else if(path.endsWith('/pulls/2/files')) body=[{filename:'app.js',patch:'@@ -0,0 +1 @@\\n+eval(input)'}];
-        else if(path.endsWith('/pulls/2/comments')) body=scenario==='repeat'?[{id:3,user:{id:42},body:findingMarker({rule:'homelab.web.eval',path:'app.js',line:1})}]:[];
+        else if(path.endsWith('/issues/2/comments')) body=[{id:1,user:{id:99},body:SUMMARY_MARKER},...(scenario==='first'?[]:[{id:2,user:{id:42},body:SUMMARY_MARKER}])];
         else throw new Error('Unexpected request');
         return new Response(JSON.stringify(body),{status:200});
       };
@@ -88,16 +90,29 @@ test("reporter updates only its summary and places a neutral finding check on th
   assert.equal(r.status, 0);
   assert.ok(r.writes.some((w) => w.path.endsWith("/issues/comments/2")));
   assert.ok(!r.writes.some((w) => w.path.endsWith("/issues/comments/1")));
-  assert.equal(r.writes.find((w) => w.path.endsWith("/reviews")).body.comments.length, 1);
+  assert.equal(r.writes.length, 2);
+  assert.ok(!r.writes.some((w) => w.path.includes("/pulls/")));
   const check = r.writes.find((w) => w.path.endsWith("/check-runs")).body;
   assert.equal(check.head_sha, "a".repeat(40));
   assert.equal(check.conclusion, "neutral");
 });
-test("repeat scans do not duplicate inline comments and fixes update the same summary", () => {
-  assert.ok(!run("repeat").writes.some((w) => w.path.endsWith("/reviews")));
+test("first scans create one summary and fixes update the same summary", () => {
+  const first = run("first");
+  assert.equal(first.status, 0);
+  assert.equal(first.writes.length, 2);
+  assert.equal(first.writes[0].method, "POST");
+  assert.ok(first.writes[0].path.endsWith("/issues/2/comments"));
   const fixed = run("fix");
-  assert.ok(!fixed.writes.some((w) => w.path.endsWith("/reviews")));
+  assert.equal(fixed.writes.length, 2);
+  assert.ok(fixed.writes[0].path.endsWith("/issues/comments/2"));
   assert.equal(fixed.writes.find((w) => w.path.endsWith("/check-runs")).body.conclusion, "success");
+});
+test("incomplete scans publish their summary and a failing check", () => {
+  const r = run("incomplete");
+  assert.equal(r.status, 1);
+  assert.equal(r.writes.length, 2);
+  assert.match(r.writes[0].body.body, /Analysis incomplete/);
+  assert.equal(r.writes[1].body.conclusion, "failure");
 });
 test("stale commits and wrong repositories never receive comments; publication errors fail", () => {
   for (const scenario of ["stale", "wrong-repo"]) {

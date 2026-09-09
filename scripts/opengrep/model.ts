@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 export const ENGINE_VERSION = "1.30.0";
 export const ENGINE_SHA256 = "35779bdd72e92129c8df2a77f0c55e8c08356801ea92591ef32108d6b28d564c";
 export const PROFILES = [
@@ -108,30 +106,6 @@ export function escapeMarkdown(value: string): string {
     .replace(/[\\`*_{}[\]()#+.!|~-]/g, "\\$&");
 }
 
-export function findingMarker(f: Finding): string {
-  const id = createHash("sha256")
-    .update(JSON.stringify([f.rule, f.path, f.line]))
-    .digest("hex");
-  return `<!-- homelab-opengrep-finding:${id} -->`;
-}
-
-export function addedLines(patch: string): Set<number> {
-  const result = new Set<number>();
-  let line = 0;
-  let inHunk = false;
-  for (const text of patch.split("\n")) {
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text);
-    if (hunk?.[1]) {
-      line = Number(hunk[1]);
-      inHunk = true;
-    } else if (inHunk && text.startsWith("+")) {
-      result.add(line);
-      line++;
-    } else if (inHunk && text.startsWith(" ")) line++;
-  }
-  return result;
-}
-
 export function summary(r: Report, runUrl: string): string {
   const state =
     r.status === "complete"
@@ -139,23 +113,39 @@ export function summary(r: Report, runUrl: string): string {
       : r.status === "not-applicable"
         ? "No applicable files in this scan. This is not a clean bill of health for other languages."
         : "Analysis incomplete; no clean result";
-  const rows = r.findings
-    .slice(0, 50)
-    .map((f) => `- ${f.severity} ${escapeMarkdown(f.rule)}: ${escapeMarkdown(f.path)}:${f.line}`);
+  const severityOrder = { ERROR: 0, WARNING: 1, INFO: 2 };
+  const groups = new Map<string, { rule: string; severity: Finding["severity"]; count: number }>();
+  const counts = { ERROR: 0, WARNING: 0, INFO: 0 };
+  for (const finding of r.findings) {
+    counts[finding.severity]++;
+    const group = groups.get(finding.rule);
+    if (group) {
+      group.count++;
+      if (severityOrder[finding.severity] < severityOrder[group.severity])
+        group.severity = finding.severity;
+    } else groups.set(finding.rule, { rule: finding.rule, severity: finding.severity, count: 1 });
+  }
+  const rows = [...groups.values()]
+    .sort(
+      (a, b) =>
+        severityOrder[a.severity] - severityOrder[b.severity] || a.rule.localeCompare(b.rule),
+    )
+    .slice(0, 20)
+    .map((g) => `| ${g.severity} | ${escapeMarkdown(g.rule)} | ${g.count} |`);
   return [
     SUMMARY_MARKER,
     "### OpenGrep",
     state,
     "",
     `Commit: ${r.head.slice(0, 12)} · Engine: ${r.engine} · Rules: ${r.tooling.slice(0, 12)} · Profile: ${r.profile}`,
-    `Files scanned: ${r.files} · New findings: ${r.findings.length} · Technical errors: ${r.errorCount}`,
+    `Files scanned: ${r.files} · Findings: ${r.findings.length} · Technical errors: ${r.errorCount}`,
+    `Severity: ${counts.ERROR} ERROR · ${counts.WARNING} WARNING · ${counts.INFO} INFO`,
     "Reporting only. Findings do not enforce a merge restriction.",
     "",
-    ...rows,
-    ...(r.findings.length > 50
-      ? [`${r.findings.length - 50} more findings in the report artifact.`]
-      : []),
+    ...(rows.length ? ["| Severity | Rule | Findings |", "| --- | --- | ---: |", ...rows] : []),
+    ...(groups.size > 20 ? [`${groups.size - 20} more rule groups in the report artifact.`] : []),
     "",
+    "The complete JSON artifact includes every finding with its rule, file and line. No inline comments are posted.",
     `[Full report and run](${runUrl})`,
   ].join("\n");
 }

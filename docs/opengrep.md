@@ -1,7 +1,7 @@
 # OpenGrep PR checks
 
-OpenGrep runs in the homelab and publishes a summary plus up to 20 new inline
-comments. Findings are advisory. No branch protection is installed, and private
+OpenGrep runs in the homelab and updates one PR summary, with findings grouped
+by rule. It does not post inline comments. Findings are advisory. No branch protection is installed, and private
 repositories work with GitHub Free. A later paid plan can enforce checks without
 moving the scanner. Do not require `OpenGrep / report` while it is advisory: its
 neutral result deliberately does not block findings.
@@ -133,11 +133,11 @@ unsupported-file-only changes produce a neutral head check. Cancellation or an
 early setup failure may leave no head check; inspect the Actions run in that case.
 GitHub Free does not enforce its presence for private repositories.
 
-Inline deduplication uses rule, path and line. Moving a finding can produce a new
-comment; old review threads are not automatically resolved. Only the bot's marked
-summary is updated. There are at most 20 new inline comments per run; all findings
-remain in the JSON artifact and the count in the summary. Findings outside added
-diff lines are not discarded from the report.
+Only the bot's marked summary is updated. It shows severity totals and at most
+20 rule groups, ordered by severity, with a count for each rule. Repeated audit
+hints occupy one row. All findings remain in the JSON artifact with rule IDs,
+file paths and line numbers for further review, including findings outside added
+diff lines. Existing inline threads from older reporter versions are not changed.
 
 ## Engine and exclusions
 
@@ -154,10 +154,8 @@ and unsupported file types are not covered; no assertion of repository-wide
 language coverage is made. Parallelism is three scanner workers, capped at 2 GB
 per worker, with a thirty-minute process timeout inside a forty-minute job.
 
-The TypeScript reporter writes inline reviews directly through GitHub's API.
-Reviewdog is not installed: the existing summary/schema logic already supplies
-the required bounded inline publishing, so adding a second reporter would duplicate
-that small part of the pilot. SARIF is not produced in this first version.
+The TypeScript reporter updates the summary and head check through GitHub's API.
+Reviewdog is not installed. SARIF is not produced in this first version.
 
 ## Updates and recovery
 
@@ -179,7 +177,7 @@ previous tested version to recover. Do not silently turn technical failures gree
 - The type-aware ESLint run, including the CLI package, examined 62 files and reported 755 messages with
   no fatal parser failures. Counts change as the candidate changes.
 - Unit tests cover malformed reports, unsafe paths, mention/HTML escaping,
-  missing language coverage and diff line mapping. The existing application
+  missing language coverage, grouped summary limits and summary-only publishing. The existing application
   suite, including its Chrome browser test, passes; platform-specific native
   macOS tests retain their existing skips on Linux.
 
@@ -192,7 +190,7 @@ image. An equivalent type-only import in the browser test resolves the parser
 limitation observed during local acceptance without excluding the test.
 
 The temporary [acceptance PR](https://github.com/beastyrabbit/schaffa/pull/3)
-verified a new eval finding, the inline review, the summary and a neutral check
+verified a new eval finding, the then-enabled inline review, the summary and a neutral check
 on the PR head. After replacing eval with constant arithmetic, the same summary
 reported zero new findings and the new head check succeeded. The PR is closed
 without merging the fixture.

@@ -1,13 +1,5 @@
 import { appendFileSync, readFileSync, statSync } from "node:fs";
-import {
-  addedLines,
-  findingMarker,
-  SHA,
-  SUMMARY_MARKER,
-  summary,
-  trustedPullAuthor,
-  validateReport,
-} from "./model.ts";
+import { SHA, SUMMARY_MARKER, summary, trustedPullAuthor, validateReport } from "./model.ts";
 
 const token = process.env.GH_TOKEN;
 const repository = process.env.GITHUB_REPOSITORY;
@@ -108,29 +100,6 @@ async function publish(): Promise<void> {
   if (own) await api(`/issues/comments/${own.id}`, "PATCH", { body });
   else await api(`/issues/${pr}/comments`, "POST", { body });
 
-  const files = await all<{ filename: string; patch?: string }>(`/pulls/${pr}/files`);
-  const locations = new Map(files.map((f) => [f.filename, addedLines(f.patch ?? "")]));
-  const reviews = await all<Comment>(`/pulls/${pr}/comments`);
-  const existing = new Set(
-    reviews.filter((c) => c.user.id === bot.id).map((c) => c.body.split("\n")[0]),
-  );
-  const inline = report.findings
-    .filter((f) => locations.get(f.path)?.has(f.line) && !existing.has(findingMarker(f)))
-    .slice(0, 20);
-  if (inline.length) {
-    await current();
-    if (!SHA.test(report.head)) throw new Error("Invalid commit");
-    await api(`/pulls/${pr}/reviews`, "POST", {
-      commit_id: report.head,
-      event: "COMMENT",
-      comments: inline.map((f) => ({
-        path: f.path,
-        line: f.line,
-        side: "RIGHT",
-        body: `${findingMarker(f)}\nOpenGrep: ${f.rule}\nReview this finding; it is not a confirmed vulnerability.`,
-      })),
-    });
-  }
   await current();
   await api("/check-runs", "POST", {
     name: "OpenGrep / report",

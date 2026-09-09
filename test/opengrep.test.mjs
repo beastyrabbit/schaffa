@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  addedLines,
   escapeMarkdown,
   summary,
   trustedPullAuthor,
@@ -72,13 +71,36 @@ test("missing language coverage is explicit, and paths cannot insert mentions or
   assert.ok(escaped.includes("\\[link\\]"));
 });
 
-test("diff positions account for deletions, context and multiple hunks", () => {
-  assert.deepEqual(
-    [
-      ...addedLines(
-        "@@ -10,3 +10,3 @@\n context\n-old\n+new\n context\n@@ -30,0 +31,2 @@\n+one\n+two",
-      ),
-    ],
-    [11, 31, 32],
-  );
+test("noisy findings become one rule row without losing artifact detail", () => {
+  const r = report();
+  r.findings = Array.from({ length: 195 }, (_, i) => ({
+    rule: "audit.words",
+    path: "src/code.ts",
+    line: i + 1,
+    severity: "INFO",
+  }));
+  r.findings.push({ rule: "security.ssrf", path: "src/code.ts", line: 2, severity: "ERROR" });
+  const original = structuredClone(r);
+  const body = summary(r, "https://github.com/owner/repo/actions/runs/1");
+  assert.match(body, /INFO \| audit\\\.words \| 195/);
+  assert.equal(body.match(/audit/g).length, 1);
+  assert.ok(body.indexOf("security") < body.indexOf("audit"));
+  assert.ok(!body.includes("src/code"));
+  assert.deepEqual(r, original);
+});
+
+test("large summaries are bounded and incomplete scans remain explicit", () => {
+  const r = report();
+  r.status = "incomplete";
+  r.errorCount = 1;
+  r.findings = Array.from({ length: 100000 }, (_, i) => ({
+    rule: `rule${i}`,
+    path: "app.ts",
+    line: 1,
+    severity: "WARNING",
+  }));
+  const body = summary(validateReport(r), "https://github.com/owner/repo/actions/runs/1");
+  assert.match(body, /Analysis incomplete; no clean result/);
+  assert.match(body, /99980 more rule groups/);
+  assert.ok(body.length < 10000);
 });
