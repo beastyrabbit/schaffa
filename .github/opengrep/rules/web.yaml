@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT
+# Small, locally maintained review profile. Not comprehensive Fastify/TypeScript coverage.
+rules:
+  - id: homelab.web.eval
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Review dynamic code evaluation.
+    pattern: eval(...)
+  - id: homelab.web.function-constructor
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Review code constructed at runtime.
+    pattern: new Function(...)
+  - id: homelab.web.tls-verification-disabled
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: TLS certificate verification is disabled.
+    pattern: "{rejectUnauthorized: false, ...}"
+  - id: homelab.web.request-to-shell
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Request data reaches a shell command within this file.
+    mode: taint
+    pattern-sources:
+      - pattern: $REQ.query
+      - pattern: $REQ.body
+      - pattern: $REQ.params
+    pattern-sinks:
+      - pattern: child_process.exec(...)
+      - pattern: child_process.execSync(...)
+      - pattern: exec(...)
+      - pattern: execSync(...)

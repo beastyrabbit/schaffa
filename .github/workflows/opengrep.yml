@@ -1,0 +1,28 @@
+name: OpenGrep
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '37 4 * * *'
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: opengrep-${{ github.event.pull_request.number || 'full' }}
+  cancel-in-progress: true
+
+jobs:
+  opengrep:
+    uses: ./.github/workflows/opengrep-shared.yml
+    with:
+      runner: arc-opengrep-schaffa
+      profile: all
+      # Other repositories pin the published schaffa SHA in both uses and tooling-ref.
+      tooling-ref: ${{ github.workflow_sha }}

@@ -14,6 +14,7 @@
     "dev:server": "tsx watch src/server.ts",
     "format": "biome format --write .",
     "lint": "biome check .",
+    "static:lint": "eslint .",
     "pack:cli": "node scripts/pack-cli.mjs",
     "security": "gitleaks dir . --redact --no-banner",
     "start": "node dist/server.js",
@@ -43,12 +44,19 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.7",
+    "@eslint/js": "^10.0.1",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^26.2.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "ajv": "^8.20.0",
+    "eslint": "^10.10.0",
+    "eslint-plugin-security": "^4.0.1",
+    "eslint-plugin-sonarjs": "^4.2.0",
+    "globals": "^17.12.0",
     "puppeteer-core": "^25.6.0",
     "tsx": "^4.23.12",
-    "typescript": "^7.0.2"
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-eslint": "^8.70.0"
   },
   "packageManager": "pnpm@11.21.0+sha512.521705bce689924eac72f5a3587122f362689ef6571e55ba80076fd637c11132ecffada26fad4ea79c485bfddbfd3d5a2a5b05805a77e893de71ec8a6cca3bb1"
 }

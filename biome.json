@@ -9,7 +9,14 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!!**/dist", "!!data", "!!node_modules", "!!coverage"]
+    "includes": [
+      "**",
+      "!!**/dist",
+      "!!data",
+      "!!node_modules",
+      "!!coverage",
+      "!!.github/opengrep/vendor"
+    ]
   },
   "formatter": {
     "enabled": true,

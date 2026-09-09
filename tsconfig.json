@@ -10,6 +10,7 @@
     "exactOptionalPropertyTypes": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "rewriteRelativeImportExtensions": true,
     "types": ["node"],
     "rootDir": "."
   },

@@ -1,0 +1,128 @@
+name: OpenGrep shared
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+      profile:
+        description: all for broad multi-language analysis, or comma-separated profiles
+        type: string
+        default: all
+      tooling-ref:
+        description: Immutable schaffa commit containing the scanner scripts and rules
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  scan:
+    if: >-
+      github.repository_owner == 'beastyrabbit' &&
+      contains(fromJSON('["pull_request_target","workflow_dispatch","push","schedule"]'), github.event_name) &&
+      (github.event_name != 'pull_request_target' ||
+        (github.event.pull_request.head.repo.full_name == github.repository &&
+         contains(fromJSON('["beastyrabbit","renovate[bot]","dependabot[bot]"]'), github.event.pull_request.user.login) &&
+         contains(fromJSON('["beastyrabbit","renovate[bot]","dependabot[bot]"]'), github.actor)))
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    outputs:
+      head: ${{ steps.metadata.outputs.head }}
+      base: ${{ steps.metadata.outputs.base }}
+    steps:
+      - name: Pin trusted inputs
+        id: metadata
+        env:
+          TOOLING_REF: ${{ inputs.tooling-ref }}
+          PROFILE: ${{ inputs.profile }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TOOLING_REF" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$PROFILE" =~ ^(all|web|python|go|c-cpp|dotnet|jvm|swift|ruby|rust|php|config)(,(all|web|python|go|c-cpp|dotnet|jvm|swift|ruby|rust|php|config))*$ ]]
+          if [[ "$GITHUB_EVENT_NAME" != pull_request_target ]]; then
+            [[ "$GITHUB_REF" == "refs/heads/$DEFAULT_BRANCH" ]]
+            PR_HEAD="$GITHUB_SHA"
+            PR_BASE="$GITHUB_SHA"
+          fi
+          [[ "$PR_HEAD" =~ ^[a-f0-9]{40}$ && "$PR_BASE" =~ ^[a-f0-9]{40}$ ]]
+          echo "head=$PR_HEAD" >> "$GITHUB_OUTPUT"
+          echo "base=$PR_BASE" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: beastyrabbit/schaffa
+          ref: ${{ inputs.tooling-ref }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      # No installation, local Action, build, hook, submodule or repository script is run from source.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ steps.metadata.outputs.head }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Scan source as data
+        env:
+          SCAN_ROOT: ${{ github.workspace }}/source
+          REPORT_PATH: ${{ runner.temp }}/opengrep-report/report.json
+          SCAN_PROFILE: ${{ inputs.profile }}
+          SCAN_HEAD: ${{ steps.metadata.outputs.head }}
+          SCAN_BASE: ${{ steps.metadata.outputs.base }}
+          TOOLING_SHA: ${{ inputs.tooling-ref }}
+          SCAN_MODE: ${{ github.event_name == 'pull_request_target' && 'pr' || 'full' }}
+        run: node --experimental-strip-types trusted/scripts/opengrep/scan.ts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() && steps.metadata.outcome == 'success' }}
+        with:
+          name: opengrep-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/opengrep-report/report.json
+          if-no-files-found: error
+          retention-days: 14
+
+  report:
+    needs: scan
+    if: ${{ !cancelled() && needs.scan.result != 'skipped' && needs.scan.outputs.head != '' }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: beastyrabbit/schaffa
+          ref: ${{ inputs.tooling-ref }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: opengrep-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/opengrep-report
+      - name: Publish validated report
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT_PATH: ${{ runner.temp }}/opengrep-report/report.json
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SCAN_HEAD: ${{ needs.scan.outputs.head }}
+          SCAN_BASE: ${{ needs.scan.outputs.base }}
+          TOOLING_SHA: ${{ inputs.tooling-ref }}
+        run: node --experimental-strip-types trusted/scripts/opengrep/report.ts

@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+rules:
+  - id: homelab.go.tls-verification-disabled
+    languages: [go]
+    severity: WARNING
+    message: TLS certificate verification is disabled.
+    pattern: "tls.Config{..., InsecureSkipVerify: true, ...}"
+  - id: homelab.go.shell
+    languages: [go]
+    severity: WARNING
+    message: Review shell command construction.
+    pattern-either:
+      - pattern: exec.Command("sh", "-c", ...)
+      - pattern: exec.Command("bash", "-c", ...)
