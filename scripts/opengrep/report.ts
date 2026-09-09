@@ -1,11 +1,11 @@
 import { appendFileSync, readFileSync, statSync } from "node:fs";
 import {
-  ALLOWED_AUTHORS,
   addedLines,
   findingMarker,
   SHA,
   SUMMARY_MARKER,
   summary,
+  trustedPullAuthor,
   validateReport,
 } from "./model.ts";
 
@@ -18,6 +18,7 @@ interface Pull {
   number: number;
   state: string;
   user: { login: string };
+  author_association?: string;
   head: { sha: string; repo: { full_name: string } | null };
   base: { sha: string; repo: { full_name: string } };
 }
@@ -85,7 +86,7 @@ async function publish(): Promise<void> {
       pull.base.sha !== report.base ||
       pull.head.repo?.full_name !== repository ||
       pull.base.repo.full_name !== repository ||
-      !ALLOWED_AUTHORS.includes(pull.user.login)
+      !trustedPullAuthor(repository, pull.user.login, pull.author_association)
     )
       throw new Error("PR changed or is not trusted; report withheld");
   }

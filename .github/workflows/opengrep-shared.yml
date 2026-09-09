@@ -19,12 +19,14 @@ permissions: {}
 jobs:
   scan:
     if: >-
-      github.repository_owner == 'beastyrabbit' &&
+      contains(fromJSON('["beastyrabbit","SKYWAY-GmbH"]'), github.repository_owner) &&
       contains(fromJSON('["pull_request_target","workflow_dispatch","push","schedule"]'), github.event_name) &&
       (github.event_name != 'pull_request_target' ||
         (github.event.pull_request.head.repo.full_name == github.repository &&
-         contains(fromJSON('["beastyrabbit","renovate[bot]","dependabot[bot]"]'), github.event.pull_request.user.login) &&
-         contains(fromJSON('["beastyrabbit","renovate[bot]","dependabot[bot]"]'), github.actor)))
+         ((contains(fromJSON('["beastyrabbit","renovate[bot]","dependabot[bot]"]'), github.event.pull_request.user.login) &&
+           contains(fromJSON('["beastyrabbit","renovate[bot]","dependabot[bot]"]'), github.actor)) ||
+          (github.repository_owner == 'SKYWAY-GmbH' &&
+           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))))
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 40
     permissions:
@@ -77,7 +79,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REPOSITORY" =~ ^beastyrabbit/[A-Za-z0-9_.-]+$ ]]
+          [[ "$GITHUB_REPOSITORY" =~ ^(beastyrabbit|SKYWAY-GmbH)/[A-Za-z0-9_.-]+$ ]]
           git init --template= source
           git -C source remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
           (

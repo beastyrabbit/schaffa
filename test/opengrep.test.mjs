@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { addedLines, escapeMarkdown, summary, validateReport } from "../scripts/opengrep/model.ts";
+import {
+  addedLines,
+  escapeMarkdown,
+  summary,
+  trustedPullAuthor,
+  validateReport,
+} from "../scripts/opengrep/model.ts";
 
 const report = () => ({
   schema: 1,
@@ -18,6 +24,17 @@ const report = () => ({
   errorCount: 0,
   seconds: 1,
   findings: [{ rule: "homelab.web.eval", path: "src/code.ts", line: 12, severity: "WARNING" }],
+});
+
+test("organization authors require current membership or repository collaboration", () => {
+  assert.ok(trustedPullAuthor("SKYWAY-GmbH/project", "colleague", "MEMBER"));
+  assert.ok(trustedPullAuthor("SKYWAY-GmbH/project", "colleague", "COLLABORATOR"));
+  assert.ok(trustedPullAuthor("SKYWAY-GmbH/project", "dependabot[bot]"));
+  for (const association of [undefined, "NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR"]) {
+    assert.ok(!trustedPullAuthor("SKYWAY-GmbH/project", "outsider", association));
+  }
+  assert.ok(!trustedPullAuthor("beastyrabbit/project", "colleague", "COLLABORATOR"));
+  assert.ok(!trustedPullAuthor("another-org/project", "beastyrabbit", "OWNER"));
 });
 
 test("report schema rejects traversal, malformed revisions and false clean results", () => {

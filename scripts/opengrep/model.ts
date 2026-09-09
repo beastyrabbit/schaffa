@@ -17,6 +17,18 @@ export const PROFILES = [
   "config",
 ] as const;
 export const ALLOWED_AUTHORS = ["beastyrabbit", "renovate[bot]", "dependabot[bot]"];
+export function trustedPullAuthor(
+  repository: string,
+  login: string,
+  association?: string,
+): boolean {
+  const owner = repository.split("/")[0];
+  if (owner !== "beastyrabbit" && owner !== "SKYWAY-GmbH") return false;
+  return (
+    ALLOWED_AUTHORS.includes(login) ||
+    (owner === "SKYWAY-GmbH" && ["OWNER", "MEMBER", "COLLABORATOR"].includes(association ?? ""))
+  );
+}
 export const SUMMARY_MARKER = "<!-- homelab-opengrep-summary-v1 -->";
 export const SHA = /^[a-f0-9]{40}$/;
 
