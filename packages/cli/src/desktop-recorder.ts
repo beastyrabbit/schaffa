@@ -70,6 +70,7 @@ interface RecordedStep {
 
 interface RecordingManifest {
   schemaVersion: 1;
+  guideEditRevision?: number;
   recordingId: string;
   slug: string;
   publicUrl: string;
@@ -680,6 +681,10 @@ async function recordDesktopGuideLocked(
     await bindingQueue;
     await captureQueue;
     await uploads.drain();
+    const uploadedSteps = manifest.steps.filter((step) => step.status === "uploaded").length;
+    if (uploads.guide.editRevision === options.guide.editRevision + uploadedSteps) {
+      manifest.guideEditRevision = uploads.guide.editRevision;
+    }
     if (terminationTimer) clearTimeout(terminationTimer);
     await saveManifestSafely();
     unregisterSignals();

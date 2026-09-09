@@ -201,6 +201,27 @@ export function openApiDocument() {
           tags: ["Guides"],
           summary: "Edit guide metadata",
           operationId: "updateGuide",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    title: { type: "string" },
+                    description: { type: ["string", "null"] },
+                    targetUrl: { type: ["string", "null"], format: "uri" },
+                    language: { type: "string" },
+                    videoUrl: {
+                      type: ["string", "null"],
+                      description:
+                        "Same-instance video uploaded by the guide owner and marked clean by scanning. Null removes the video from the new revision.",
+                    },
+                  },
+                },
+              },
+            },
+          },
           security: [{ bearerAuth: [] }],
           parameters: [slugParameter, ifMatchParameter],
           responses: {
@@ -406,6 +427,7 @@ export function openApiDocument() {
         Guide: objectSchema(
           {
             schemaVersion: { const: 1 },
+            videoUrl: { type: ["string", "null"], format: "uri" },
             slug: { type: "string", pattern: "^[a-z2-7]{12}$" },
             title: { type: "string" },
             targetUrl: { type: ["string", "null"], format: "uri" },

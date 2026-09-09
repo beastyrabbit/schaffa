@@ -33,6 +33,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install video test encoder
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y ffmpeg
+          fi
+
       - name: Run type, lint, test, and build checks
         run: pnpm typecheck && pnpm lint && pnpm test && pnpm build
 
@@ -90,6 +96,12 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Install video test encoder
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y ffmpeg
+          fi
 
       - name: Run type, lint, and test checks
         run: pnpm typecheck && pnpm lint && pnpm test

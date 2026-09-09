@@ -18,6 +18,15 @@ jobs:
           node-version: 24.0.0
           package-manager-cache: false
       - run: corepack enable && pnpm install --frozen-lockfile
+      - name: Install video test encoder
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            if [ "$RUNNER_OS" = macOS ]; then
+              brew install ffmpeg
+            else
+              sudo apt-get update && sudo apt-get install -y ffmpeg
+            fi
+          fi
       - run: pnpm typecheck && pnpm lint && pnpm test && pnpm build
       - name: Broad type-aware static analysis (advisory)
         if: runner.os == 'Linux'

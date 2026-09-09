@@ -70,6 +70,56 @@ Other file types are published as files and require a token:
 npx schaffa upload ./diagram.png --token "sfa_…"
 ```
 
+## Video walkthroughs
+
+```sh
+# Record a guide and attach its video player and download
+schaffa record --title "Create a project" --browser https://app.example.com --video
+
+# Record only a video, locally, without a token or server guide
+schaffa video record --browser https://app.example.com --title "Create a project" --output ./demo.webm
+
+# Opt in to publishing the standalone video
+schaffa video record --browser https://app.example.com --upload
+
+# Export a saved recording again with a different output filename
+schaffa video export --manifest .schaffa/videos/<id>/video/video.json --output ./demo-v2.webm
+
+# Export and attach the active guide's saved recording
+schaffa guide video
+```
+
+Install **ffmpeg with libvpx-vp9** and Chrome or Chromium before recording video.
+Use `--browser-executable <path>` to select Chromium. Close the recorded browser
+or press Ctrl+C to finish. Alt+Shift+R pauses and resumes capture.
+
+Browser video preserves page transitions and scrolling at up to ten captured
+frames per second. Export adds a smooth cursor approach and expanding click ring,
+holds each click for 2.5 seconds, and leaves the final result visible for two
+seconds. Captions show the clicked control's label. The cursor follows an
+illustrative path between click positions; actual pointer movement and audio
+are not recorded. Output is a fixed 1280 × 800 WebM with a caption area, rendered
+at 20 fps. Record desktop and mobile demonstrations separately.
+
+Video follows the first browser tab only. Frames from sensitive URLs and pages
+containing password, payment, or explicitly private controls are excluded.
+Visible personal data elsewhere still needs review. Local captures are limited
+to 512 MiB and stay in `.schaffa/`; exports refuse to overwrite existing files.
+
+`--video` also works with `--chrome` and `--desktop` guide recording. Those
+native adapters produce animated walkthroughs from their saved screenshots,
+with the same pacing and click effects. Use `--browser` for continuous motion.
+`schaffa video export` accepts either `video.json` or an older guide's
+`manifest.json`. An export reflects the saved capture, not subsequent guide edits.
+Attaching a saved video requires matching capture edit metadata. Older manifests
+without it can be exported locally, but cannot be attached with `guide video`.
+
+Guide videos are uploaded through the normal file scan pipeline and attached
+only after scanning passes. Editing a guide removes its attached video from the
+new revision; previous revisions retain theirs. A failed export leaves the
+recording available for retry. Standalone `--upload` publishes the finished file;
+without it, recording and export require no Schaffa token.
+
 ## Use a token
 
 A token is required for permanent HTML pages and file uploads.

@@ -26,9 +26,11 @@ import {
   type GuideResult,
   getGuide,
   replaceGuideScreenshot,
+  setGuideVideo,
   startGuide,
   updateGuideStep,
   upload,
+  waitForVideoScan,
 } from "./client.js";
 import {
   findChromeExecutable,
@@ -44,12 +46,16 @@ import {
   syncRecording,
 } from "./recorder.js";
 import { resolveToken } from "./token.js";
+import { assertGuideVideoProvenance, checkVideoEncoder, exportVideo } from "./video.js";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const help = `Schaffa publishes pages, presentations, files, and incrementally recorded guides.
 
 Usage:
+  schaffa video record --browser <url> [--title <title>] [--output <file.webm>] [--upload] [--json]
+  schaffa video export --manifest <video.json|manifest.json> --output <file.webm> [--json]
+  schaffa guide video [--manifest <path>] [--output <file.webm>] [--json]
   schaffa upload <file> [--token <token>] [--interactive] [--json]
   schaffa publish <deck.md> --kind presentation [--export pdf] [--export pptx] [--json]
   schaffa record --title <title> --chrome <url> [--browser-executable <path>] [--json]
@@ -71,6 +77,8 @@ Environment:
 
 The guide commands persist the active random slug and edit revision in
 .schaffa/guide-session.json so an interrupted recording can be resumed.
+Add --video to record or guide record to export and attach a video walkthrough.
+Video export requires local ffmpeg with libvpx-vp9 and Chromium. Standalone video is local unless --upload is requested.
 Automatic recordings also keep every original screenshot and a manifest under
 .schaffa/recordings/<slug>/ before uploading each captured click immediately.
 
@@ -131,6 +139,8 @@ export function parseCliArgs(
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  if (args[0] === "video") return runVideo(args.slice(1));
+  if (args[0] === "guide" && args[1] === "video") return runGuideVideo(args.slice(2));
   if (args[0] === "record") return runAutomaticRecorder(args.slice(1), false);
   if (args[0] === "guide") {
     if (args[1] === "record") return runAutomaticRecorder(args.slice(2), true);
@@ -162,10 +172,12 @@ async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<vo
       "browser-executable": { type: "string" },
       token: { type: "string" },
       "ignore-token": { type: "boolean" },
+      video: { type: "boolean" },
     },
   });
   if (values.help) return void process.stdout.write(help);
   if (!values.title) throw new Error("record requires --title.");
+  if (values.video) checkVideoEncoder();
   const selectedToken = resolveToken(values);
   if (!selectedToken) throw new Error("SCHAFFA_TOKEN is required for guide operations.");
   const chromeUrl = values.chrome;
@@ -243,6 +255,7 @@ async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<vo
             onMessage: (message) => process.stderr.write(`${message}\n`),
           })
         : await recordBrowserGuide({
+            ...(values.video ? { video: true } : {}),
             guide: result,
             url: browserUrl as string,
             token: selectedToken,
@@ -259,6 +272,24 @@ async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<vo
     };
     await writeSession(result);
     if (recording.failedUploads === 0) {
+      if (values.video) {
+        const manifest =
+          "videoManifest" in recording && typeof recording.videoManifest === "string"
+            ? recording.videoManifest
+            : recording.manifestPath;
+        result = await getGuide({ ...common, slug: result.slug });
+        await assertGuideVideoProvenance(manifest, result);
+        const videoPath = await exportVideo({
+          manifest,
+          output: path.join(path.dirname(recording.manifestPath), `walkthrough-${Date.now()}.webm`),
+          executablePath: browserExecutable || findBrowserExecutable(values["browser-executable"]),
+        });
+        result = await getGuide({ ...common, slug: result.slug });
+        await assertGuideVideoProvenance(manifest, result);
+        const video = await publishVideo(videoPath, common);
+        result = await setGuideVideo({ ...common, ...result, videoUrl: video.publicUrl });
+        await writeSession(result);
+      }
       const finished = await finishGuide({ ...common, ...result });
       result = finished.guide;
       output = { ...finished, manifestPath: recording.manifestPath };
@@ -269,6 +300,142 @@ async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<vo
     process.stdout.write(values.json ? `${JSON.stringify(output)}\n` : `${result.publicUrl}\n`);
   } finally {
     await sessionLock.release();
+  }
+}
+
+async function publishVideo(filePath: string, common: { token: string; baseUrl?: string }) {
+  process.stderr.write("Uploading video and waiting for scanning…\n");
+  const video = await upload({ ...common, filePath });
+  if (video.statusUrl)
+    await waitForVideoScan({
+      statusUrl: video.statusUrl,
+      ...(common.baseUrl ? { baseUrl: common.baseUrl } : {}),
+    });
+  return video;
+}
+
+function videoArgs(args: string[]) {
+  return parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      help: { type: "boolean", short: "h" },
+      browser: { type: "string" },
+      "browser-executable": { type: "string" },
+      title: { type: "string" },
+      manifest: { type: "string" },
+      output: { type: "string" },
+      upload: { type: "boolean" },
+      json: { type: "boolean" },
+      token: { type: "string" },
+      "ignore-token": { type: "boolean" },
+    },
+  });
+}
+
+async function runVideo(args: string[]): Promise<void> {
+  const { values, positionals } = videoArgs(args);
+  if (values.help) return void process.stdout.write(help);
+  const command = positionals[0];
+  if (positionals.length !== 1 || !["record", "export"].includes(command || ""))
+    throw new Error("Use schaffa video record or schaffa video export.");
+  if (command === "record" && (!values.browser || values.manifest))
+    throw new Error("video record requires --browser <url> and does not accept --manifest.");
+  if (command === "export" && (!values.manifest || !values.output || values.browser))
+    throw new Error("video export requires --manifest and --output.");
+  const token = values.upload ? resolveToken(values) : undefined;
+  if (values.upload && !token) throw new Error("Video upload requires SCHAFFA_TOKEN.");
+  checkVideoEncoder();
+  const executablePath = findBrowserExecutable(values["browser-executable"]);
+  const directory = path.resolve(".schaffa", "videos", randomUUID());
+  let manifest = values.manifest;
+  if (command === "record") {
+    const url = new URL(values.browser as string);
+    if (!["http:", "https:"].includes(url.protocol))
+      throw new Error("Video recording requires an HTTP or HTTPS URL.");
+    // A local sink uses the same capture pipeline without starting or publishing a server guide.
+    const result = await recordBrowserGuide({
+      guide: {
+        slug: path.basename(directory),
+        targetUrl: url.href,
+        status: "recording",
+        revision: 0,
+        editRevision: 0,
+        publicUrl: "",
+        apiUrl: "",
+        steps: [],
+      },
+      url: url.href,
+      token: "",
+      localOnly: true,
+      video: true,
+      outputDirectory: directory,
+      browserExecutable: executablePath,
+      onMessage: (message) => process.stderr.write(`${message}\n`),
+    });
+    manifest = result.videoManifest;
+  }
+  if (!manifest) throw new Error("No video manifest was captured.");
+  process.stderr.write("Rendering paced video…\n");
+  const filePath = await exportVideo({
+    manifest,
+    output: values.output || path.join(directory, "walkthrough.webm"),
+    executablePath,
+    ...(values.title ? { title: values.title } : {}),
+  });
+  const published = token
+    ? await publishVideo(filePath, {
+        token,
+        ...(process.env.SCHAFFA_URL ? { baseUrl: process.env.SCHAFFA_URL } : {}),
+      })
+    : undefined;
+  process.stdout.write(
+    values.json
+      ? `${JSON.stringify({ filePath, manifestPath: manifest, ...published })}\n`
+      : `${published?.publicUrl || filePath}\n`,
+  );
+}
+
+async function runGuideVideo(args: string[]): Promise<void> {
+  const { values, positionals } = videoArgs(args);
+  if (values.help) return void process.stdout.write(help);
+  if (positionals.length || values.browser || values.upload)
+    throw new Error("guide video accepts --manifest, --output, and --browser-executable.");
+  const token = resolveToken(values);
+  if (!token) throw new Error("Guide video requires SCHAFFA_TOKEN.");
+  checkVideoEncoder();
+  const lock = await acquireGuideSessionLock();
+  try {
+    const session = await readSession();
+    const common = {
+      token,
+      ...(process.env.SCHAFFA_URL ? { baseUrl: process.env.SCHAFFA_URL } : {}),
+    };
+    let guide = await getGuide({ ...common, slug: session.slug });
+    const directory = path.resolve(".schaffa", "recordings", guide.slug);
+    const manifest =
+      values.manifest ||
+      (await readFile(path.join(directory, "video", "video.json")).then(
+        () => path.join(directory, "video", "video.json"),
+        () => path.join(directory, "manifest.json"),
+      ));
+    await assertGuideVideoProvenance(manifest, guide);
+    const filePath = await exportVideo({
+      manifest,
+      output: values.output || path.join(directory, `walkthrough-${Date.now()}.webm`),
+      executablePath: findBrowserExecutable(values["browser-executable"]),
+    });
+    guide = await getGuide({ ...common, slug: guide.slug });
+    await assertGuideVideoProvenance(manifest, guide);
+    const video = await publishVideo(filePath, common);
+    guide = await setGuideVideo({ ...common, ...guide, videoUrl: video.publicUrl });
+    await writeSession(guide);
+    process.stdout.write(
+      values.json ? `${JSON.stringify({ guide, filePath, video })}\n` : `${guide.publicUrl}\n`,
+    );
+  } finally {
+    await lock.release();
   }
 }
 
