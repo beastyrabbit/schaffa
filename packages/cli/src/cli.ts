@@ -282,7 +282,7 @@ async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<vo
         const videoPath = await exportVideo({
           manifest,
           output: path.join(path.dirname(recording.manifestPath), `walkthrough-${Date.now()}.webm`),
-          executablePath: findBrowserExecutable(values["browser-executable"]),
+          executablePath: browserExecutable || findBrowserExecutable(values["browser-executable"]),
         });
         result = await getGuide({ ...common, slug: result.slug });
         await assertGuideVideoProvenance(manifest, result);
