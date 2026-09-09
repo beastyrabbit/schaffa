@@ -51,12 +51,14 @@ const report: Report = {
   findings: [],
 };
 
+let stage = "checkout";
 try {
   const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" });
   if (revision.status !== 0 || revision.stdout.trim() !== head) throw new Error("Wrong checkout");
   const merge = spawnSync("git", ["merge-base", head, base], { cwd: root, encoding: "utf8" });
   if (merge.status !== 0 || !SHA.test(merge.stdout.trim())) throw new Error("Missing merge base");
   report.mergeBase = merge.stdout.trim();
+  stage = "engine-download";
   const binary = process.env.OPENGREP_BINARY ?? resolve(required("RUNNER_TEMP"), "opengrep");
   if (!process.env.OPENGREP_BINARY) {
     const response = await fetch(
@@ -68,10 +70,12 @@ try {
     if (!response.ok) throw new Error("Engine download failed");
     writeFileSync(binary, Buffer.from(await response.arrayBuffer()));
   }
+  stage = "engine-integrity";
   if (createHash("sha256").update(readFileSync(binary)).digest("hex") !== ENGINE_SHA256) {
     throw new Error("Engine checksum mismatch");
   }
   chmodSync(binary, 0o700);
+  stage = "rule-integrity";
   const vendor = fileURLToPath(new URL("../../.github/opengrep/vendor/", import.meta.url));
   const manifest = JSON.parse(readFileSync(resolve(vendor, "manifest.json"), "utf8")) as {
     profiles: Record<string, string[]>;
@@ -138,15 +142,24 @@ try {
   ];
   if (process.env.SCAN_MODE === "pr") args.push("--baseline-commit", report.mergeBase);
   args.push(".");
+  stage = "engine-execution";
   const scan = spawnSync(binary, args, {
     cwd: root,
     encoding: "utf8",
     maxBuffer: 32 * 1024 * 1024,
     timeout: 1800000,
-    env: { ...process.env, SEMGREP_SEND_METRICS: "off" },
+    env: {
+      ...process.env,
+      SEMGREP_SEND_METRICS: "off",
+      // Minimal ARC images otherwise make the bundled Python read Unicode rules as ASCII.
+      LANG: "C.UTF-8",
+      LC_ALL: "C.UTF-8",
+      PYTHONUTF8: "1",
+    },
   });
   // Raw output stays in memory: it can contain source code and must never enter CI logs/artifacts.
   if (scan.error) throw new Error("Scanner failed");
+  stage = `engine-output (exit ${scan.status ?? "signal"})`;
   const raw = JSON.parse(scan.stdout);
   if (
     !Array.isArray(raw.errors) ||
@@ -181,13 +194,14 @@ try {
       a.path.localeCompare(b.path) ||
       a.line - b.line,
   );
+  stage = "report-validation";
   validateReport(report);
 } catch {
   report.status = "incomplete";
   report.errorCount = Math.max(report.errorCount, 1);
   report.findings = [];
   process.stderr.write(
-    "OpenGrep did not complete. Raw scanner output was withheld to protect source data.\n",
+    `OpenGrep did not complete at ${stage}. Raw scanner output was withheld to protect source data.\n`,
   );
 } finally {
   report.seconds = Math.round((Date.now() - started) / 1000);

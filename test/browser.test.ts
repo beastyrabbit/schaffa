@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import puppeteer from "puppeteer-core";
+import puppeteer, { type Page } from "puppeteer-core";
 import {
   app,
   assert,
@@ -135,9 +135,7 @@ test("local presentation assets, screenshot keyboard navigation, and browser rec
       path: path.join(process.env.SCHAFFA_TEST_EVIDENCE_DIR, "guide-focus.png"),
     });
   }
-  const popup = new Promise<import("puppeteer-core").Page | null>((resolve) =>
-    page.once("popup", resolve),
-  );
+  const popup = new Promise<Page | null>((resolve) => page.once("popup", resolve));
   await page.keyboard.press("Enter");
   const enlarged = await popup;
   assert.ok(enlarged);
