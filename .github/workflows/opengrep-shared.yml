@@ -65,14 +65,29 @@ jobs:
           node-version: 24.21.0
           package-manager-cache: false
       # No installation, local Action, build, hook, submodule or repository script is run from source.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ steps.metadata.outputs.head }}
-          path: source
-          fetch-depth: 0
-          persist-credentials: false
-          submodules: false
-          lfs: false
+      - name: Fetch source without submodule processing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCAN_HEAD: ${{ steps.metadata.outputs.head }}
+          SCAN_BASE: ${{ steps.metadata.outputs.base }}
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_LFS_SKIP_SMUDGE: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" =~ ^beastyrabbit/[A-Za-z0-9_.-]+$ ]]
+          git init --template= source
+          git -C source remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          (
+            export GIT_CONFIG_COUNT=1
+            export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+            export GIT_CONFIG_VALUE_0
+            git -C source fetch --no-recurse-submodules --no-tags origin "$SCAN_HEAD" "$SCAN_BASE"
+          )
+          git -C source checkout --no-recurse-submodules --force --detach "$SCAN_HEAD"
       - name: Scan source as data
         env:
           SCAN_ROOT: ${{ github.workspace }}/source
