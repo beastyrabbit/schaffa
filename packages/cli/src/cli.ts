@@ -46,7 +46,7 @@ import {
   syncRecording,
 } from "./recorder.js";
 import { resolveToken } from "./token.js";
-import { checkVideoEncoder, exportVideo } from "./video.js";
+import { assertGuideVideoProvenance, checkVideoEncoder, exportVideo } from "./video.js";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -277,11 +277,15 @@ async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<vo
           "videoManifest" in recording && typeof recording.videoManifest === "string"
             ? recording.videoManifest
             : recording.manifestPath;
+        result = await getGuide({ ...common, slug: result.slug });
+        await assertGuideVideoProvenance(manifest, result);
         const videoPath = await exportVideo({
           manifest,
           output: path.join(path.dirname(recording.manifestPath), `walkthrough-${Date.now()}.webm`),
           executablePath: findBrowserExecutable(values["browser-executable"]),
         });
+        result = await getGuide({ ...common, slug: result.slug });
+        await assertGuideVideoProvenance(manifest, result);
         const video = await publishVideo(videoPath, common);
         result = await setGuideVideo({ ...common, ...result, videoUrl: video.publicUrl });
         await writeSession(result);
@@ -416,18 +420,14 @@ async function runGuideVideo(args: string[]): Promise<void> {
         () => path.join(directory, "video", "video.json"),
         () => path.join(directory, "manifest.json"),
       ));
-    const recorded = JSON.parse(await readFile(manifest, "utf8"));
-    if ((recorded.guideSlug || recorded.slug) !== guide.slug)
-      throw new Error("The video manifest does not belong to the active guide.");
-    if (guide.revision > 1)
-      throw new Error(
-        "This guide has been edited. Record a new video matching the current steps before attaching it through the API.",
-      );
+    await assertGuideVideoProvenance(manifest, guide);
     const filePath = await exportVideo({
       manifest,
       output: values.output || path.join(directory, `walkthrough-${Date.now()}.webm`),
       executablePath: findBrowserExecutable(values["browser-executable"]),
     });
+    guide = await getGuide({ ...common, slug: guide.slug });
+    await assertGuideVideoProvenance(manifest, guide);
     const video = await publishVideo(filePath, common);
     guide = await setGuideVideo({ ...common, ...guide, videoUrl: video.publicUrl });
     await writeSession(guide);

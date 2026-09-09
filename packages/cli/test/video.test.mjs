@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { waitForVideoScan } from "../dist/client.js";
-import { createVideoCapture, readVideoTimeline } from "../dist/video.js";
+import {
+  assertGuideVideoProvenance,
+  createVideoCapture,
+  readVideoTimeline,
+} from "../dist/video.js";
 
 test("video capture retains click order, excludes paused clicks, and persists owner identity", {}, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "schaffa-video-"));
@@ -85,4 +89,32 @@ test("capture failure stays failed when reopening the saved manifest", {}, async
   capture.frame(Buffer.from("too large"));
   await assert.rejects(capture.finish(), /size limit/);
   await assert.rejects(readVideoTimeline(path.join(directory, "video.json")), /incomplete/);
+});
+
+test("guide video rejects draft edits while allowing an unchanged first publication", {}, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "schaffa-video-provenance-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const manifest = path.join(directory, "video.json");
+  const guide = { slug: "abc234def567", status: "recording", revision: 0, editRevision: 3 };
+  await writeFile(manifest, JSON.stringify({ guideSlug: guide.slug, guideEditRevision: 3 }));
+  await assertGuideVideoProvenance(manifest, guide);
+  await assert.rejects(
+    assertGuideVideoProvenance(manifest, { ...guide, editRevision: 4 }),
+    /guide changed/,
+  );
+  await assertGuideVideoProvenance(manifest, {
+    ...guide,
+    status: "published",
+    revision: 1,
+    editRevision: 4,
+  });
+  await assert.rejects(
+    assertGuideVideoProvenance(manifest, {
+      ...guide,
+      status: "published",
+      revision: 2,
+      editRevision: 5,
+    }),
+    /guide changed/,
+  );
 });

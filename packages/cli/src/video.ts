@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import type { GuideClickMarker } from "./client.js";
+import type { GuideClickMarker, GuideResult } from "./client.js";
 
 export interface VideoFrame {
   file: string;
@@ -25,6 +25,7 @@ export interface VideoTimeline {
   schemaVersion: 1;
   failure?: string;
   guideSlug?: string;
+  guideEditRevision?: number;
   frames: VideoFrame[];
 }
 
@@ -81,9 +82,10 @@ export async function createVideoCapture(
       const frame = timeline.frames.at(-1);
       if (frame) timeline.frames.push({ ...frame, click: marker, caption });
     },
-    async finish() {
+    async finish(guideEditRevision?: number) {
       active = false;
       await pending;
+      if (guideEditRevision !== undefined) timeline.guideEditRevision = guideEditRevision;
       if (failure) timeline.failure = failure.message;
       const manifest = path.join(directory, "video.json");
       await writeFile(manifest, `${JSON.stringify(timeline)}\n`, { mode: 0o600 });
@@ -91,6 +93,26 @@ export async function createVideoCapture(
       return manifest;
     },
   };
+}
+
+export async function assertGuideVideoProvenance(
+  manifest: string,
+  guide: GuideResult,
+): Promise<void> {
+  const recorded = JSON.parse(await readFile(manifest, "utf8"));
+  if ((recorded.guideSlug || recorded.slug) !== guide.slug)
+    throw new Error("The video manifest does not belong to the active guide.");
+  const captured = recorded.guideEditRevision;
+  // Finishing an otherwise unchanged guide adds one edit revision.
+  const justFinished =
+    guide.status === "published" &&
+    guide.revision === 1 &&
+    !guide.videoUrl &&
+    guide.editRevision === captured + 1;
+  if (!Number.isSafeInteger(captured) || (captured !== guide.editRevision && !justFinished))
+    throw new Error(
+      "The guide changed or this capture has no edit provenance. Record a new matching video; the saved recording can still be exported locally with video export.",
+    );
 }
 
 export async function readVideoTimeline(manifest: string): Promise<VideoTimeline> {

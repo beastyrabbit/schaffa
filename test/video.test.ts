@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -21,9 +21,15 @@ const { findBrowserExecutable, isVideoPageSafe, recordBrowserGuide } = await imp
   "../packages/cli/dist/recorder.js"
 );
 const { exportVideo } = await import("../packages/cli/dist/video.js");
-const { startGuide, setGuideVideo, upload, finishGuide, updateGuideStep } = await import(
-  "../packages/cli/dist/client.js"
-);
+const {
+  startGuide,
+  setGuideVideo,
+  upload,
+  finishGuide,
+  updateGuideStep,
+  addGuideStep,
+  deleteGuideStep,
+} = await import("../packages/cli/dist/client.js");
 
 test("continuous guide and standalone recording export paced video that plays in the published guide", {
   timeout: 120_000,
@@ -113,6 +119,47 @@ test("continuous guide and standalone recording export paced video that plays in
     { cwd: directory },
   );
   assert.equal(JSON.parse(cliExport.stdout).filePath, output);
+  let draft = await startGuide({ ...common, title: "Draft correction" });
+  draft = await addGuideStep({
+    ...common,
+    ...draft,
+    title: "Remove this step",
+    description: "An obsolete captured step.",
+    capture: false,
+  });
+  const staleManifest = path.join(directory, "stale-video.json");
+  await writeFile(
+    staleManifest,
+    JSON.stringify({ ...timeline, guideSlug: draft.slug, guideEditRevision: draft.editRevision }),
+  );
+  const draftStep = draft.steps[0];
+  assert.ok(draftStep);
+  draft = await deleteGuideStep({ ...common, ...draft, stepId: draftStep.id });
+  await mkdir(path.join(directory, ".schaffa"));
+  await writeFile(
+    path.join(directory, ".schaffa", "guide-session.json"),
+    JSON.stringify({ slug: draft.slug, editRevision: draft.editRevision }),
+  );
+  const filesBefore = db().prepare("SELECT COUNT(*) AS count FROM files").get();
+  await assert.rejects(
+    promisify(execFile)(
+      process.execPath,
+      [
+        fileURLToPath(new URL("../packages/cli/dist/cli.js", import.meta.url)),
+        "guide",
+        "video",
+        "--manifest",
+        staleManifest,
+      ],
+      { cwd: directory, env: { ...process.env, SCHAFFA_TOKEN: owner.token, SCHAFFA_URL: origin } },
+    ),
+    /guide changed/,
+  );
+  assert.deepEqual(
+    db().prepare("SELECT COUNT(*) AS count FROM files").get(),
+    filesBefore,
+    "stale draft video is rejected before upload",
+  );
   const probe = JSON.parse(
     (
       await promisify(execFile)("ffprobe", [

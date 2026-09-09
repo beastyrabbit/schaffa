@@ -111,6 +111,8 @@ native adapters produce animated walkthroughs from their saved screenshots,
 with the same pacing and click effects. Use `--browser` for continuous motion.
 `schaffa video export` accepts either `video.json` or an older guide's
 `manifest.json`. An export reflects the saved capture, not subsequent guide edits.
+Attaching a saved video requires matching capture edit metadata. Older manifests
+without it can be exported locally, but cannot be attached with `guide video`.
 
 Guide videos are uploaded through the normal file scan pipeline and attached
 only after scanning passes. Editing a guide removes its attached video from the

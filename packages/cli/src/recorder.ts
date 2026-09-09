@@ -55,6 +55,7 @@ interface RecordedStep {
 
 interface RecordingManifest {
   schemaVersion: 1;
+  guideEditRevision?: number;
   recordingId?: string;
   slug: string;
   publicUrl: string;
@@ -448,12 +449,19 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
     await videoWork;
     await captureQueue;
     await uploads.drain();
+    const uploadedSteps = manifest.steps.filter((step) => step.status === "uploaded").length;
+    if (
+      !options.localOnly &&
+      uploads.guide.editRevision === options.guide.editRevision + uploadedSteps
+    ) {
+      manifest.guideEditRevision = uploads.guide.editRevision;
+    }
     if (terminationTimer) clearTimeout(terminationTimer);
     await saveManifestSafely();
     if (browser.connected) await browser.close().catch(() => undefined);
     process.off("SIGINT", interrupt);
     process.off("SIGTERM", terminate);
-    if (video) videoManifest = await video.finish();
+    if (video) videoManifest = await video.finish(manifest.guideEditRevision);
   }
 
   if (terminated) {
