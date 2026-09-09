@@ -17,10 +17,12 @@ import {
   test,
 } from "./server-fixture.js";
 
-const { findBrowserExecutable, isVideoPageSafe, recordBrowserGuide } = await import(
-  "../packages/cli/dist/recorder.js"
-);
-const { exportVideo } = await import("../packages/cli/dist/video.js");
+const { findBrowserExecutable, isVideoPageSafe, recordBrowserGuide } = (await import(
+  new URL("../packages/cli/dist/recorder.js", import.meta.url).href
+)) as typeof import("../packages/cli/src/recorder.js");
+const { exportVideo } = (await import(
+  new URL("../packages/cli/dist/video.js", import.meta.url).href
+)) as typeof import("../packages/cli/src/video.js");
 const {
   startGuide,
   setGuideVideo,
@@ -29,7 +31,9 @@ const {
   updateGuideStep,
   addGuideStep,
   deleteGuideStep,
-} = await import("../packages/cli/dist/client.js");
+} = (await import(
+  new URL("../packages/cli/dist/client.js", import.meta.url).href
+)) as typeof import("../packages/cli/src/client.js");
 
 test("continuous guide and standalone recording export paced video that plays in the published guide", {
   timeout: 120_000,
