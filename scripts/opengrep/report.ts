@@ -55,7 +55,7 @@ async function all<T>(path: string): Promise<T[]> {
 
 async function publish(): Promise<void> {
   const reportPath = process.env.REPORT_PATH ?? "";
-  if (statSync(reportPath).size > 2 * 1024 * 1024) throw new Error("Oversized report");
+  if (statSync(reportPath).size > 32 * 1024 * 1024) throw new Error("Oversized report");
   const file = readFileSync(reportPath);
   const report = validateReport(JSON.parse(file.toString("utf8")));
   if (

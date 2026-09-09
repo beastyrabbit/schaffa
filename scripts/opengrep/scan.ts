@@ -146,7 +146,7 @@ try {
   const scan = spawnSync(binary, args, {
     cwd: root,
     encoding: "utf8",
-    maxBuffer: 32 * 1024 * 1024,
+    maxBuffer: 256 * 1024 * 1024,
     timeout: 1800000,
     env: {
       ...process.env,
@@ -158,7 +158,11 @@ try {
     },
   });
   // Raw output stays in memory: it can contain source code and must never enter CI logs/artifacts.
-  if (scan.error) throw new Error("Scanner failed");
+  if (scan.error) {
+    if (scan.error.code === "ENOBUFS") stage = "engine-output-buffer-limit";
+    if (scan.error.code === "ETIMEDOUT") stage = "engine-timeout";
+    throw new Error("Scanner failed");
+  }
   stage = `engine-output (exit ${scan.status ?? "signal"})`;
   const raw = JSON.parse(scan.stdout);
   if (

@@ -62,7 +62,7 @@ export function validateReport(value: unknown): Report {
     !Number.isFinite(r.seconds) ||
     r.seconds < 0 ||
     !Array.isArray(r.findings) ||
-    r.findings.length > 10000 ||
+    r.findings.length > 100000 ||
     (r.status === "complete" && (r.errorCount !== 0 || r.files === 0)) ||
     (r.status === "not-applicable" &&
       (r.errorCount !== 0 || r.files !== 0 || r.findings.length !== 0))
