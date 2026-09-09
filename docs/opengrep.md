@@ -183,5 +183,28 @@ previous tested version to recover. Do not silently turn technical failures gree
   suite, including its Chrome browser test, passes; platform-specific native
   macOS tests retain their existing skips on Linux.
 
-Live ARC scheduling, restricted-network connectivity, GitHub comment permissions,
-the complete PR/fix cycle and a private caller still require deployment evidence.
+## Live acceptance evidence, 2026-09-09
+
+The [full Schaffa scan](https://github.com/beastyrabbit/schaffa/actions/runs/34398262970)
+completed on the restricted ARC runner: 124 files, 1,630 findings, 73 seconds,
+zero technical errors. Explicit UTF-8 fixes rule loading in the minimal runner
+image. An equivalent type-only import in the browser test resolves the parser
+limitation observed during local acceptance without excluding the test.
+
+The temporary [acceptance PR](https://github.com/beastyrabbit/schaffa/pull/3)
+verified a new eval finding, the inline review, the summary and a neutral check
+on the PR head. After replacing eval with constant arithmetic, the same summary
+reported zero new findings and the new head check succeeded. The PR is closed
+without merging the fixture.
+
+The live runner uses UID 1001, drops all capabilities, disallows privilege
+escalation and mounts no Kubernetes service-account token. Connectivity probes
+reached GitHub and nodejs.org and could not reach the Kubernetes API or the
+tested homelab destination. A private repository also completed a full scan
+through this public reusable workflow and retained its report in its own run.
+
+Other repositories can still produce parser errors or timeouts. Those results
+remain incomplete; successful workflow delivery is not evidence that every
+file can be analyzed by the engine. Repository rollout status is tracked in
+the private homelab documentation. Daily caller schedules are staggered to
+reduce simultaneous runner demand.
