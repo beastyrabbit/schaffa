@@ -320,6 +320,41 @@ export async function finishGuide(options: GuideMutationOptions): Promise<GuideO
   );
 }
 
+export async function setGuideVideo(
+  options: GuideMutationOptions & { videoUrl: string },
+): Promise<GuideResult> {
+  return guideRequest(options, `/api/guides/${encodeURIComponent(options.slug)}`, {
+    method: "PATCH",
+    headers: { "If-Match": String(options.editRevision), "Content-Type": "application/json" },
+    body: JSON.stringify({ videoUrl: options.videoUrl }),
+  });
+}
+
+export async function waitForVideoScan(options: {
+  statusUrl: string;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+}): Promise<void> {
+  const base = new URL(options.baseUrl || "https://schaffa.dev");
+  const status = new URL(options.statusUrl);
+  if (status.origin !== base.origin || !/^\/f\/[A-Za-z0-9_-]+\.webm\/status$/.test(status.pathname))
+    throw new Error("Invalid video scan status URL.");
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const response = await (options.fetch || fetch)(status, {
+      signal: AbortSignal.timeout(10_000),
+      redirect: "error",
+    });
+    if (!response.ok) throw new Error("Could not check the video scan.");
+    const result = (await response.json()) as { scanStatus: string };
+    if (result.scanStatus === "clean") return;
+    if (result.scanStatus === "rejected") throw new Error("Video was rejected by scanning.");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error(
+    "Video scan is still pending. Retry guide video export after scanning completes.",
+  );
+}
+
 export interface GuideMutationOptions {
   slug: string;
   editRevision: number;

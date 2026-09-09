@@ -78,6 +78,7 @@ export interface GuideView {
   title: string;
   description: string | null;
   targetUrl: string | null;
+  videoUrl?: string | null;
   language: string;
   status: GuideStatus;
   revision: number;
@@ -152,6 +153,7 @@ export function updateGuide(
     targetUrl?: unknown;
     language?: unknown;
     status?: unknown;
+    videoUrl?: unknown;
   },
   tokenId: string,
   isAdmin: boolean,
@@ -170,12 +172,14 @@ export function updateGuide(
   const targetUrl =
     input.targetUrl === undefined ? guide.target_url : validateTargetUrl(input.targetUrl);
   const language = input.language === undefined ? guide.language : validateLanguage(input.language);
+  const videoUrl =
+    input.videoUrl === undefined ? null : validateGuideVideo(input.videoUrl, guide.owner_token_id);
   mutateGuide(
     guide.id,
     expectedRevision,
-    `UPDATE guides SET title = ?, description = ?, target_url = ?, language = ?, status = ?,
+    `UPDATE guides SET title = ?, description = ?, target_url = ?, language = ?, status = ?, video_url = ?,
      edit_revision = edit_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND edit_revision = ?`,
-    [title, description, targetUrl, language, guide.status, guide.id, expectedRevision],
+    [title, description, targetUrl, language, guide.status, videoUrl, guide.id, expectedRevision],
   );
   return getOwnedGuide(slug, tokenId, isAdmin);
 }
@@ -652,10 +656,45 @@ export function guidePreflight(guide: GuideView): GuidePreflight {
   return { ready: errors.length === 0, errors, warnings, missingScreenshots, sensitiveFindings };
 }
 
+function validateGuideVideo(value: unknown, owner: string): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string")
+    throw new AppError("videoUrl must be a Schaffa video URL or null.", 422);
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new AppError("Invalid videoUrl.", 422);
+  }
+  if (
+    url.origin !== new URL(config.baseUrl).origin ||
+    url.search ||
+    url.hash ||
+    url.username ||
+    url.password ||
+    !/^\/f\/[A-Za-z0-9_-]+\.(webm|mp4)$/.test(url.pathname)
+  )
+    throw new AppError("videoUrl must reference a video uploaded to this Schaffa instance.", 422);
+  const file = db()
+    .prepare("SELECT created_by_token_id, media_type, scan_status FROM files WHERE filename = ?")
+    .get(url.pathname.slice(3)) as
+    | { created_by_token_id: string; media_type: string; scan_status: string }
+    | undefined;
+  if (
+    !file ||
+    file.created_by_token_id !== owner ||
+    !["video/webm", "video/mp4"].includes(file.media_type) ||
+    file.scan_status !== "clean"
+  )
+    throw new AppError("The guide owner must upload a video that has passed scanning first.", 422);
+  return url.href;
+}
+
 export function renderGuideMarkdown(guide: GuideView): string {
   const lines = [`# ${guide.title}`, ""];
   if (guide.description) lines.push(guide.description, "");
   if (guide.targetUrl) lines.push(`[Ziel öffnen](<${guide.targetUrl}>)`, "");
+  if (guide.videoUrl) lines.push(`[Video ansehen und herunterladen](<${guide.videoUrl}>)`, "");
   lines.push(`Revision ${guide.revision}`, "");
   for (const [index, step] of guide.steps.filter((item) => item.visible).entries()) {
     lines.push(`## ${index + 1}. ${step.title}`, "", step.description, "");
@@ -699,7 +738,7 @@ export function renderGuideHtml(guide: GuideView): string {
     .join("");
   return `<!doctype html><html lang="${escapeHtml(guide.language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(guide.title)}</title><style>${guideCss}</style></head><body>
   <header><div><a class="brand" href="/">Schaffa</a><span>Guide · Revision ${guide.revision}</span></div><h1>${escapeHtml(guide.title)}</h1>${guide.description ? `<p>${escapeHtml(guide.description)}</p>` : ""}<nav aria-label="Guide-Aktionen">${guide.targetUrl ? `<a class="target-link" href="${escapeHtml(guide.targetUrl)}">Ziel öffnen <span aria-hidden="true">↗</span></a>` : ""}<a href="${escapeHtml(guide.jsonUrl)}">JSON</a><a href="${escapeHtml(guide.markdownUrl)}">Markdown</a></nav></header>
-  <main><nav class="toc" aria-label="Schritte">${toc}</nav><article>${steps}</article></main>
+  <main><nav class="toc" aria-label="Schritte">${toc}</nav><article>${guide.videoUrl ? `<section aria-label="Video-Anleitung"><h2>Video-Anleitung</h2><video controls playsinline muted preload="metadata" aria-label="Video-Anleitung ohne Ton; Schritte stehen unter dem Video" style="width:100%;max-height:80vh" src="${escapeHtml(guide.videoUrl)}"></video><p><a href="${escapeHtml(guide.videoUrl)}" download>Video herunterladen</a></p></section>` : ""}${steps}</article></main>
   <footer>Veröffentlicht mit Schaffa · ${guide.steps.filter((step) => step.visible).length} Schritte</footer></body></html>`;
 }
 
@@ -725,6 +764,7 @@ function guideView(guide: GuideRow, steps: GuideStepRow[]): GuideView {
     title: guide.title,
     description: guide.description,
     targetUrl: guide.target_url,
+    videoUrl: guide.video_url,
     language: guide.language,
     status: guide.status,
     revision: guide.current_revision,
@@ -969,7 +1009,7 @@ function mutateGuide(
     const result = stepMutation
       ? db()
           .prepare(
-            `UPDATE guides SET status = ?, edit_revision = edit_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND edit_revision = ?`,
+            `UPDATE guides SET status = ?, video_url = NULL, edit_revision = edit_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND edit_revision = ?`,
           )
           .run(guide.status, guideId, expectedRevision)
       : db()
@@ -992,7 +1032,7 @@ function advanceGuideRevision(
 ): void {
   const result = db()
     .prepare(
-      `UPDATE guides SET status = ?, edit_revision = edit_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND edit_revision = ?`,
+      `UPDATE guides SET status = ?, video_url = NULL, edit_revision = edit_revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND edit_revision = ?`,
     )
     .run(status, guideId, expectedRevision);
   if (result.changes !== 1) throw conflict();

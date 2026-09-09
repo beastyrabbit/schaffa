@@ -13,6 +13,7 @@ import {
 } from "./client.js";
 
 import { appendRecordedStep, recordingUploadQueue } from "./recording-upload.js";
+import { createVideoCapture } from "./video.js";
 
 const recorderBinding = "__schaffaRecordClick";
 const pauseBinding = "__schaffaSetPaused";
@@ -68,6 +69,8 @@ export interface LatestFrame {
 }
 
 export interface RecorderOptions {
+  video?: boolean;
+  localOnly?: boolean;
   guide: GuideResult;
   url: string;
   token: string;
@@ -82,6 +85,7 @@ export interface RecorderOptions {
 }
 
 export interface RecorderResult {
+  videoManifest?: string;
   guide: GuideResult;
   manifestPath: string;
   failedUploads: number;
@@ -98,6 +102,12 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
   await mkdir(profileDirectory, { recursive: true, mode: 0o700 });
   await chmod(recordingDirectory, 0o700);
   await chmod(profileDirectory, 0o700);
+  const video = options.video
+    ? await createVideoCapture(
+        path.join(recordingDirectory, "video"),
+        options.localOnly ? undefined : options.guide.slug,
+      )
+    : undefined;
 
   const manifest: RecordingManifest = {
     schemaVersion: 1,
@@ -131,6 +141,49 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
   let stopping = false;
   let terminated = false;
   let paused = false;
+  let videoManifest: string | undefined;
+  let videoPage: Page | undefined;
+  let videoTimer: NodeJS.Timeout | undefined;
+  let videoWork = Promise.resolve();
+  let videoBusy = false;
+  let pauseRevision = 0;
+  const captureVideoFrame = () => {
+    if (!video || !videoPage || videoBusy || stopping) return videoWork;
+    const page = videoPage;
+    const revision = pauseRevision;
+    const safe = async () =>
+      !paused &&
+      !stopping &&
+      !page.isClosed() &&
+      !isSensitiveLocation(page.url()) &&
+      (await page.evaluate(
+        () =>
+          !document.querySelector(
+            'input[type="password"], [data-private], [data-sensitive], input[autocomplete^="cc-"], input[autocomplete="one-time-code"]',
+          ),
+      ));
+    videoBusy = true;
+    videoWork = (async () => {
+      try {
+        if (!(await safe())) {
+          video.pause();
+          return;
+        }
+        const data = await page.screenshot({
+          type: "jpeg",
+          quality: 85,
+          captureBeyondViewport: false,
+        });
+        if (revision === pauseRevision && (await safe())) video.frame(Buffer.from(data));
+        else video.pause();
+      } catch {
+        video.pause();
+      } finally {
+        videoBusy = false;
+      }
+    })();
+    return videoWork;
+  };
   const attachedPages = new WeakSet<Page>();
   const frameHistory = new WeakMap<Page, LatestFrame[]>();
   let captureQueue = Promise.resolve();
@@ -190,7 +243,11 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
   const queueUpload = (
     step: RecordedStep,
     input: Omit<Parameters<typeof addGuideStep>[0], "slug" | "editRevision" | "token" | "baseUrl">,
-  ) =>
+  ) => {
+    if (options.localOnly) {
+      step.status = "uploaded";
+      return;
+    }
     uploads.enqueue(step, {
       ...input,
       token: options.token,
@@ -198,6 +255,7 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
       fetch: uploadFetch,
       idempotencyKey: recorderIdempotencyKey(manifest, step.sequence),
     });
+  };
 
   const captureStep = async (
     page: Page,
@@ -318,15 +376,27 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
   const attachPage = async (page: Page) => {
     if (page.isClosed() || attachedPages.has(page)) return;
     attachedPages.add(page);
+    const pageVideo = video && (!videoPage || videoPage === page) ? video : undefined;
+    if (pageVideo) {
+      videoPage = page;
+      await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 });
+    }
     await page.exposeFunction(recorderBinding, (value: unknown) => {
       const click = parseRecordedClick(value);
       if (!click || stopping || paused) return;
+      if (click.sensitive || isSensitiveLocation(click.url)) pageVideo?.pause();
+      else {
+        const marker = markerFromClick(click);
+        if (marker) pageVideo?.click(marker, describeClick(click));
+      }
       const preClickFrame = selectPreClickFrame(frameHistory.get(page) || [], click.timestamp);
       void queueCapture(page, click, preClickFrame);
     });
     await page.exposeFunction(pauseBinding, (command: unknown) => {
       if (command === "toggle") {
         paused = !paused;
+        pauseRevision++;
+        video?.pause();
         options.onMessage?.(paused ? "Capture paused." : "Capture resumed.");
       }
       return paused;
@@ -372,6 +442,10 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
     await page.goto(options.url, { waitUntil: "domcontentloaded" });
     await waitForFreshFrame(page, frameHistory, 1_000);
     await queueCapture(page, null);
+    if (video) {
+      await captureVideoFrame();
+      videoTimer = setInterval(() => void captureVideoFrame(), 100);
+    }
     options.onMessage?.(
       "Recording. Close the browser or press Ctrl+C to stop. Alt+Shift+R pauses capture.",
     );
@@ -379,6 +453,8 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
     await browserClosed;
   } finally {
     stopping = true;
+    if (videoTimer) clearInterval(videoTimer);
+    await videoWork;
     await captureQueue;
     await uploads.drain();
     if (terminationTimer) clearTimeout(terminationTimer);
@@ -386,6 +462,7 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
     if (browser.connected) await browser.close().catch(() => undefined);
     process.off("SIGINT", interrupt);
     process.off("SIGTERM", terminate);
+    if (video) videoManifest = await video.finish();
   }
 
   if (terminated) {
@@ -395,6 +472,7 @@ export async function recordBrowserGuide(options: RecorderOptions): Promise<Reco
   }
 
   return {
+    ...(videoManifest ? { videoManifest } : {}),
     guide: uploads.guide,
     manifestPath,
     failedUploads: manifest.steps.filter((step) => step.status !== "uploaded").length,

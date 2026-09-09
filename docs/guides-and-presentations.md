@@ -121,3 +121,37 @@ Add those annotations to the replacement image before uploading it when needed.
 
 Desktop mode currently targets macOS. Other operating systems can continue to
 use manual guide steps until equivalent native helpers are implemented.
+
+## Guide and standalone video
+
+`schaffa record --browser <url> --title <title> --video` saves continuous browser
+frames locally and exports a paced WebM before finishing the guide. The existing
+Chrome-window and desktop adapters support `--video` using their saved stills.
+`schaffa video record --browser <url> --output demo.webm` records locally without
+creating a server guide; `--upload` explicitly publishes the result. Both use
+the same renderer. ffmpeg with libvpx-vp9 and a local Chromium are required.
+
+The browser sampler captures the first tab at up to 10 fps, checks private-screen
+conditions before and after screenshots, and drops work spanning a pause toggle.
+Rendering produces 1280 × 800 video at 20 fps, adds 2.5 seconds per click for
+cursor movement and a click ring, caps idle holds at three seconds, and holds
+the final frame for two seconds. Cursor paths are illustrated from click
+coordinates. Typed values, actual pointer paths, and audio are not event metadata.
+Screenshots can still contain visible personal information. Native still exports
+cannot recover transitions, scrolling, or a final state absent from the capture.
+
+Frames and `video/video.json` remain under the recording directory with owner-only
+permissions. Capture stops accepting frames at 512 MiB and fails export instead
+of silently publishing a truncated clip. `schaffa video export --manifest <path>
+--output <new.webm>` retries locally. Existing output files are never replaced.
+`schaffa guide video` exports a saved recording for the active guide. Edited
+guides require a new matching capture; exporting an old manifest does not apply
+later screenshot or text corrections.
+
+`PATCH /api/guides/:slug` accepts `videoUrl` or `null`. A video must be an MP4 or
+WebM uploaded to this instance by the guide's owning token and have a clean scan.
+The URL is saved in immutable revisions and exposed in JSON and Markdown. HTML
+renders native playback controls and a download link. Subsequent guide edits
+clear the video in the new revision, preserving older snapshots. File takedown
+still applies through the normal file endpoint. Videos are public file uploads,
+including when attached to a guide that has not been finished yet.

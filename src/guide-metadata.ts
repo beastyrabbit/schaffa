@@ -4,7 +4,11 @@ import type { DatabaseSync } from "node:sqlite";
 // The reserved '*' row holds the instance total.
 export function initializeGuideMetadata(database: DatabaseSync): void {
   const sources = [
-    { table: "guides", key: "id", fields: ["title", "description", "target_url", "language"] },
+    {
+      table: "guides",
+      key: "id",
+      fields: ["title", "description", "target_url", "video_url", "language"],
+    },
     {
       table: "guide_steps",
       key: "guide_id",
