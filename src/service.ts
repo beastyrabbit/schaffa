@@ -785,7 +785,7 @@ function sqliteTimestamp(timestamp: number): string {
 }
 
 function requireVirusScannerConfiguration(): void {
-  if (!config.clamavHost) {
+  if (config.scanner.provider !== "clamgate" && !config.clamavHost) {
     throw new AppError(
       "Uploads are unavailable because the virus scanner is not configured.",
       503,

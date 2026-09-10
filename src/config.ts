@@ -1,3 +1,4 @@
+import { createPublicKey } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
 import path from "node:path";
@@ -64,6 +65,56 @@ const baseUrl = readBaseUrl(
 );
 const shooBaseUrl = readBaseUrl("SHOO_BASE_URL", "https://shoo.dev");
 
+function scannerConfiguration() {
+  const provider = process.env.VIRUS_SCANNER || "clamav";
+  if (provider !== "clamav" && provider !== "clamgate") {
+    throw new Error("VIRUS_SCANNER must be clamav or clamgate.");
+  }
+  if (provider === "clamav") return { provider, clamgate: null } as const;
+  const baseUrl = process.env.CLAMGATE_BASE_URL || "";
+  const origin = new URL(baseUrl);
+  if (
+    origin.protocol !== "https:" ||
+    origin.username ||
+    origin.password ||
+    origin.pathname !== "/" ||
+    origin.search ||
+    origin.hash
+  ) {
+    throw new Error("CLAMGATE_BASE_URL must be an HTTPS origin.");
+  }
+  const keyFile = process.env.CLAMGATE_PUBLIC_KEY_FILE;
+  const keyId = process.env.CLAMGATE_PUBLIC_KEY_ID;
+  if (!keyFile || !keyId)
+    throw new Error("ClamGate requires CLAMGATE_PUBLIC_KEY_FILE and CLAMGATE_PUBLIC_KEY_ID.");
+  const publicKey = readFileSync(keyFile, "utf8");
+  if (
+    !publicKey.startsWith("-----BEGIN PUBLIC KEY-----") ||
+    createPublicKey(publicKey).asymmetricKeyType !== "ed25519"
+  ) {
+    throw new Error("ClamGate requires an Ed25519 SPKI public key.");
+  }
+  for (const [name, fallback] of [
+    ["MAX_PAGE_BYTES", 2 * 1024 * 1024],
+    ["MAX_FILE_BYTES", 256 * 1024 * 1024],
+    ["MAX_IMAGE_INPUT_BYTES", 32 * 1024 * 1024],
+    ["MAX_PUBLISHED_IMAGE_BYTES", 8 * 1024 * 1024],
+  ] as const) {
+    if (positiveInteger(name, fallback) > 2_147_483_645)
+      throw new Error(`${name} exceeds the ClamGate limit.`);
+  }
+  return {
+    provider,
+    clamgate: {
+      baseUrl,
+      publicKey,
+      keyId,
+      applicationToken: process.env.CLAMGATE_APPLICATION_TOKEN || "",
+      timeoutMs: boundedInteger("CLAMGATE_TIMEOUT_MS", 3_600_000, 1_000, 3_600_000),
+    },
+  } as const;
+}
+
 export const config = {
   version: readApplicationVersion(),
   host: process.env.HOST || "0.0.0.0",
@@ -97,6 +148,7 @@ export const config = {
   authenticatedUploadsPerHour: boundedInteger("AUTHENTICATED_UPLOADS_PER_HOUR", 120, 1, 10_000),
   userLoginsPerHour: boundedInteger("USER_LOGINS_PER_HOUR", 60, 1, 1000),
   trustedProxies: parseTrustedProxies(process.env.TRUSTED_PROXIES),
+  scanner: scannerConfiguration(),
   clamavHost: process.env.CLAMAV_HOST || "",
   clamavPort: boundedInteger("CLAMAV_PORT", 3310, 1, 65535),
   clamavTimeoutMs: boundedInteger("CLAMAV_TIMEOUT_MS", 15_000, 1000, 120_000),

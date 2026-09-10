@@ -10,7 +10,7 @@ import {
   removeStoredFile,
   storeUpload,
 } from "./storage.js";
-import { scanStoredUpload, synchronousScanDemandCount } from "./virus-scanner.js";
+import { scanStoredUpload, scanUpload, synchronousScanDemandCount } from "./virus-scanner.js";
 
 interface PendingPage extends PageVersionRow {
   slug: string;
@@ -131,12 +131,13 @@ function claimFile(): FileRow | null {
 
 async function processPage(page: PendingPage): Promise<ScanRunResult> {
   try {
-    await scanStoredUpload(page.storage_path);
+    const scanned = await scanStoredUpload(page.storage_path);
     const publicPath = await promoteQuarantinedPage(
       page.storage_path,
       page.slug,
       page.version,
       page.id,
+      scanned,
     );
     const updated = db()
       .prepare(
@@ -158,19 +159,25 @@ async function processFile(file: FileRow): Promise<ScanRunResult> {
   let publicPath: string | undefined;
   let committed = false;
   try {
-    await scanStoredUpload(file.storage_path);
+    const scanned = await scanStoredUpload(file.storage_path);
     let bytes = file.bytes;
     let digest = file.sha256;
     if (file.process_as_image) {
       const cleaned = await withImageProcessingPermit(async () =>
         cleanImage(await readStoredFile(file.storage_path)),
       );
+      if (scanned) await scanUpload(cleaned.data);
       const stored = await storeUpload(file.id, file.filename, Readable.from([cleaned.data]));
       publicPath = stored.storagePath;
       bytes = stored.bytes;
       digest = stored.sha256;
     } else {
-      publicPath = await promoteQuarantinedUpload(file.storage_path, file.id, file.filename);
+      publicPath = await promoteQuarantinedUpload(
+        file.storage_path,
+        file.id,
+        file.filename,
+        scanned,
+      );
     }
     const destination = publicPath;
     const updated = await serializeMetadataWrite(async () => {

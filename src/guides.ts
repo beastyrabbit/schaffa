@@ -889,6 +889,7 @@ async function prepareGuideImage(
     const data = await readLimited(part, config.maxImageInputBytes);
     await scanUpload(data);
     const cleaned = await cleanImage(data, clickMarker);
+    if (config.scanner.provider === "clamgate") await scanUpload(cleaned.data);
     const metadata = await sharp(cleaned.data).metadata();
     const id = randomFileId();
     return {

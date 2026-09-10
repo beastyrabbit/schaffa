@@ -1,14 +1,34 @@
 import net from "node:net";
 import type { Readable } from "node:stream";
+import { ClamGateScanner, type ScannedBytes } from "./clamgate.js";
 import { config } from "./config.js";
 import { AppError } from "./errors.js";
 import { openStoredFile } from "./storage.js";
 
 const chunkBytes = 64 * 1024;
 let synchronousScanDemands = 0;
+let remoteScanner: ClamGateScanner | undefined;
+let remoteOptions: typeof config.scanner.clamgate;
+
+export function virusScannerConfigured(): boolean {
+  return config.scanner.provider === "clamgate" || Boolean(config.clamavHost);
+}
+
+export function cancelPendingVirusScans(): void {
+  remoteScanner?.close();
+}
+
+function clamgate(): ClamGateScanner {
+  if (!config.scanner.clamgate) throw new Error("ClamGate is not configured.");
+  if (!remoteScanner || remoteOptions !== config.scanner.clamgate) {
+    remoteOptions = config.scanner.clamgate;
+    remoteScanner = new ClamGateScanner(remoteOptions);
+  }
+  return remoteScanner;
+}
 
 export async function scanUpload(data: Buffer): Promise<void> {
-  if (!config.clamavHost) {
+  if (!virusScannerConfigured()) {
     throw new AppError(
       "Uploads are unavailable because the virus scanner is not configured.",
       503,
@@ -18,6 +38,15 @@ export async function scanUpload(data: Buffer): Promise<void> {
   synchronousScanDemands += 1;
   const deadline = Date.now() + config.clamavWakeTimeoutMs;
   try {
+    if (config.scanner.provider === "clamgate") {
+      await clamgate().scan(
+        (async function* () {
+          yield data;
+        })(),
+        Math.min(config.clamavWakeTimeoutMs, config.scanner.clamgate.timeoutMs),
+      );
+      return;
+    }
     while (true) {
       try {
         await scan(data);
@@ -42,9 +71,10 @@ export function synchronousScanDemandCount(): number {
   return synchronousScanDemands;
 }
 
-export async function scanStoredUpload(storagePath: string): Promise<void> {
+export async function scanStoredUpload(storagePath: string): Promise<ScannedBytes | undefined> {
   const input = openStoredFile(storagePath);
   try {
+    if (config.scanner.provider === "clamgate") return await clamgate().scan(input);
     await scan(input);
   } finally {
     input.destroy();

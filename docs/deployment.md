@@ -102,6 +102,79 @@ curl --fail http://127.0.0.1:3000/healthz
 
 Set `SCHAFFA_IMAGE` to the manifest digest produced by the selected CI build; Compose intentionally has no mutable `latest` fallback. Run Compose through the local secret manager so the required values are present in its environment. The repository intentionally does not prescribe or expose instance-specific secret-store coordinates.
 
+## ClamGate scanning
+
+The default scanner remains local ClamAV. To use ClamGate v0.1.0, set
+`VIRUS_SCANNER=clamgate`, `CLAMGATE_BASE_URL`, `CLAMGATE_PUBLIC_KEY_FILE` and
+`CLAMGATE_PUBLIC_KEY_ID`. Obtain the Ed25519 SPKI PEM public key and its ID from
+the service operator through a trusted channel. The observed ID in the integration
+notice is `production-1`; confirm it with the operator. Missing configuration,
+an invalid key or upload limits above 2,147,483,645 bytes prevent startup.
+The public key is read at startup, so restart Schaffa when rotating the key.
+
+Choose the HTTPS origin by project ownership. Personal projects use
+`https://virus.heerlab.com`; SKYWAY projects use `https://virus.skyway.tools`.
+Confirm reachability from the actual backend. Do not substitute one origin for
+the other when access fails. Optionally inject `CLAMGATE_APPLICATION_TOKEN`
+through the existing secret manager for verified application attribution.
+Anonymous scanning works without it. Tokens and per-job keys stay on the backend.
+
+Mount the public key read-only into the application container, for example with
+an operator-owned Compose override:
+
+```yaml
+services:
+  schaffa:
+    environment:
+      VIRUS_SCANNER: clamgate
+      CLAMGATE_PUBLIC_KEY_FILE: /run/clamgate/public.pem
+    volumes:
+      - ./clamgate-public.pem:/run/clamgate/public.pem:ro
+```
+
+The main Compose file passes the other ClamGate variables through. It retains
+its ClamAV service and health dependency for rollback. After validating ClamGate,
+`docker compose up -d --no-deps schaffa` can start only the application; stop the
+local scanner separately if it is no longer needed. A normal `compose up` still
+starts ClamAV. Local `pnpm dev` continues to use ClamAV by default.
+
+Schaffa implements the ClamGate v0.1.0 HTTP and signed-result contract with its
+existing `jose` dependency. Builds do not need access to ClamGate's private
+repository. Only Ed25519 signatures from the configured key are accepted, with
+the expected issuer, job, nonce, file hash, size, policy, expiry and recent scanner
+evidence. Redirects are rejected. Raw files and HTML are checked again when
+copied out of quarantine. Images and guide screenshots are scanned both before
+conversion and after conversion, so the published WebP bytes also pass scanning.
+
+Submissions across pages, files and guide screenshots are spaced at least 6.5
+seconds apart per application process. This stays below the service's default
+ten submissions per minute for one process. Other applications or replicas
+sharing the egress IP share the service budget; a token does not increase it.
+Images use two submissions, so allow fewer than five images per minute before
+other traffic and actual scan time. High-volume recordings require more service
+capacity. The default service also scans only one file at a time.
+
+Page/file scans have a one-hour overall deadline, configurable with
+`CLAMGATE_TIMEOUT_MS`. Guide scans wait inside the upload request, with each scan
+bounded by the smaller of that deadline and `CLAMAV_WAKE_TIMEOUT_MS`, default
+120 seconds. Allow up to twice that for screenshot scans plus conversion and
+upload time through proxies. A failed guide request does not publish the image;
+the recorder's local files can be synced later.
+
+Polling failures retry the same accepted job after 60 seconds. Failed submissions,
+invalid results, timeouts and operational failures impose a 60-second submission
+cooldown and leave page/file bytes quarantined. Known jobs are cancelled on
+failure with a separate three-second cleanup deadline. Malware and signed policy
+rejections delete page/file payloads and preserve their rejected status URLs.
+Unknown jobs from lost acknowledgements expire at the service. After a Schaffa
+restart, pending work is resubmitted; remote job credentials are not persisted.
+
+Before switching production, test harmless files, EICAR, wrong signing keys,
+service failures, timeouts, representative archives and recording bursts. Verify
+actual proxy upload sizes and deadlines, and confirm service retention with the
+operator. Retain local ClamAV until those checks pass; set `VIRUS_SCANNER=clamav`
+and restart to switch back. Existing rendering and sandbox restrictions still apply.
+
 ## Kubernetes scale-to-zero
 
 Schaffa exposes the private Prometheus gauge `schaffa_pending_scans` at `/metrics`. It counts quarantined page/file jobs plus a guide screenshot waiting for ClamAV. A Kubernetes deployment can scrape it and use KEDA's Prometheus scaler with `minReplicaCount: 0`, `maxReplicaCount: 1`, and a cooldown period. Keep the Schaffa application running: it returns the stable URL, stores payloads in quarantine, and retries while KEDA starts ClamAV. Persist `/var/lib/clamav` so cold starts reuse downloaded signatures. Do not expose `/metrics` through the public reverse proxy.

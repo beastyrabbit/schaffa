@@ -21,6 +21,7 @@ Schaffa is heavily inspired by [PostPlan](https://postplan.dev) and [UploadThing
 - Lets users sign in through Shoo and issue revocable upload tokens for their own agents.
 - Lets administrators enable sandboxed interactive pages only for explicitly trusted users.
 - Returns a stable URL immediately, scans page/file uploads asynchronously, and never exposes unscanned bytes.
+- Supports local ClamAV or an explicitly configured ClamGate service with verified signed results.
 
 ## Pangolin access model
 
