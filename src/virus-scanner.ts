@@ -27,7 +27,10 @@ function clamgate(): ClamGateScanner {
   return remoteScanner;
 }
 
-export async function scanUpload(data: Buffer): Promise<void> {
+export async function scanUpload(
+  data: Buffer,
+  { background = false }: { background?: boolean } = {},
+): Promise<void> {
   if (!virusScannerConfigured()) {
     throw new AppError(
       "Uploads are unavailable because the virus scanner is not configured.",
@@ -43,7 +46,9 @@ export async function scanUpload(data: Buffer): Promise<void> {
         (async function* () {
           yield data;
         })(),
-        Math.min(config.clamavWakeTimeoutMs, config.scanner.clamgate.timeoutMs),
+        background
+          ? config.scanner.clamgate.timeoutMs
+          : Math.min(config.clamavWakeTimeoutMs, config.scanner.clamgate.timeoutMs),
       );
       return;
     }

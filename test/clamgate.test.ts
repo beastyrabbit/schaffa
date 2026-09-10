@@ -395,3 +395,41 @@ test("ClamGate startup validates origin, trusted key and configured upload limit
   assert.throws(() => load({}));
   assert.doesNotThrow(() => load({ VIRUS_SCANNER: "clamav" }));
 });
+
+test("background WebP scans use the remote deadline while guide buffers keep the request cap", {}, async (t) => {
+  config.scanner = { provider: "clamgate", clamgate: { ...options, timeoutMs: 5_000 } };
+  config.clamavWakeTimeoutMs = 1_000;
+  const deadlines: Array<number | undefined> = [];
+  t.mock.method(
+    ClamGateScanner.prototype,
+    "scan",
+    async (input: AsyncIterable<Uint8Array>, timeoutMs?: number) => {
+      deadlines.push(timeoutMs);
+      const hash = createHash("sha256");
+      let size = 0;
+      for await (const chunk of input) {
+        hash.update(chunk);
+        size += chunk.length;
+      }
+      return { sha256: hash.digest("hex"), size };
+    },
+  );
+  const image = await sharp({ create: { width: 2, height: 2, channels: 3, background: "white" } })
+    .png()
+    .toBuffer();
+  const body = multipart("file", "deadline.png", "image/png", image);
+  const queued = await app.inject({
+    method: "POST",
+    url: "/api/files",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${bootstrapToken}`,
+      "content-type": body.contentType,
+    },
+    payload: body.payload,
+  });
+  assert.equal(queued.statusCode, 202);
+  assert.equal((await processNextPendingScan()).status, "clean");
+  await scanUpload(image);
+  assert.deepEqual(deadlines, [undefined, 5_000, 1_000]);
+});

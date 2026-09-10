@@ -154,7 +154,7 @@ Images use two submissions, so allow fewer than five images per minute before
 other traffic and actual scan time. High-volume recordings require more service
 capacity. The default service also scans only one file at a time.
 
-Page/file scans have a one-hour overall deadline, configurable with
+Each page/file scan has a one-hour overall deadline, configurable with
 `CLAMGATE_TIMEOUT_MS`. Guide scans wait inside the upload request, with each scan
 bounded by the smaller of that deadline and `CLAMAV_WAKE_TIMEOUT_MS`, default
 120 seconds. Allow up to twice that for screenshot scans plus conversion and
