@@ -13,8 +13,8 @@ import {
   publishHtml,
   queueHtmlWithToken,
   readFile,
+  releaseStalledScans,
   scannerState,
-  stalledScannerSockets,
   test,
   waitForStalledScanner,
 } from "./server-fixture.js";
@@ -55,8 +55,7 @@ test("keeps monotonic page versions isolated from stale scan workers", async () 
     .get() as unknown as { storage_path: string; scan_status: string };
 
   scannerState.mode = "ok";
-  for (const socket of stalledScannerSockets) socket.end("stream: OK\0");
-  stalledScannerSockets.clear();
+  releaseStalledScans();
   await assert.rejects(staleScan);
   const replacementStatus = db()
     .prepare("SELECT scan_status FROM page_versions WHERE storage_path = ?")
@@ -113,7 +112,7 @@ test("rejects anonymous files, updates, malware, and scanner failures", async ()
     headers: { host: "schaffa.test" },
   });
   assert.equal(infectedPage.statusCode, 422);
-  assert.match(infectedPage.body, /Eicar-Test-Signature/);
+  assert.match(infectedPage.body, /malware was detected/);
   assert.doesNotMatch(infectedPage.body, /stream:/);
 
   scannerState.mode = "unavailable";
@@ -179,7 +178,7 @@ test("scans authenticated pages and files", async () => {
     headers: { host: "schaffa.test" },
   });
   assert.equal(rejectedPage.statusCode, 422);
-  assert.match(rejectedPage.body, /Eicar-Test-Signature/);
+  assert.match(rejectedPage.body, /malware was detected/);
 
   const body = multipart("file", "payload.bin", "application/octet-stream", "malware marker");
   const file = await app.inject({
@@ -200,7 +199,7 @@ test("scans authenticated pages and files", async () => {
     headers: { host: "schaffa.test" },
   });
   assert.equal(rejectedFile.statusCode, 422);
-  assert.match(rejectedFile.body, /Eicar-Test-Signature/);
+  assert.match(rejectedFile.body, /malware was detected/);
   const rejectedRow = db()
     .prepare("SELECT storage_path, bytes, scan_message FROM files WHERE id = ?")
     .get(file.json().id) as unknown as {
@@ -209,7 +208,7 @@ test("scans authenticated pages and files", async () => {
     scan_message: string;
   };
   assert.equal(rejectedRow.bytes, 0);
-  assert.match(rejectedRow.scan_message, /Eicar-Test-Signature/);
+  assert.match(rejectedRow.scan_message, /malware was detected/);
   await assert.rejects(readFile(path.join(dataDir, rejectedRow.storage_path)), {
     code: "ENOENT",
   });

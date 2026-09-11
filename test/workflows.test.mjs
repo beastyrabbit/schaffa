@@ -68,15 +68,21 @@ test("container tags are promoted only after the exact candidate passes its scan
   assert.match(githubRelease, /org.opencontainers.image.revision/);
 });
 
-test("development worktrees start and stop separate scanner projects", {}, async (t) => {
+test("development uses ClamGate and starts Portless without a local scanner", {}, async (t) => {
   const directory = await fixture(t);
   const trace = path.join(directory, "trace");
   await writeFile(
     path.join(directory, "docker"),
-    '#!/bin/sh\nif [ "$1" = inspect ]; then echo healthy; else printf "%s\\n" "$*" >> "$TRACE"; fi\n',
+    '#!/bin/sh\necho docker-must-not-run >> "$TRACE"; exit 91\n',
     { mode: 0o755 },
   );
-  await writeFile(path.join(directory, "portless"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  await writeFile(
+    path.join(directory, "portless"),
+    '#!/bin/sh\nprintf "%s\\n" "$CLAMGATE_BASE_URL" >> "$TRACE"\n',
+    { mode: 0o755 },
+  );
+  const keyFile = path.join(directory, "public.pem");
+  await writeFile(keyFile, "fixture-public-key");
   const script = await readFile(new URL("scripts/dev.sh", root), "utf8");
   for (const name of ["first", "second"]) {
     const worktree = path.join(directory, name);
@@ -89,19 +95,20 @@ test("development worktrees start and stop separate scanner projects", {}, async
         TRACE: trace,
         SCHAFFA_TOKEN_PEPPER: "fixture-pepper",
         SCHAFFA_BOOTSTRAP_TOKEN: "fixture-token",
-        CLAMAV_DEV_PORT: "3310",
+        CLAMGATE_PUBLIC_KEY_FILE: keyFile,
+        CLAMGATE_PUBLIC_KEY_ID: "fixture",
       },
     });
   }
   const lines = (await readFile(trace, "utf8")).trim().split("\n");
-  const starts = lines.filter((line) => line.includes("up -d"));
-  const stops = lines.filter((line) => line.includes("stop clamav"));
-  assert.equal(starts.length, 2);
-  assert.notEqual(starts[0].split(" ")[2], starts[1].split(" ")[2]);
-  assert.deepEqual(
-    stops.map((line) => line.split(" ")[2]),
-    starts.map((line) => line.split(" ")[2]),
+  assert.deepEqual(lines, ["https://virus.heerlab.com", "https://virus.heerlab.com"]);
+  await assert.rejects(
+    exec("sh", ["dev.sh"], {
+      cwd: path.join(directory, "first"),
+      env: { PATH: `${directory}:${process.env.PATH}`, TRACE: trace },
+    }),
   );
+  assert.equal((await readFile(trace, "utf8")).trim().split("\n").length, 2);
 });
 
 test("documented maintenance injects secrets each time and stops backup on a failed stop", {}, async (t) => {

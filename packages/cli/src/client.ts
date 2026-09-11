@@ -339,19 +339,28 @@ export async function waitForVideoScan(options: {
   const status = new URL(options.statusUrl);
   if (status.origin !== base.origin || !/^\/f\/[A-Za-z0-9_-]+\.webm\/status$/.test(status.pathname))
     throw new Error("Invalid video scan status URL.");
-  for (let attempt = 0; attempt < 60; attempt++) {
-    const response = await (options.fetch || fetch)(status, {
-      signal: AbortSignal.timeout(10_000),
-      redirect: "error",
-    });
+  const deadline = Date.now() + 3_600_000;
+  while (Date.now() < deadline) {
+    let response: Response;
+    try {
+      response = await (options.fetch || fetch)(status, {
+        signal: AbortSignal.timeout(Math.max(1, Math.min(10_000, deadline - Date.now()))),
+        redirect: "error",
+      });
+    } catch (error) {
+      if (Date.now() >= deadline) break;
+      throw error;
+    }
     if (!response.ok) throw new Error("Could not check the video scan.");
     const result = (await response.json()) as { scanStatus: string };
     if (result.scanStatus === "clean") return;
     if (result.scanStatus === "rejected") throw new Error("Video was rejected by scanning.");
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(0, Math.min(5000, deadline - Date.now()))),
+    );
   }
   throw new Error(
-    "Video scan is still pending. Retry guide video export after scanning completes.",
+    `Video scan is still pending after waiting up to one hour. The existing upload remains queued. File: ${status.origin}${status.pathname.replace(/\/status$/, "")} Status: ${status.origin}${status.pathname}. Check these URLs before uploading again.`,
   );
 }
 

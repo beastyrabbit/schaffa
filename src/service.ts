@@ -115,7 +115,6 @@ async function publishPageLocked(input: {
   isAdmin?: boolean;
   kind?: PageKind;
 }): Promise<PublishedPage> {
-  requireVirusScannerConfiguration();
   const slug = validateSlug(input.slug);
   if (input.html.length === 0) throw new AppError("HTML file is empty.", 422, "empty_file");
   if (input.html.length > config.maxPageBytes) {
@@ -274,7 +273,6 @@ export async function publishFile(
   tokenId: string,
   requestBytes?: number,
 ): Promise<PublishedFile> {
-  requireVirusScannerConfiguration();
   const id = randomFileId();
   const likelyImage = isLikelyImage(part.filename, part.mimetype);
   const reservationBytes = likelyImage
@@ -782,14 +780,4 @@ function sqliteTimestamp(timestamp: number): string {
     .toISOString()
     .replace("T", " ")
     .replace(/\.\d{3}Z$/, "");
-}
-
-function requireVirusScannerConfiguration(): void {
-  if (!config.clamavHost) {
-    throw new AppError(
-      "Uploads are unavailable because the virus scanner is not configured.",
-      503,
-      "scanner_unavailable",
-    );
-  }
 }
