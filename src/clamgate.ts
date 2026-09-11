@@ -8,7 +8,7 @@ export interface ScannedBytes {
   size: number;
 }
 
-interface ClamGateOptions {
+export interface ClamGateOptions {
   baseUrl: string;
   publicKey: string;
   keyId: string;

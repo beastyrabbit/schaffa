@@ -2,6 +2,7 @@ import { createPublicKey } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
 import path from "node:path";
+import type { ClamGateOptions } from "./clamgate.js";
 
 function readApplicationVersion(): string {
   const packageJson = JSON.parse(
@@ -65,13 +66,8 @@ const baseUrl = readBaseUrl(
 );
 const shooBaseUrl = readBaseUrl("SHOO_BASE_URL", "https://shoo.dev");
 
-function scannerConfiguration() {
-  const provider = process.env.VIRUS_SCANNER || "clamav";
-  if (provider !== "clamav" && provider !== "clamgate") {
-    throw new Error("VIRUS_SCANNER must be clamav or clamgate.");
-  }
-  if (provider === "clamav") return { provider, clamgate: null } as const;
-  const baseUrl = process.env.CLAMGATE_BASE_URL || "";
+function scannerConfiguration(): ClamGateOptions {
+  const baseUrl = process.env.CLAMGATE_BASE_URL || "https://virus.heerlab.com";
   const origin = new URL(baseUrl);
   if (
     origin.protocol !== "https:" ||
@@ -104,15 +100,12 @@ function scannerConfiguration() {
       throw new Error(`${name} exceeds the ClamGate limit.`);
   }
   return {
-    provider,
-    clamgate: {
-      baseUrl,
-      publicKey,
-      keyId,
-      applicationToken: process.env.CLAMGATE_APPLICATION_TOKEN || "",
-      timeoutMs: boundedInteger("CLAMGATE_TIMEOUT_MS", 3_600_000, 1_000, 3_600_000),
-    },
-  } as const;
+    baseUrl,
+    publicKey,
+    keyId,
+    applicationToken: process.env.CLAMGATE_APPLICATION_TOKEN || "",
+    timeoutMs: boundedInteger("CLAMGATE_TIMEOUT_MS", 3_600_000, 1_000, 3_600_000),
+  };
 }
 
 export const config = {
@@ -148,11 +141,8 @@ export const config = {
   authenticatedUploadsPerHour: boundedInteger("AUTHENTICATED_UPLOADS_PER_HOUR", 120, 1, 10_000),
   userLoginsPerHour: boundedInteger("USER_LOGINS_PER_HOUR", 60, 1, 1000),
   trustedProxies: parseTrustedProxies(process.env.TRUSTED_PROXIES),
-  scanner: scannerConfiguration(),
-  clamavHost: process.env.CLAMAV_HOST || "",
-  clamavPort: boundedInteger("CLAMAV_PORT", 3310, 1, 65535),
-  clamavTimeoutMs: boundedInteger("CLAMAV_TIMEOUT_MS", 15_000, 1000, 120_000),
-  clamavWakeTimeoutMs: boundedInteger("CLAMAV_WAKE_TIMEOUT_MS", 120_000, 1000, 600_000),
+  clamgate: scannerConfiguration(),
+  guideScanTimeoutMs: boundedInteger("CLAMGATE_GUIDE_TIMEOUT_MS", 120_000, 1000, 3_600_000),
   logLevel: process.env.LOG_LEVEL || "info",
   cookieSecure: new URL(baseUrl).protocol === "https:",
 };

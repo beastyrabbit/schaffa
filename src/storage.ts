@@ -45,7 +45,7 @@ export async function promoteQuarantinedPage(
   slugValue: string,
   version: number,
   versionId: string,
-  scanned?: { sha256: string; size: number },
+  scanned: { sha256: string; size: number },
 ): Promise<string> {
   const slug = validateSlug(slugValue);
   if (!Number.isSafeInteger(version) || version < 1) throw new Error("Invalid page version.");
@@ -154,7 +154,7 @@ export async function promoteQuarantinedUpload(
   storagePath: string,
   id: string,
   filename: string,
-  scanned?: { sha256: string; size: number },
+  scanned: { sha256: string; size: number },
 ): Promise<string> {
   if (!isFileId(id) || !new RegExp(`^${id}\\.[a-z0-9]{1,10}$`).test(filename)) {
     throw new Error("Invalid upload identity.");
@@ -173,9 +173,8 @@ export async function promoteQuarantinedUpload(
 
 async function verifyScannedCopy(
   file: string,
-  expected?: { sha256: string; size: number },
+  expected: { sha256: string; size: number },
 ): Promise<void> {
-  if (!expected) return;
   const hash = createHash("sha256");
   let size = 0;
   try {

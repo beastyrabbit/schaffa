@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rename, rm } from "node:fs/promises";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import sharp from "sharp";
+import {
+  installClamGateFixture,
+  releaseStalledScans,
+  scannerState,
+  waitForStalledScanner,
+} from "./clamgate-fixture.js";
 
 const dataDir = await mkdtemp(path.join(os.tmpdir(), "schaffa-test-"));
 const legacyDb = new DatabaseSync(path.join(dataDir, "schaffa.sqlite"));
@@ -50,60 +55,11 @@ legacyDb.exec(`
 `);
 legacyDb.close();
 const bootstrapToken = `sfa_${"a".repeat(43)}`;
-const scannerState: { mode: "ok" | "infected" | "unavailable" | "error" | "stall" } = {
-  mode: "ok",
-};
-const stalledScannerSockets = new Set<net.Socket>();
-const scanner = net.createServer({ allowHalfOpen: true }, (socket) => {
-  const request: Buffer[] = [];
-  socket.on("data", (chunk) =>
-    request.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk),
-  );
-  socket.on("end", () => {
-    const framed = Buffer.concat(request);
-    assert.equal(framed.subarray(0, 10).toString(), "zINSTREAM\0");
-    let offset = 10;
-    let bytes = 0;
-    while (true) {
-      assert.ok(offset + 4 <= framed.length);
-      const length = framed.readUInt32BE(offset);
-      offset += 4;
-      if (length === 0) break;
-      assert.ok(length <= 64 * 1024 && offset + length <= framed.length);
-      bytes += length;
-      offset += length;
-    }
-    assert.equal(offset, framed.length);
-    assert.ok(bytes > 0);
-
-    if (scannerState.mode === "unavailable") return socket.destroy();
-    if (scannerState.mode === "stall") {
-      stalledScannerSockets.add(socket);
-      return;
-    }
-    const response =
-      scannerState.mode === "infected"
-        ? "stream: Eicar-Test-Signature FOUND\0"
-        : scannerState.mode === "error"
-          ? "stream: INSTREAM size limit exceeded. ERROR\0"
-          : "stream: OK\0";
-    socket.end(response);
-  });
-});
-await new Promise<void>((resolve, reject) => {
-  scanner.once("error", reject);
-  scanner.listen(0, "127.0.0.1", resolve);
-});
-const scannerAddress = scanner.address();
-if (!scannerAddress || typeof scannerAddress === "string")
-  throw new Error("Scanner did not start.");
+const restoreScanner = await installClamGateFixture(dataDir);
 process.env.SCHAFFA_DATA_DIR = dataDir;
 process.env.SCHAFFA_TOKEN_PEPPER = "test-only-pepper-with-enough-entropy";
 process.env.SCHAFFA_BOOTSTRAP_TOKEN = bootstrapToken;
 process.env.SCHAFFA_BASE_URL = "https://schaffa.test";
-process.env.CLAMAV_HOST = "127.0.0.1";
-process.env.CLAMAV_PORT = String(scannerAddress.port);
-process.env.CLAMAV_TIMEOUT_MS = "1000";
 process.env.ANONYMOUS_UPLOADS_PER_HOUR = "3";
 process.env.AUTHENTICATED_UPLOADS_PER_HOUR = "50";
 process.env.MAX_PAGE_VERSIONS = "2";
@@ -114,6 +70,8 @@ process.env.TRUSTED_PROXIES = "127.0.0.1,::1";
 
 const { buildServer } = await import("../src/server.js");
 const { config } = await import("../src/config.js");
+config.clamgate.submissionIntervalMs = 0;
+config.clamgate.retryDelayMs = 0;
 const { db } = await import("../src/db.js");
 const { createToken, seedBootstrapToken } = await import("../src/auth.js");
 const { allSkillsMarkdown, exampleSkills } = await import("../src/example-skills.js");
@@ -131,9 +89,7 @@ const app = buildServer({
 
 test.after(async () => {
   await app.close();
-  await new Promise<void>((resolve, reject) =>
-    scanner.close((error) => (error ? reject(error) : resolve())),
-  );
+  restoreScanner();
   await rm(dataDir, { recursive: true, force: true });
 });
 
@@ -242,14 +198,6 @@ async function finishPendingScans(): Promise<void> {
     assert.equal(result.processed, true);
     if (result.status === "pending") return;
   }
-}
-
-async function waitForStalledScanner(): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (stalledScannerSockets.size > 0) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("Scanner request did not reach the stalled test server.");
 }
 
 function multipart(field: string, filename: string, mediaType: string, content: string | Buffer) {
@@ -461,6 +409,7 @@ export {
   readFile,
   redPixelBounds,
   redPixelCount,
+  releaseStalledScans,
   rename,
   renderMarkedScreenshot,
   responseCookie,
@@ -470,7 +419,6 @@ export {
   seedBootstrapToken,
   sharp,
   shooLogin,
-  stalledScannerSockets,
   test,
   updateSettings,
   waitForStalledScanner,

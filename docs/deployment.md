@@ -1,6 +1,6 @@
 # Deployment
 
-Schaffa runs as an application container plus an isolated ClamAV container. The app uses one persistent `/data` volume; ClamAV keeps its signature database separately. Pangolin exposes only the application through the single origin `https://schaffa.dev`.
+Schaffa runs as one application container and sends uploads to ClamGate over HTTPS. The app uses one persistent `/data` volume. Pangolin exposes only the application through the single origin `https://schaffa.dev`.
 
 ## Container image
 
@@ -77,7 +77,8 @@ Anonymous rate limiting uses the client address reported by the trusted reverse 
 | `SCHAFFA_BASE_URL` | Canonical origin for admin, API, pages, and files |
 | `SCHAFFA_TOKEN_PEPPER` | High-entropy HMAC key used to hash stored tokens |
 | `SCHAFFA_DATA_DIR` | Persistent data directory; `/data` in the image |
-| `CLAMAV_HOST` | Private hostname of the ClamAV container |
+| `CLAMGATE_PUBLIC_KEY_FILE` | Trusted Ed25519 public key PEM file; Compose mounts this host path read-only |
+| `CLAMGATE_PUBLIC_KEY_ID` | Operator-confirmed ID of that signing key |
 | `SHOO_BASE_URL` | Shoo authorization and JWKS origin; defaults to `https://shoo.dev` |
 | `SHOO_ISSUER` | Exact accepted Shoo token issuer; defaults to `SHOO_BASE_URL` |
 
@@ -91,7 +92,7 @@ The user dashboard uses Shoo for Google OAuth/PKCE and stores its own HMAC-hashe
 
 ## Docker Compose
 
-The included [compose.yaml](../compose.yaml) binds the app and ClamAV TCP port to loopback. ClamAV has no transport authentication, so port `3310` must never be exposed publicly:
+The included [compose.yaml](../compose.yaml) runs only Schaffa and binds its HTTP port to loopback. Provision the trusted ClamGate public key before starting:
 
 ```sh
 export SCHAFFA_IMAGE="ghcr.io/beastyrabbit/schaffa@sha256:<published-manifest-digest>"
@@ -104,9 +105,10 @@ Set `SCHAFFA_IMAGE` to the manifest digest produced by the selected CI build; Co
 
 ## ClamGate scanning
 
-The default scanner remains local ClamAV. To use ClamGate v0.1.0, set
-`VIRUS_SCANNER=clamgate`, `CLAMGATE_BASE_URL`, `CLAMGATE_PUBLIC_KEY_FILE` and
-`CLAMGATE_PUBLIC_KEY_ID`. Obtain the Ed25519 SPKI PEM public key and its ID from
+ClamGate v0.1.0 is the only scanner. There is no enable flag or provider selection.
+Schaffa defaults to `https://virus.heerlab.com`. Set
+`CLAMGATE_PUBLIC_KEY_FILE` and `CLAMGATE_PUBLIC_KEY_ID`.
+Obtain the Ed25519 SPKI PEM public key and its ID from
 the service operator through a trusted channel. The observed ID in the integration
 notice is `production-1`; confirm it with the operator. Missing configuration,
 an invalid key or upload limits above 2,147,483,645 bytes prevent startup.
@@ -119,24 +121,15 @@ the other when access fails. Optionally inject `CLAMGATE_APPLICATION_TOKEN`
 through the existing secret manager for verified application attribution.
 Anonymous scanning works without it. Tokens and per-job keys stay on the backend.
 
-Mount the public key read-only into the application container, for example with
-an operator-owned Compose override:
+Compose mounts the host path in `CLAMGATE_PUBLIC_KEY_FILE` read-only at
+`/run/clamgate/public.pem`. The host file must already exist and be readable by
+the container's `node` user. Direct server starts and `pnpm dev` read the path
+from the same variable. The development script starts Portless without Docker.
 
-```yaml
-services:
-  schaffa:
-    environment:
-      VIRUS_SCANNER: clamgate
-      CLAMGATE_PUBLIC_KEY_FILE: /run/clamgate/public.pem
-    volumes:
-      - ./clamgate-public.pem:/run/clamgate/public.pem:ro
-```
-
-The main Compose file passes the other ClamGate variables through. It retains
-its ClamAV service and health dependency for rollback. After validating ClamGate,
-`docker compose up -d --no-deps schaffa` can start only the application; stop the
-local scanner separately if it is no longer needed. A normal `compose up` still
-starts ClamAV. Local `pnpm dev` continues to use ClamAV by default.
+Upgrading from the local scanner requires the trusted key before starting this
+version. Remove the old scanner-selection and ClamAV connection variables.
+The old Compose scanner container and signature volume are no longer used;
+an operator can remove those exact obsolete resources after migration.
 
 Schaffa implements the ClamGate v0.1.0 HTTP and signed-result contract with its
 existing `jose` dependency. Builds do not need access to ClamGate's private
@@ -156,7 +149,7 @@ capacity. The default service also scans only one file at a time.
 
 Each page/file scan has a one-hour overall deadline, configurable with
 `CLAMGATE_TIMEOUT_MS`. Guide scans wait inside the upload request, with each scan
-bounded by the smaller of that deadline and `CLAMAV_WAKE_TIMEOUT_MS`, default
+bounded by the smaller of that deadline and `CLAMGATE_GUIDE_TIMEOUT_MS`, default
 120 seconds. Allow up to twice that for screenshot scans plus conversion and
 upload time through proxies. A failed guide request does not publish the image;
 the recorder's local files can be synced later.
@@ -172,16 +165,20 @@ restart, pending work is resubmitted; remote job credentials are not persisted.
 Before switching production, test harmless files, EICAR, wrong signing keys,
 service failures, timeouts, representative archives and recording bursts. Verify
 actual proxy upload sizes and deadlines, and confirm service retention with the
-operator. Retain local ClamAV until those checks pass; set `VIRUS_SCANNER=clamav`
-and restart to switch back. Existing rendering and sandbox restrictions still apply.
+operator. Rolling back requires the previous application image and matching
+Compose configuration. Existing rendering and sandbox restrictions still apply.
 
-## Kubernetes scale-to-zero
+## Scan monitoring
 
-Schaffa exposes the private Prometheus gauge `schaffa_pending_scans` at `/metrics`. It counts quarantined page/file jobs plus a guide screenshot waiting for ClamAV. A Kubernetes deployment can scrape it and use KEDA's Prometheus scaler with `minReplicaCount: 0`, `maxReplicaCount: 1`, and a cooldown period. Keep the Schaffa application running: it returns the stable URL, stores payloads in quarantine, and retries while KEDA starts ClamAV. Persist `/var/lib/clamav` so cold starts reuse downloaded signatures. Do not expose `/metrics` through the public reverse proxy.
+Schaffa exposes the private Prometheus gauge `schaffa_pending_scans` at
+`/metrics`. It counts quarantined page/file jobs plus guide screenshots waiting
+for ClamGate. Alert on sustained pending work and service errors. Scanner engine
+scaling and signature updates belong to the shared ClamGate service.
+Do not expose `/metrics` through the public reverse proxy.
 
 ## Persistent data and upgrades
 
-SQLite metadata and stored files must be backed up together. Back up the complete `/data` volume rather than copying only the database or only the object directories. The ClamAV signature volume is reproducible and does not contain uploads. Page and file uploads receive a stable URL immediately and remain in `/data/quarantine` until ClamAV accepts them. Scanner unavailability leaves them pending for retry; rejected payload bytes are deleted while the URL keeps a status tombstone.
+SQLite metadata and stored files must be backed up together. Back up the complete `/data` volume rather than copying only the database or only the object directories. Page and file uploads receive a stable URL immediately and remain in `/data/quarantine` until ClamGate returns a verified clean result. Scanner unavailability leaves them pending for retry; rejected payload bytes are deleted while the URL keeps a status tombstone.
 
 For an update:
 

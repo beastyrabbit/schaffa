@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { installClamGateFixture } from "./clamgate-fixture.js";
 
 test("the production Shoo verifier validates offline signed claims against loopback JWKS", {}, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "schaffa-shoo-test-"));
+  const restoreScanner = await installClamGateFixture(directory);
+  t.after(async () => {
+    restoreScanner();
+    await rm(directory, { recursive: true, force: true });
+  });
   const keys = await generateKeyPair("ES256");
   const jwk = { ...(await exportJWK(keys.publicKey)), kid: "fixture", alg: "ES256", use: "sig" };
   const server = createServer((_request, reply) => {

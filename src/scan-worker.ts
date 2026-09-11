@@ -166,7 +166,7 @@ async function processFile(file: FileRow): Promise<ScanRunResult> {
       const cleaned = await withImageProcessingPermit(async () =>
         cleanImage(await readStoredFile(file.storage_path)),
       );
-      if (scanned) await scanUpload(cleaned.data, { background: true });
+      await scanUpload(cleaned.data, { background: true });
       const stored = await storeUpload(file.id, file.filename, Readable.from([cleaned.data]));
       publicPath = stored.storagePath;
       bytes = stored.bytes;

@@ -13,15 +13,11 @@ services:
       SHOO_BASE_URL: ${SHOO_BASE_URL:-https://shoo.dev}
       SHOO_ISSUER: ${SHOO_ISSUER:-https://shoo.dev}
       USER_SESSION_TTL_HOURS: ${USER_SESSION_TTL_HOURS:-168}
-      CLAMAV_HOST: clamav
-      CLAMAV_PORT: 3310
-      CLAMAV_TIMEOUT_MS: ${CLAMAV_TIMEOUT_MS:-15000}
-      CLAMAV_WAKE_TIMEOUT_MS: ${CLAMAV_WAKE_TIMEOUT_MS:-120000}
-      VIRUS_SCANNER: ${VIRUS_SCANNER:-clamav}
-      CLAMGATE_BASE_URL: ${CLAMGATE_BASE_URL:-}
-      CLAMGATE_PUBLIC_KEY_FILE: ${CLAMGATE_PUBLIC_KEY_FILE:-}
-      CLAMGATE_PUBLIC_KEY_ID: ${CLAMGATE_PUBLIC_KEY_ID:-}
+      CLAMGATE_BASE_URL: ${CLAMGATE_BASE_URL:-https://virus.heerlab.com}
+      CLAMGATE_PUBLIC_KEY_FILE: /run/clamgate/public.pem
+      CLAMGATE_PUBLIC_KEY_ID: ${CLAMGATE_PUBLIC_KEY_ID:?set the trusted key ID}
       CLAMGATE_APPLICATION_TOKEN: ${CLAMGATE_APPLICATION_TOKEN:-}
+      CLAMGATE_GUIDE_TIMEOUT_MS: ${CLAMGATE_GUIDE_TIMEOUT_MS:-120000}
       CLAMGATE_TIMEOUT_MS: ${CLAMGATE_TIMEOUT_MS:-3600000}
       ANONYMOUS_PAGE_TTL_SECONDS: ${ANONYMOUS_PAGE_TTL_SECONDS:-3600}
       ANONYMOUS_PAGE_RETENTION_DAYS: ${ANONYMOUS_PAGE_RETENTION_DAYS:-30}
@@ -47,9 +43,12 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - schaffa-data:/data
-    depends_on:
-      clamav:
-        condition: service_healthy
+      - type: bind
+        source: ${CLAMGATE_PUBLIC_KEY_FILE:?set the trusted public key path on the host}
+        target: /run/clamgate/public.pem
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/healthz"]
       interval: 30s
@@ -61,20 +60,5 @@ services:
     cap_drop:
       - ALL
 
-  clamav:
-    image: clamav/clamav:1.5.4@sha256:78810772a92b4a9168115bc6b2e0ffd702640893b9577f8c3d0432762d2655c4
-    platform: linux/amd64
-    restart: unless-stopped
-    environment:
-      CLAMD_CONF_MaxFileSize: ${CLAMAV_MAX_FILE_SIZE:-300M}
-      CLAMD_CONF_StreamMaxLength: ${CLAMAV_STREAM_MAX_LENGTH:-300M}
-    ports:
-      - "127.0.0.1:${CLAMAV_DEV_PORT:-3310}:3310"
-    volumes:
-      - clamav-signatures:/var/lib/clamav
-    security_opt:
-      - no-new-privileges:true
-
 volumes:
   schaffa-data:
-  clamav-signatures:

@@ -202,8 +202,7 @@ test("ClamGate cancels an accepted job when its deadline expires", {}, async (t)
 });
 
 test("ClamGate page publication waits for verification and refuses changed quarantine bytes", {}, async (t) => {
-  config.scanner = { provider: "clamgate", clamgate: { ...options } };
-  config.clamavHost = "";
+  config.clamgate = { ...options };
   let quarantine = "";
   fakeService(t, {
     afterUpload: async () => {
@@ -230,8 +229,7 @@ test("ClamGate page publication waits for verification and refuses changed quara
 });
 
 test("ClamGate publishes clean page bytes at the original URL", {}, async (t) => {
-  config.scanner = { provider: "clamgate", clamgate: { ...options } };
-  config.clamavHost = "";
+  config.clamgate = { ...options };
   fakeService(t);
   const html = "<h1>ClamGate approved fixture</h1>";
   const queued = await queueHtmlWithToken("clamgate-clean", html, bootstrapToken);
@@ -246,7 +244,7 @@ test("ClamGate publishes clean page bytes at the original URL", {}, async (t) =>
 });
 
 test("ClamGate invalid signatures leave file bytes quarantined", {}, async (t) => {
-  config.scanner = { provider: "clamgate", clamgate: { ...options } };
+  config.clamgate = { ...options };
   fakeService(t, { wrongKey: true });
   const body = multipart("file", "fixture.txt", "text/plain", "private fixture");
   const queued = await app.inject({
@@ -276,7 +274,7 @@ test("ClamGate invalid signatures leave file bytes quarantined", {}, async (t) =
 });
 
 test("ClamGate uses the same scanner for guide buffers and never accepts an invalid result", {}, async (t) => {
-  config.scanner = { provider: "clamgate", clamgate: { ...options } };
+  config.clamgate = { ...options };
   fakeService(t, { wrongKey: true });
   const image = await sharp({ create: { width: 2, height: 2, channels: 3, background: "white" } })
     .png()
@@ -288,7 +286,7 @@ test("ClamGate uses the same scanner for guide buffers and never accepts an inva
 });
 
 test("ClamGate scans both original and published WebP bytes for files and guide screenshots", {}, async (t) => {
-  config.scanner = { provider: "clamgate", clamgate: { ...options } };
+  config.clamgate = { ...options };
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const service = fakeService(t, {
     afterUpload: async () => {
@@ -370,7 +368,6 @@ test("ClamGate startup validates origin, trusted key and configured upload limit
   await writeFile(keyFile, options.publicKey);
   const env = {
     PATH: process.env.PATH,
-    VIRUS_SCANNER: "clamgate",
     CLAMGATE_BASE_URL: options.baseUrl,
     CLAMGATE_PUBLIC_KEY_FILE: keyFile,
     CLAMGATE_PUBLIC_KEY_ID: options.keyId,
@@ -382,23 +379,25 @@ test("ClamGate startup validates origin, trusted key and configured upload limit
       { env: { ...env, ...override }, stdio: "pipe" },
     );
   assert.doesNotThrow(() => load({}));
+  assert.doesNotThrow(() => load({ CLAMGATE_BASE_URL: "" }));
+  assert.doesNotThrow(() => load({ VIRUS_SCANNER: "clamav" }));
   for (const override of [
-    { VIRUS_SCANNER: "typo" },
     { CLAMGATE_BASE_URL: "http://scanner.example.test" },
     { CLAMGATE_PUBLIC_KEY_FILE: "" },
     { CLAMGATE_PUBLIC_KEY_ID: "" },
     { MAX_FILE_BYTES: "2147483646" },
     { CLAMGATE_TIMEOUT_MS: "3600001" },
+    { CLAMGATE_GUIDE_TIMEOUT_MS: "3600001" },
   ])
     assert.throws(() => load(override));
   await writeFile(keyFile, "invalid PEM");
   assert.throws(() => load({}));
-  assert.doesNotThrow(() => load({ VIRUS_SCANNER: "clamav" }));
+  assert.throws(() => load({ VIRUS_SCANNER: "clamav" }));
 });
 
 test("background WebP scans use the remote deadline while guide buffers keep the request cap", {}, async (t) => {
-  config.scanner = { provider: "clamgate", clamgate: { ...options, timeoutMs: 5_000 } };
-  config.clamavWakeTimeoutMs = 1_000;
+  config.clamgate = { ...options, timeoutMs: 5_000 };
+  config.guideScanTimeoutMs = 1_000;
   const deadlines: Array<number | undefined> = [];
   t.mock.method(
     ClamGateScanner.prototype,
