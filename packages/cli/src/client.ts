@@ -388,7 +388,7 @@ async function guideRequest<T = GuideResult>(
   return result as T;
 }
 
-function canonicalOrigin(value: string): string {
+export function canonicalOrigin(value: string): string {
   let parsed: URL;
   try {
     parsed = new URL(value);

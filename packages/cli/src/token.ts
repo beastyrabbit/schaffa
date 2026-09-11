@@ -3,12 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { parseEnv } from "node:util";
 
-interface TokenOptions {
+export interface TokenOptions {
   token?: string;
   "ignore-token"?: boolean;
 }
 
-interface TokenContext {
+export interface TokenContext {
   environment?: NodeJS.ProcessEnv;
   cwd?: string;
   home?: string;
@@ -18,15 +18,23 @@ export function resolveToken(
   options: TokenOptions,
   context: TokenContext = {},
 ): string | undefined {
+  return resolveTokenWithSource(options, context)?.token;
+}
+
+export function resolveTokenWithSource(
+  options: TokenOptions,
+  context: TokenContext = {},
+): { token: string; source: string } | undefined {
   if (options["ignore-token"]) {
     if (options.token !== undefined) {
       throw new Error("--token and --ignore-token cannot be used together.");
     }
     return undefined;
   }
-  if (options.token !== undefined) return checkedToken(options.token);
+  if (options.token !== undefined) return { token: checkedToken(options.token), source: "--token" };
   const environment = context.environment ?? process.env;
-  if (environment.SCHAFFA_TOKEN?.trim()) return checkedToken(environment.SCHAFFA_TOKEN.trim());
+  if (environment.SCHAFFA_TOKEN?.trim())
+    return { token: checkedToken(environment.SCHAFFA_TOKEN.trim()), source: "SCHAFFA_TOKEN" };
 
   const cwd = context.cwd ?? process.cwd();
   const home = context.home ?? os.homedir();
@@ -64,7 +72,8 @@ export function resolveToken(
     } else {
       token = parseEnv(content).SCHAFFA_TOKEN;
     }
-    if (typeof token === "string" && token.trim()) return checkedToken(token.trim());
+    if (typeof token === "string" && token.trim())
+      return { token: checkedToken(token.trim()), source: file };
   }
   return undefined;
 }

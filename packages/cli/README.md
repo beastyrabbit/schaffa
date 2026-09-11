@@ -120,6 +120,19 @@ new revision; previous revisions retain theirs. A failed export leaves the
 recording available for retry. Standalone `--upload` publishes the finished file;
 without it, recording and export require no Schaffa token.
 
+## Check credentials and permissions
+
+```sh
+npx schaffa doctor
+npx schaffa doctor --interactive --json
+```
+
+`doctor` reports where it found a token, verifies it with the configured server, and checks permission to publish static HTML, interactive HTML, files, and guides. It never prints the token or publishes content. Interactive permission requires an Interactive token, account approval, and the instance setting to be enabled. Denied permissions include a reason.
+
+Use `--json` for agents. The response contains `ready`, `server`, `token` with `found`, `source`, and `status`, and `capabilities` with `allowed` and `reason` for each operation. Exit code 0 means a valid token can publish; `--interactive` specifically requires interactive HTML permission. Exit code 1 means the requirement was not met or could not be verified. Missing tokens still show anonymous static HTML permission but exit 1. Connection failures and unsupported servers leave capabilities `null`, and a discovered token stays `unverified`.
+
+The command uses the same token lookup and `SCHAFFA_URL` as uploads. `--ignore-token` checks anonymous access. The server must support `GET /api/capabilities`; older servers need an update. This checks permissions, not content validation, quotas, or scanner health.
+
 ## Use a token
 
 A token is required for permanent HTML pages and file uploads.
