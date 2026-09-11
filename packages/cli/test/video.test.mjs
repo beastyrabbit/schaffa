@@ -82,6 +82,62 @@ test("scan polling refuses other origins and accepts only clean results", async 
   );
 });
 
+test("video polling waits for delayed clean results without resubmitting", {}, async (t) => {
+  let now = 0;
+  let requests = 0;
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(globalThis, "setTimeout", (callback, milliseconds) => {
+    now += milliseconds;
+    queueMicrotask(callback);
+  });
+  await waitForVideoScan({
+    statusUrl: "https://schaffa.dev/f/test.webm/status",
+    fetch: async (url, init) => {
+      assert.equal(String(url), "https://schaffa.dev/f/test.webm/status");
+      assert.equal(init.method, undefined);
+      return new Response(JSON.stringify({ scanStatus: ++requests > 60 ? "clean" : "pending" }));
+    },
+  });
+  assert.equal(requests, 61);
+  assert.ok(now > 60_000);
+});
+
+test("video polling deadline reports existing URLs even when the final request times out", {}, async (t) => {
+  let now = 0;
+  let requests = 0;
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(globalThis, "setTimeout", (callback, milliseconds) => {
+    now += milliseconds;
+    queueMicrotask(callback);
+  });
+  for (const requestTimeout of [false, true]) {
+    now = 0;
+    requests = 0;
+    await assert.rejects(
+      waitForVideoScan({
+        statusUrl: "https://schaffa.dev/f/test.webm/status",
+        fetch: async () => {
+          requests++;
+          if (requestTimeout) {
+            now = 3_600_000;
+            throw new Error("request timed out");
+          }
+          return new Response(JSON.stringify({ scanStatus: "pending" }));
+        },
+      }),
+      (error) => {
+        assert.match(error.message, /still pending/);
+        assert.match(error.message, /File: https:\/\/schaffa.dev\/f\/test.webm /);
+        assert.match(error.message, /Status: https:\/\/schaffa.dev\/f\/test.webm\/status/);
+        assert.doesNotMatch(error.message, /Retry guide video export/);
+        return true;
+      },
+    );
+    assert.equal(now, 3_600_000);
+    assert.ok(requests > 0);
+  }
+});
+
 test("capture failure stays failed when reopening the saved manifest", {}, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "schaffa-video-limit-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

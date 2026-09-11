@@ -120,6 +120,11 @@ new revision; previous revisions retain theirs. A failed export leaves the
 recording available for retry. Standalone `--upload` publishes the finished file;
 without it, recording and export require no Schaffa token.
 
+Video publishing waits up to one hour for scanning, checking every five seconds.
+Queue time can exceed this wait. If the deadline expires, the CLI prints the
+existing file and status URLs. Check them before uploading again; the pending
+upload remains on the server and is not cancelled by the CLI deadline.
+
 ## Use a token
 
 A token is required for permanent HTML pages and file uploads.
