@@ -2,15 +2,24 @@
 // Never downloads tools, runs application code, contacts GitHub or calls an AI provider.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { prepareEngine } from "./engine.ts";
 
 const binary = process.env.OPENGREP_BINARY;
 if (!binary) throw new Error("Set OPENGREP_BINARY to the verified local release binary");
 const script = fileURLToPath(new URL("./scan.ts", import.meta.url));
+
+// biome-ignore lint/style/noDoneCallback: t is node:test's TestContext, not a completion callback.
+test("verified preinstalled engine is reused without network access", async (t) => {
+  t.mock.method(globalThis, "fetch", () => {
+    throw new Error("Unexpected network access");
+  });
+  await prepareEngine(binary);
+});
 
 test("real engine: baseline, intrafile flow, fix, ignores, mixed languages and parser errors", () => {
   const root = mkdtempSync(join(tmpdir(), "opengrep-acceptance-"));
@@ -96,6 +105,7 @@ test("real engine: baseline, intrafile flow, fix, ignores, mixed languages and p
     assert.equal(broken.exit, 1);
     assert.equal(broken.report.status, "incomplete");
     assert.ok(broken.report.errorCount > 0);
+    assert.ok(broken.report.diagnostics.some((d) => d.kind === "parser" && d.path === "broken.ts"));
 
     const noFiles = scan(git("rev-parse", "HEAD"), "go");
     assert.equal(noFiles.report.status, "not-applicable");
@@ -105,5 +115,93 @@ test("real engine: baseline, intrafile flow, fix, ignores, mixed languages and p
     assert.equal(invalid.report.status, "incomplete");
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("real engine skips PDF data and exact vendor path while keeping nested own-source findings", () => {
+  const root = mkdtempSync(join(tmpdir(), "opengrep-scope-"));
+  const output = join(tmpdir(), `${root.split("/").at(-1)}.json`);
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    const source =
+      "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nspec:\n  ingress:\n    - {}\n";
+    writeFileSync(join(root, "policy.yaml"), source);
+    writeFileSync(join(root, "book.pdf"), source);
+    mkdirSync(join(root, "tools"));
+    mkdirSync(join(root, "src/tools"), { recursive: true });
+    writeFileSync(join(root, "tools/jshint.js"), source);
+    writeFileSync(join(root, "src/tools/jshint.js"), source);
+    symlinkSync("policy.yaml", join(root, "link.js"));
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=OpenGrep Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "fixture",
+      ],
+      { cwd: root },
+    );
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    const env = {
+      ...process.env,
+      OPENGREP_BINARY: binary,
+      SCAN_ROOT: root,
+      REPORT_PATH: output,
+      SCAN_PROFILE: "config",
+      SCAN_MODE: "full",
+      SCAN_HEAD: head,
+      SCAN_BASE: head,
+      TOOLING_SHA: "a".repeat(40),
+      GITHUB_REPOSITORY: "beastyrabbit/beasty_printer_hub",
+      GITHUB_RUN_ID: "1",
+      GITHUB_RUN_ATTEMPT: "1",
+    };
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env });
+    const report = JSON.parse(readFileSync(output, "utf8"));
+    assert.equal(r.status, 0);
+    assert.ok(
+      report.findings.some(
+        (f) => f.rule === "network-policy-ingress-any" && f.path === "policy.yaml",
+      ),
+    );
+    assert.ok(!report.findings.some((f) => f.path === "book.pdf"));
+    assert.ok(!report.findings.some((f) => f.path === "tools/jshint.js"));
+    assert.ok(report.findings.some((f) => f.path === "src/tools/jshint.js"));
+    assert.equal(report.status, "complete");
+    writeFileSync(join(root, "new-policy.yaml"), source);
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=OpenGrep Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "new policy",
+      ],
+      { cwd: root },
+    );
+    const next = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    const pr = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      env: { ...env, SCAN_HEAD: next, SCAN_BASE: head, SCAN_MODE: "pr" },
+    });
+    const delta = JSON.parse(readFileSync(output, "utf8"));
+    assert.equal(pr.status, 0);
+    assert.equal(delta.status, "complete");
+    assert.ok(delta.findings.some((f) => f.path === "new-policy.yaml"));
+    assert.ok(
+      !delta.findings.some((f) => f.path === "policy.yaml" || f.path === "src/tools/jshint.js"),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(output, { force: true });
   }
 });

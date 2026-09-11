@@ -19,8 +19,9 @@ Private code is not uploaded to schaffa or to the schaffa.dev publishing service
 Each repository chooses `runner` and `profile`. The default is `all`: enable all
 698 validated rules and let their language selectors choose applicable files.
 This includes low-confidence audit hints; no severity category is disabled.
-Results are sorted by severity so informational word matches cannot displace
-higher-priority findings from the first page of the summary.
+The `raptor-bad-words` word search remains in the JSON artifact, but is counted
+separately and does not appear in the PR rule table or determine the head-check
+conclusion. Other findings are sorted by severity.
 
 Optional profiles are `web`, `python`, `go`, `c-cpp`, `dotnet`, `jvm`, `swift`,
 `ruby`, `rust`, `php` and `config`; combine them with commas. Configuration rules
@@ -114,45 +115,71 @@ The job tokens are scoped independently; no `secrets: inherit` or Infisical job
 access is used.
 
 The runner has no Docker socket, privileged sidecar, Kubernetes service-account
-token or shared cache. Cilium permits DNS plus necessary GitHub/Node HTTPS
+token or shared writable volume. Only the verified engine is cached through
+GitHub Actions, under its SHA256; source and reports are never cached. Cilium permits DNS plus necessary GitHub/Node HTTPS
 destinations. This restricted pod is for trusted contributions, not a proven
 sandbox for arbitrary hostile public submissions. Public GitHub endpoints remain
 network-accessible; this is not a general data-loss-prevention boundary.
 
 Report metadata must match the caller, run ID, attempt, source SHA, base SHA and
 tool revision. The reporter rechecks the current PR before writes. Reports are
-bounded and contain only rule IDs, paths, line numbers and scan metadata. Raw
+bounded and contain only rule IDs, paths, line numbers and scan metadata. Up to
+100 diagnostics retain a fixed error category, validated path, line, rule ID and
+setup stage when available. Parser, timeout and memory errors remain incomplete;
+the original error count includes errors beyond the diagnostic limit. Raw
 engine output, source excerpts, metavariables and arbitrary rule messages are not
 published. Artifact retention starts at 14 days. Paths can still disclose private
 project structure, so artifacts must stay in their source repository.
 
 Scan failures, missing artifacts and publication failures fail the reporting job.
-The reporter writes a separate `OpenGrep / report` check on the PR head, because
-`pull_request_target` jobs themselves are associated with the base. Findings and
-unsupported-file-only changes produce a neutral head check. Cancellation or an
-early setup failure may leave no head check; inspect the Actions run in that case.
+Before scanning, a separate trusted job marks the existing summary as in progress
+and creates `OpenGrep / report` on the current PR head. The reporter completes
+that same check after verifying its run identity. Findings and unsupported-file-only
+changes produce a neutral head check. The reporting job uses github-script's
+bundled Node 24, with no setup-node download. An always-run fallback needs neither
+checkout nor report artifact and marks unavailable results as failed. It updates
+only the current trusted PR; an old run cannot overwrite a newer commit's summary.
+A runner outage, failure before the first GitHub action starts, hard cancellation
+or GitHub API failure can still prevent publication. The Actions run remains the
+source of truth in those cases.
 GitHub Free does not enforce its presence for private repositories.
 
 Only the bot's marked summary is updated. It shows severity totals and at most
-20 rule groups, ordered by severity, with a count for each rule. Repeated audit
-hints occupy one row. All findings remain in the JSON artifact with rule IDs,
+20 rule groups, ordered by severity, with a count for each rule. At most five
+groups get an example file/line link, and at most five technical errors are shown.
+Word-search audit counts are separate. All findings remain in the JSON artifact with rule IDs,
 file paths and line numbers for further review, including findings outside added
 diff lines. Existing inline threads from older reporter versions are not changed.
 
 ## Engine and exclusions
 
 The engine is OpenGrep v1.30.0, LGPL-2.1. The official Linux x86 release binary is
-downloaded per fresh runner and checked against the committed SHA-256. It is not
+restored from an Actions cache and checked against the committed SHA-256 every
+time. A missing or invalid cache triggers at most three downloads with bounded
+backoff; each attempt has a 120-second deadline. Unverified bytes are never
+executed or saved as a valid engine. Cache failures do not prevent a verified
+download. Update the workflow cache key when changing the engine hash. It is not
 built or installed from repository code. See the upstream release at
 https://github.com/opengrep/opengrep/releases/tag/v1.30.0.
 
 Intrafile taint analysis is enabled. PR-provided `.gitignore`, `.semgrepignore`
 and inline `nosem` suppressions cannot change the configured analysis. The trusted
 scanner excludes `.git`, `node_modules`, `.venv`, `dist`, `build`, `coverage` and
-the vendored scanner rules themselves. Test code is included. Files above 20 MB
+the vendored scanner rules themselves. `scripts/opengrep/policy.ts` additionally
+excludes PDF data and exact diagnosed third-party bundle paths in the affected
+repositories. This leaves an explicit analysis gap for those bundles; it does
+not exclude all minified JavaScript or any own database source. Test code is
+included. Files above 20 MB
 and unsupported file types are not covered; no assertion of repository-wide
 language coverage is made. Parallelism is three scanner workers, capped at 2 GB
 per worker, with a thirty-minute process timeout inside a forty-minute job.
+The per-rule/file timeout remains 20 seconds. A timeout can prevent subsequent
+rules from running on that file. Known parser limitations and the SQL-rule
+timeout in own application code remain visible until individually fixed.
+
+Vendor paths use explicit target selection rather than OpenGrep's suffix-based
+exclusion globs. Nested own-source files with the same suffix remain covered.
+Explicit PDF targets and symlinks are omitted to preserve recursive-scan behavior.
 
 The TypeScript reporter updates the summary and head check through GitHub's API.
 Reviewdog is not installed. SARIF is not produced in this first version.

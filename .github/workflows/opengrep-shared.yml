@@ -17,7 +17,7 @@ on:
 permissions: {}
 
 jobs:
-  scan:
+  prepare:
     if: >-
       contains(fromJSON('["beastyrabbit","SKYWAY-GmbH"]'), github.repository_owner) &&
       contains(fromJSON('["pull_request_target","workflow_dispatch","push","schedule"]'), github.event_name) &&
@@ -28,12 +28,16 @@ jobs:
           (github.repository_owner == 'SKYWAY-GmbH' &&
            contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))))
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 40
+    timeout-minutes: 10
     permissions:
       contents: read
+      pull-requests: write
+      checks: write
     outputs:
       head: ${{ steps.metadata.outputs.head }}
       base: ${{ steps.metadata.outputs.base }}
+      check-id: ${{ steps.pending.outputs.check-id }}
+      check-attempt: ${{ steps.metadata.outputs.attempt }}
     steps:
       - name: Pin trusted inputs
         id: metadata
@@ -56,6 +60,64 @@ jobs:
           [[ "$PR_HEAD" =~ ^[a-f0-9]{40}$ && "$PR_BASE" =~ ^[a-f0-9]{40}$ ]]
           echo "head=$PR_HEAD" >> "$GITHUB_OUTPUT"
           echo "base=$PR_BASE" >> "$GITHUB_OUTPUT"
+          echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Mark current PR analysis in progress
+        id: pending
+        if: ${{ github.event_name == 'pull_request_target' }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8, bundled Node 24
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT_PHASE: start
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SCAN_HEAD: ${{ steps.metadata.outputs.head }}
+          SCAN_BASE: ${{ steps.metadata.outputs.base }}
+        with: &lifecycle
+          script: |
+            const { owner, repo } = context.repo;
+            const { SCAN_HEAD: head, SCAN_BASE: base, PR_NUMBER: number, REPORT_PHASE: phase, CHECK_RUN_ID: checkId } = process.env;
+            if (!/^[a-f0-9]{40}$/.test(head || '') || !/^[a-f0-9]{40}$/.test(base || '') || !/^\d+$/.test(number || '')) throw new Error('Invalid lifecycle inputs');
+            const checkAttempt = process.env.CHECK_RUN_ATTEMPT || process.env.GITHUB_RUN_ATTEMPT;
+            if (!/^\d+$/.test(checkAttempt || '')) throw new Error('Invalid check attempt');
+            const externalId = `opengrep-${context.runId}-${checkAttempt}`;
+            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
+            const marker = '<!-- homelab-opengrep-summary-v1 -->';
+            const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: Number(number) });
+            const trusted = ['beastyrabbit', 'renovate[bot]', 'dependabot[bot]'].includes(pull.user.login) ||
+              (owner === 'SKYWAY-GmbH' && ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(pull.author_association));
+            const current = ['beastyrabbit', 'SKYWAY-GmbH'].includes(owner) && trusted && pull.state === 'open' &&
+              pull.head.sha === head && pull.base.sha === base && pull.head.repo?.full_name === `${owner}/${repo}` && pull.base.repo.full_name === `${owner}/${repo}`;
+            if (phase === 'start' && !current) throw new Error('PR changed; start withheld');
+            const title = phase === 'start' ? 'Analysis in progress' : 'Analysis unavailable or interrupted';
+            const body = `${marker}\n### OpenGrep\n${title}. No clean result for this commit.\n\nCommit: ${head.slice(0, 12)}\n[Current workflow run](${runUrl})`;
+            const output = { title, summary: body };
+            if (phase === 'start') {
+              const { data } = await github.rest.checks.create({ owner, repo, name: 'OpenGrep / report', head_sha: head, external_id: externalId, status: 'in_progress', details_url: runUrl, output });
+              core.setOutput('check-id', data.id);
+            } else if (checkId && /^\d+$/.test(checkId)) {
+              const { data } = await github.rest.checks.get({ owner, repo, check_run_id: Number(checkId) });
+              if (data.head_sha !== head || data.name !== 'OpenGrep / report' || data.external_id !== externalId) throw new Error('Check identity mismatch');
+              await github.rest.checks.update({ owner, repo, check_run_id: Number(checkId), status: 'completed', conclusion: 'failure', output });
+            }
+            if (!current) return;
+            const { data: bot } = await github.rest.users.getByUsername({ username: 'github-actions[bot]' });
+            if (bot.login !== 'github-actions[bot]' || bot.type !== 'Bot' || !Number.isSafeInteger(bot.id)) throw new Error('Invalid bot identity');
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: Number(number), per_page: 100 });
+            const own = comments.find(c => c.user.id === bot.id && c.body.startsWith(marker));
+            const { data: latest } = await github.rest.pulls.get({ owner, repo, pull_number: Number(number) });
+            if (latest.state !== 'open' || latest.head.sha !== head || latest.base.sha !== base) return;
+            if (own) {
+              if (own.body !== body) await github.rest.issues.updateComment({ owner, repo, comment_id: own.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: Number(number), body });
+            }
+
+  scan:
+    needs: prepare
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: beastyrabbit/schaffa
@@ -66,12 +128,30 @@ jobs:
         with:
           node-version: 24.21.0
           package-manager-cache: false
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: engine-cache
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/opengrep-engine
+          key: opengrep-linux-x64-35779bdd72e92129c8df2a77f0c55e8c08356801ea92591ef32108d6b28d564c
+      - name: Prepare verified engine
+        env:
+          ENGINE_PATH: ${{ runner.temp }}/opengrep-engine/opengrep
+        run: >-
+          node --input-type=module -e
+          'import { prepareEngine } from "./trusted/scripts/opengrep/engine.ts"; await prepareEngine(process.env.ENGINE_PATH);'
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: ${{ steps.engine-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/opengrep-engine
+          key: opengrep-linux-x64-35779bdd72e92129c8df2a77f0c55e8c08356801ea92591ef32108d6b28d564c
       # No installation, local Action, build, hook, submodule or repository script is run from source.
       - name: Fetch source without submodule processing
         env:
           GH_TOKEN: ${{ github.token }}
-          SCAN_HEAD: ${{ steps.metadata.outputs.head }}
-          SCAN_BASE: ${{ steps.metadata.outputs.base }}
+          SCAN_HEAD: ${{ needs.prepare.outputs.head }}
+          SCAN_BASE: ${{ needs.prepare.outputs.base }}
           GIT_CONFIG_NOSYSTEM: '1'
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_TERMINAL_PROMPT: '0'
@@ -95,13 +175,13 @@ jobs:
           SCAN_ROOT: ${{ github.workspace }}/source
           REPORT_PATH: ${{ runner.temp }}/opengrep-report/report.json
           SCAN_PROFILE: ${{ inputs.profile }}
-          SCAN_HEAD: ${{ steps.metadata.outputs.head }}
-          SCAN_BASE: ${{ steps.metadata.outputs.base }}
+          SCAN_HEAD: ${{ needs.prepare.outputs.head }}
+          SCAN_BASE: ${{ needs.prepare.outputs.base }}
           TOOLING_SHA: ${{ inputs.tooling-ref }}
           SCAN_MODE: ${{ github.event_name == 'pull_request_target' && 'pr' || 'full' }}
         run: node --experimental-strip-types trusted/scripts/opengrep/scan.ts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: ${{ always() && steps.metadata.outcome == 'success' }}
+        if: ${{ always() }}
         with:
           name: opengrep-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/opengrep-report/report.json
@@ -109,10 +189,10 @@ jobs:
           retention-days: 14
 
   report:
-    needs: scan
-    if: ${{ !cancelled() && needs.scan.result != 'skipped' && needs.scan.outputs.head != '' }}
+    needs: [prepare, scan]
+    if: ${{ always() && needs.prepare.result != 'skipped' && needs.prepare.outputs.head != '' }}
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read
@@ -125,21 +205,35 @@ jobs:
           ref: ${{ inputs.tooling-ref }}
           path: trusted
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 24.21.0
-          package-manager-cache: false
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: opengrep-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/opengrep-report
       - name: Publish validated report
+        id: publish
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8, bundled Node 24
         if: ${{ always() }}
         env:
           GH_TOKEN: ${{ github.token }}
+          CHECK_RUN_ID: ${{ needs.prepare.outputs.check-id }}
+          CHECK_RUN_ATTEMPT: ${{ needs.prepare.outputs.check-attempt }}
           REPORT_PATH: ${{ runner.temp }}/opengrep-report/report.json
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          SCAN_HEAD: ${{ needs.scan.outputs.head }}
-          SCAN_BASE: ${{ needs.scan.outputs.base }}
+          SCAN_HEAD: ${{ needs.prepare.outputs.head }}
+          SCAN_BASE: ${{ needs.prepare.outputs.base }}
           TOOLING_SHA: ${{ inputs.tooling-ref }}
-        run: node --experimental-strip-types trusted/scripts/opengrep/report.ts
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/trusted/scripts/opengrep/report.ts`).href);
+      - name: Close current check when reporting could not finish
+        if: ${{ always() && github.event_name == 'pull_request_target' && steps.publish.outputs.published != 'true' }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          REPORT_PHASE: failure
+          CHECK_RUN_ID: ${{ needs.prepare.outputs.check-id }}
+          CHECK_RUN_ATTEMPT: ${{ needs.prepare.outputs.check-attempt }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SCAN_HEAD: ${{ needs.prepare.outputs.head }}
+          SCAN_BASE: ${{ needs.prepare.outputs.base }}
+        with: *lifecycle

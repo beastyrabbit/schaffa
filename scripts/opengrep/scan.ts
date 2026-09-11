@@ -3,14 +3,10 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  ENGINE_SHA256,
-  ENGINE_VERSION,
-  PROFILES,
-  type Report,
-  SHA,
-  validateReport,
-} from "./model.ts";
+import { diagnostics } from "./diagnostics.ts";
+import { prepareEngine, verifiedEngine } from "./engine.ts";
+import { ENGINE_VERSION, PROFILES, type Report, SHA, validateReport } from "./model.ts";
+import { MAX_TARGET_BYTES, scanExcludes, scanTargets } from "./policy.ts";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -49,6 +45,7 @@ const report: Report = {
   errorCount: 1,
   seconds: 0,
   findings: [],
+  diagnostics: [],
 };
 
 let stage = "checkout";
@@ -59,19 +56,13 @@ try {
   if (merge.status !== 0 || !SHA.test(merge.stdout.trim())) throw new Error("Missing merge base");
   report.mergeBase = merge.stdout.trim();
   stage = "engine-download";
-  const binary = process.env.OPENGREP_BINARY ?? resolve(required("RUNNER_TEMP"), "opengrep");
+  const binary =
+    process.env.OPENGREP_BINARY ?? resolve(required("RUNNER_TEMP"), "opengrep-engine/opengrep");
   if (!process.env.OPENGREP_BINARY) {
-    const response = await fetch(
-      `https://github.com/opengrep/opengrep/releases/download/v${ENGINE_VERSION}/opengrep_manylinux_x86`,
-      {
-        signal: AbortSignal.timeout(120000),
-      },
-    );
-    if (!response.ok) throw new Error("Engine download failed");
-    writeFileSync(binary, Buffer.from(await response.arrayBuffer()));
+    await prepareEngine(binary);
   }
   stage = "engine-integrity";
-  if (createHash("sha256").update(readFileSync(binary)).digest("hex") !== ENGINE_SHA256) {
+  if (!verifiedEngine(binary)) {
     throw new Error("Engine checksum mismatch");
   }
   chmodSync(binary, 0o700);
@@ -124,39 +115,29 @@ try {
     "--timeout-threshold",
     "1",
     "--max-target-bytes",
-    "20000000",
-    "--exclude",
-    ".git",
-    "--exclude",
-    "node_modules",
-    "--exclude",
-    ".venv",
-    "--exclude",
-    "dist",
-    "--exclude",
-    "build",
-    "--exclude",
-    "coverage",
-    "--exclude",
-    ".github/opengrep/vendor",
+    String(MAX_TARGET_BYTES),
+    ...scanExcludes().flatMap((path) => ["--exclude", path]),
   ];
   if (process.env.SCAN_MODE === "pr") args.push("--baseline-commit", report.mergeBase);
-  args.push(".");
+  const targets = scanTargets(root, report.repository);
+  args.push(...targets);
   stage = "engine-execution";
-  const scan = spawnSync(binary, args, {
-    cwd: root,
-    encoding: "utf8",
-    maxBuffer: 256 * 1024 * 1024,
-    timeout: 1800000,
-    env: {
-      ...process.env,
-      SEMGREP_SEND_METRICS: "off",
-      // Minimal ARC images otherwise make the bundled Python read Unicode rules as ASCII.
-      LANG: "C.UTF-8",
-      LC_ALL: "C.UTF-8",
-      PYTHONUTF8: "1",
-    },
-  });
+  const scan = targets.length
+    ? spawnSync(binary, args, {
+        cwd: root,
+        encoding: "utf8",
+        maxBuffer: 256 * 1024 * 1024,
+        timeout: 1800000,
+        env: {
+          ...process.env,
+          SEMGREP_SEND_METRICS: "off",
+          // Minimal ARC images otherwise make the bundled Python read Unicode rules as ASCII.
+          LANG: "C.UTF-8",
+          LC_ALL: "C.UTF-8",
+          PYTHONUTF8: "1",
+        },
+      })
+    : { status: 0, error: undefined, stdout: '{"errors":[],"results":[],"paths":{"scanned":[]}}' };
   // Raw output stays in memory: it can contain source code and must never enter CI logs/artifacts.
   if (scan.error) {
     const code = "code" in scan.error ? scan.error.code : undefined;
@@ -164,7 +145,7 @@ try {
     if (code === "ETIMEDOUT") stage = "engine-timeout";
     throw new Error("Scanner failed");
   }
-  stage = `engine-output (exit ${scan.status ?? "signal"})`;
+  stage = "engine-output";
   const raw = JSON.parse(scan.stdout);
   if (
     !Array.isArray(raw.errors) ||
@@ -175,7 +156,10 @@ try {
   }
   report.files = raw.paths.scanned.length;
   report.errorCount = raw.errors.length;
+  report.diagnostics = diagnostics(raw.errors);
   if (scan.status !== 0 && report.errorCount === 0) report.errorCount = 1;
+  if (report.errorCount && !report.diagnostics.length)
+    report.diagnostics = [{ kind: "engine", stage }];
   report.findings = raw.results.map(
     (f: {
       check_id: string;
@@ -205,6 +189,7 @@ try {
   report.status = "incomplete";
   report.errorCount = Math.max(report.errorCount, 1);
   report.findings = [];
+  report.diagnostics = [{ kind: stage.startsWith("engine-") ? "engine" : "setup", stage }];
   process.stderr.write(
     `OpenGrep did not complete at ${stage}. Raw scanner output was withheld to protect source data.\n`,
   );

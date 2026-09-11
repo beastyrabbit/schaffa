@@ -32,11 +32,14 @@ function run(scenario) {
           : [{ rule: "homelab.web.eval", path: "app.js", line: 1, severity: "WARNING" }],
     };
     if (scenario === "wrong-repo") report.repository = "elsewhere/other";
+    if (scenario === "rerun") report.attempt = "2";
     if (scenario === "incomplete") {
       report.status = "incomplete";
       report.errorCount = 1;
     }
-    writeFileSync(join(root, "report.json"), JSON.stringify(report));
+    if (scenario === "audit-only")
+      report.findings = [{ rule: "raptor-bad-words", path: "notes.md", line: 1, severity: "INFO" }];
+    if (scenario !== "missing") writeFileSync(join(root, "report.json"), JSON.stringify(report));
     const stub = `
       import { writeFileSync } from 'node:fs';
       import { SUMMARY_MARKER } from ${JSON.stringify(model)};
@@ -50,6 +53,7 @@ function run(scenario) {
         let body;
         if(path.endsWith('/pulls/2')) body={state:'open',user:{login:'beastyrabbit'},head:{sha:scenario==='stale'?'f'.repeat(40):'a'.repeat(40),repo:{full_name:'beastyrabbit/private-fixture'}},base:{sha:'b'.repeat(40),repo:{full_name:'beastyrabbit/private-fixture'}}};
         else if(path.startsWith('/users/')) body={id:42,login:'github-actions[bot]',type:'Bot'};
+        else if(path.endsWith('/check-runs/123')) body={head_sha:'a'.repeat(40),name:'OpenGrep / report',external_id:'opengrep-1-1'};
         else if(path.endsWith('/issues/2/comments')) body=[{id:1,user:{id:99},body:SUMMARY_MARKER},...(scenario==='first'?[]:[{id:2,user:{id:42},body:SUMMARY_MARKER}])];
         else throw new Error('Unexpected request');
         return new Response(JSON.stringify(body),{status:200});
@@ -67,11 +71,13 @@ function run(scenario) {
           GH_TOKEN: "test-not-a-credential",
           GITHUB_REPOSITORY: "beastyrabbit/private-fixture",
           GITHUB_RUN_ID: "1",
-          GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_RUN_ATTEMPT: scenario === "rerun" ? "2" : "1",
           PR_NUMBER: "2",
           SCAN_HEAD: "a".repeat(40),
           SCAN_BASE: "b".repeat(40),
           TOOLING_SHA: "d".repeat(40),
+          CHECK_RUN_ID: ["existing-check", "rerun"].includes(scenario) ? "123" : "",
+          CHECK_RUN_ATTEMPT: "1",
           REPORT_PATH: join(root, "report.json"),
         },
       },
@@ -123,4 +129,29 @@ test("stale commits and wrong repositories never receive comments; publication e
     );
   }
   assert.equal(run("publication-error").status, 1);
+});
+
+test("missing report invalidates old summary and audit-only results remain clean", () => {
+  const missing = run("missing");
+  assert.equal(missing.status, 1);
+  assert.match(missing.writes[0].body.body, /Analysis unavailable/);
+  const audit = run("audit-only");
+  assert.equal(audit.status, 0);
+  assert.match(audit.writes[0].body.body, /Findings: 0/);
+  assert.equal(audit.writes[1].body.conclusion, "success");
+});
+test("final report completes the same check created at scan start", () => {
+  const r = run("existing-check");
+  assert.equal(r.status, 0);
+  assert.equal(r.writes[1].path.endsWith("/check-runs/123"), true);
+  assert.equal(r.writes[1].method, "PATCH");
+  assert.equal(r.writes[1].body.status, "completed");
+});
+
+test("failed-job rerun validates attempt-two report and completes attempt-one check", () => {
+  const r = run("rerun");
+  assert.equal(r.status, 0);
+  assert.equal(r.writes[1].path.endsWith("/check-runs/123"), true);
+  assert.equal(r.writes[1].body.external_id, "opengrep-1-1");
+  assert.equal(r.writes[1].body.conclusion, "neutral");
 });
