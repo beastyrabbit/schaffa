@@ -1,6 +1,6 @@
 # Self-host Schaffa with Docker Compose and Infisical
 
-This guide deploys Schaffa on one Linux host with Docker Compose, ClamAV,
+This guide deploys Schaffa on one Linux host with Docker Compose, shared ClamGate scanning,
 Infisical runtime secret injection, persistent storage, and an HTTPS reverse
 proxy. It deliberately keeps secret values out of Git, Compose files, shell
 history, and Docker image layers.
@@ -11,15 +11,15 @@ history, and Docker image layers.
 Internet
    │ HTTPS
    ▼
-Reverse proxy ─────► Schaffa :3000 ─────► ClamAV :3310
-                         │                     │
-                         ▼                     ▼
-                   /data volume         signature volume
-                  SQLite + uploads       reproducible data
+Reverse proxy ─────► Schaffa :3000 ──HTTPS──► ClamGate
+                         │
+                         ▼
+                   /data volume
+                  SQLite + uploads
 ```
 
-Only the reverse proxy is public. Schaffa binds to host loopback and ClamAV is
-reachable only inside the Compose network. The entire Schaffa `/data` volume
+Only the reverse proxy exposes Schaffa publicly. Schaffa binds to host loopback
+and reaches the configured ClamGate service over HTTPS. The entire Schaffa `/data` volume
 is one backup unit: SQLite metadata and stored page/file bytes must remain in
 sync.
 
@@ -30,8 +30,8 @@ sync.
 - An HTTPS reverse proxy. Pangolin, Caddy, Traefik, and nginx all work.
 - An Infisical organization and project.
 - Infisical CLI installed on the host. Pin a tested version in production.
-- At least 4 GiB RAM for Schaffa plus ClamAV. ClamAV signature loading is the
-  largest baseline memory consumer.
+- Access to ClamGate and its operator-provided trusted Ed25519 public key and key ID.
+- Memory sized for the configured image conversion concurrency; no local scanner is required.
 - Storage sized for the configured `MAX_STORAGE_BYTES` plus backups.
 
 The examples use Infisical Cloud's default endpoint. If you self-host
@@ -85,8 +85,9 @@ and rotate only as a planned migration.
 ```sh
 sudo install -d -m 0750 -o "$USER" -g docker /opt/schaffa
 cd /opt/schaffa
+export SCHAFFA_RELEASE="<release-tag-with-ClamGate-support>"
 curl --fail --location --output compose.yaml \
-  https://raw.githubusercontent.com/beastyrabbit/schaffa/v0.10.0/compose.yaml
+  "https://raw.githubusercontent.com/beastyrabbit/schaffa/$SCHAFFA_RELEASE/compose.yaml"
 ```
 
 Read the selected release in GitHub and copy its immutable container digest.
@@ -97,6 +98,9 @@ Create `/opt/schaffa/deployment.env` containing non-secret settings only:
 ```dotenv
 SCHAFFA_IMAGE=ghcr.io/beastyrabbit/schaffa@sha256:REPLACE_WITH_RELEASE_DIGEST
 SCHAFFA_BASE_URL=https://publish.example.com
+CLAMGATE_BASE_URL=https://virus.heerlab.com
+CLAMGATE_PUBLIC_KEY_FILE=/opt/schaffa/clamgate-public.pem
+CLAMGATE_PUBLIC_KEY_ID=REPLACE_WITH_OPERATOR_CONFIRMED_KEY_ID
 
 MAX_STORAGE_BYTES=21474836480
 MAX_ANONYMOUS_STORAGE_BYTES=536870912
@@ -109,6 +113,14 @@ TRUSTED_PROXIES=127.0.0.1,::1
 
 This file is not secret, but keep it host-local so environment-specific DNS
 names and capacity choices do not leak into reusable deployment automation.
+
+Obtain the matching trusted public key from the ClamGate operator and place it
+at the configured host path. Make it readable by the container's `node` user.
+Compose mounts it read-only; Schaffa refuses to start without a valid key.
+SKYWAY-owned installations must use `https://virus.skyway.tools` instead.
+An optional `CLAMGATE_APPLICATION_TOKEN` can be injected from the existing secret
+store. See [ClamGate scanning](deployment.md#clamgate-scanning) for capacity and
+proxy deadlines.
 
 ## 4. Authenticate the host to Infisical
 
@@ -153,17 +165,17 @@ schaffa_compose up -d --pull always --no-build
 Keep this function and the non-secret environment loaded for every maintenance
 command. In a new shell, repeat this setup and authenticate to Infisical first.
 
-Verify both containers:
+Verify the application:
 
 ```sh
 schaffa_compose ps
 curl --fail http://127.0.0.1:3000/healthz
-schaffa_compose logs --tail=100 schaffa clamav
+schaffa_compose logs --tail=100 schaffa
 ```
 
-The first ClamAV startup can take several minutes while signatures download.
+ClamGate may queue scans while its engine starts or updates signatures.
 Schaffa returns the final URL immediately, shows a no-cache scan status page,
-and keeps the payload quarantined until ClamAV is ready. Scanner outages are
+and keeps the payload quarantined until ClamGate returns a verified clean result. Scanner outages are
 retried; unscanned bytes are never served.
 
 For unattended restarts, configure your service manager to authenticate the
@@ -253,8 +265,8 @@ trap - EXIT
 Store backups encrypted and off-host. Test restores regularly on an isolated
 hostname. Restore the complete archive into an empty data volume, restore the
 same `SCHAFFA_TOKEN_PEPPER` from Infisical, start Schaffa, and verify page/file
-reads plus admin authentication. The ClamAV signature volume is reproducible
-and does not need backup.
+reads plus admin authentication. Provision the trusted ClamGate public key on
+the restored host as well.
 
 ## Upgrade and rollback
 
@@ -271,7 +283,7 @@ the matching `/data` backup as well.
 ## Operational checklist
 
 - Monitor disk usage against `MAX_STORAGE_BYTES` and leave filesystem headroom.
-- Alert when either container is unhealthy or uploads return scanner errors.
+- Alert when Schaffa is unhealthy or uploads return scanner errors.
 - Back up `/data` and the Infisical project independently.
 - Give every user or workstation its own revocable upload token.
 - Keep anonymous limits conservative on public instances.

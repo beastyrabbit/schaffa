@@ -45,6 +45,7 @@ export async function promoteQuarantinedPage(
   slugValue: string,
   version: number,
   versionId: string,
+  scanned: { sha256: string; size: number },
 ): Promise<string> {
   const slug = validateSlug(slugValue);
   if (!Number.isSafeInteger(version) || version < 1) throw new Error("Invalid page version.");
@@ -56,6 +57,7 @@ export async function promoteQuarantinedPage(
   const target = path.join(directory, `${version}.html`);
   const temporary = `${target}.${randomUUID()}.tmp`;
   await copyFile(absoluteStoragePath(storagePath), temporary);
+  await verifyScannedCopy(temporary, scanned);
   await rename(temporary, target);
   return path.relative(config.dataDir, target);
 }
@@ -152,6 +154,7 @@ export async function promoteQuarantinedUpload(
   storagePath: string,
   id: string,
   filename: string,
+  scanned: { sha256: string; size: number },
 ): Promise<string> {
   if (!isFileId(id) || !new RegExp(`^${id}\\.[a-z0-9]{1,10}$`).test(filename)) {
     throw new Error("Invalid upload identity.");
@@ -163,8 +166,29 @@ export async function promoteQuarantinedUpload(
   const target = path.join(directory, filename);
   const temporary = `${target}.${randomUUID()}.tmp`;
   await copyFile(absoluteStoragePath(storagePath), temporary);
+  await verifyScannedCopy(temporary, scanned);
   await rename(temporary, target);
   return path.relative(config.dataDir, target);
+}
+
+async function verifyScannedCopy(
+  file: string,
+  expected: { sha256: string; size: number },
+): Promise<void> {
+  const hash = createHash("sha256");
+  let size = 0;
+  try {
+    for await (const chunk of createReadStream(file)) {
+      hash.update(chunk);
+      size += chunk.length;
+    }
+    if (size !== expected.size || hash.digest("hex") !== expected.sha256) {
+      throw new AppError("Quarantined bytes changed after scanning.", 503, "scanner_unavailable");
+    }
+  } catch (error) {
+    await rm(file, { force: true });
+    throw error;
+  }
 }
 
 export async function removeUpload(id: string): Promise<void> {

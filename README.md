@@ -15,12 +15,14 @@ Schaffa is heavily inspired by [PostPlan](https://postplan.dev) and [UploadThing
 - Returns byte-identical HTML for static pages; interactive pages use a warning screen and isolated run URL.
 - Publishes files under random 128-bit IDs without retaining original filenames.
 - Records guides incrementally with optimistic concurrency, idempotent steps, cleaned screenshots, preflight checks, and immutable revisions.
+- Records browser videos locally or attaches a scanned video player to a published guide.
 - Publishes script-free Marp presentations with optional PDF/PPTX/source artifacts through the CLI.
 - Converts images to metadata-free WebP, limits them to 2560 px and preserves transparency.
 - Accepts new anonymous HTML pages for one hour; tokens make pages permanent and enable files or updates.
 - Lets users sign in through Shoo and issue revocable upload tokens for their own agents.
 - Lets administrators enable sandboxed interactive pages only for explicitly trusted users.
 - Returns a stable URL immediately, scans page/file uploads asynchronously, and never exposes unscanned bytes.
+- Scans every upload through ClamGate and verifies its signed result before publication.
 
 ## Pangolin access model
 
@@ -48,8 +50,12 @@ Node 24+ and pnpm are required for the server and local development. The standal
 
 ```sh
 pnpm install --frozen-lockfile
+export CLAMGATE_PUBLIC_KEY_FILE="/path/to/trusted-public.pem"
+export CLAMGATE_PUBLIC_KEY_ID="<operator-confirmed-key-id>"
 pnpm dev
 ```
+
+ClamGate is the only scanner. The default service origin is `https://virus.heerlab.com`; obtain its trusted public key and key ID from the operator before starting the server. Local development uses the same service and needs no scanner container.
 
 `pnpm dev` is the only normal local entry point. It starts all configured services through Portless and prints their stable `.localhost` URLs. Open `/admin` on the printed Schaffa URL and sign in with the temporary token.
 
@@ -91,6 +97,12 @@ saved locally under `.schaffa/recordings/<slug>/`, and uploaded immediately as
 an incremental guide step. Close the recorded window or press Ctrl+C to stop.
 `Alt+Shift+R` pauses capture for private screens. If the network fails, the
 local manifest remains recoverable with `npx schaffa guide sync`.
+
+Add `--video` to attach a video player to the guide, or use
+`npx schaffa video record --browser https://app.example.com --output ./demo.webm`
+for a local standalone recording. Video needs ffmpeg with libvpx-vp9 and Chrome
+or Chromium. See the [CLI video guide](packages/cli/README.md) for capture modes,
+privacy controls, and publishing options.
 
 Manual recording remains available for terminal, API, and mixed workflows:
 

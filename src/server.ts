@@ -96,6 +96,7 @@ import {
   revokeUserToken,
   setInteractivePublishingPermission,
 } from "./users.js";
+import { cancelPendingVirusScans } from "./virus-scanner.js";
 
 const adminCookie = config.cookieSecure ? "__Secure-schaffa_admin" : "schaffa_admin";
 const userCookie = config.cookieSecure ? "__Secure-schaffa_user" : "schaffa_user";
@@ -927,8 +928,11 @@ export function buildServer(
     request.log.error({ err: error }, "request failed");
     return reply.code(500).send({ error: "internal_error", message: "Internal server error." });
   });
-  app.addHook("onClose", async () => {
+  app.addHook("preClose", async () => {
     closing = true;
+    cancelPendingVirusScans();
+  });
+  app.addHook("onClose", async () => {
     clearInterval(cleanupTimer);
     if (scanTimer) clearInterval(scanTimer);
     await activeScan;

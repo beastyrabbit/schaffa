@@ -29,7 +29,7 @@ curl --fail-with-body --silent --show-error \
   "$SCHAFFA_URL/api/pages"
 ```
 
-Add `-H "Authorization: Bearer $SCHAFFA_TOKEN"` to make the new page permanent. Page and file writes return `202 Accepted` with `publicUrl`, `scanStatus: "pending"`, and `statusUrl`. The stable public URL displays a self-refreshing status page while the payload remains quarantined. Clean content replaces that page at the same URL. If ClamAV is unavailable, the worker keeps retrying; unscanned bytes are never public. Malware deletes the payload and leaves a rejection tombstone with a sanitized signature.
+Add `-H "Authorization: Bearer $SCHAFFA_TOKEN"` to make the new page permanent. Page and file writes return `202 Accepted` with `publicUrl`, `scanStatus: "pending"`, and `statusUrl`. The stable public URL displays a self-refreshing status page while the payload remains quarantined. Clean content replaces that page at the same URL. If ClamGate is unavailable, the worker keeps retrying; unscanned bytes are never public. Malware deletes the payload and leaves a rejection tombstone with a safe rejection reason.
 
 Update an existing permanent page by using its server-generated ID:
 
@@ -68,7 +68,7 @@ Server-generated page IDs contain approximately 83 random bits. Existing pages w
 
 Schaffa does not inject CSS into uploaded content. Upload one complete UTF-8 HTML file, including its own `<style>` block when needed. Static pages reject scripts, forms, frames, event handlers, JavaScript URLs, and meta refresh.
 
-Uploaded HTML is parsed for policy checks and served as inert stored bytes under a strict Content Security Policy. It is never opened, rendered, or executed by the server. ClamAV receives every upload over its `INSTREAM` protocol and runs in a separate container.
+Uploaded HTML is parsed for policy checks and served as inert stored bytes under a strict Content Security Policy. It is never opened, rendered, or executed by the server. ClamGate receives uploads over HTTPS. Schaffa verifies the signed result against the trusted public key and uploaded bytes before publication. Converted images are scanned again as WebP.
 
 ## Files
 

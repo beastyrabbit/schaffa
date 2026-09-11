@@ -84,7 +84,7 @@ Create a page with a random, non-semantic 16-character slug:
 skills/schaffa-publish/scripts/publish.sh page <html-file>
 ```
 
-Without `SCHAFFA_TOKEN`, the page is anonymous: ClamAV scans it, it disappears after one hour, and its stored data is deleted after 30 days. Set the token when the page must remain permanent.
+Without `SCHAFFA_TOKEN`, the page is anonymous: ClamGate scans it, it disappears after one hour, and its stored data is deleted after 30 days. Set the token when the page must remain permanent.
 
 Do not derive new slugs from the page title or content. To update a previously published page, reuse the returned slug explicitly:
 
