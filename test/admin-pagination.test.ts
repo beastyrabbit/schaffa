@@ -37,7 +37,7 @@ test("admin filtering precedes pagination and preserves totals, uploaders, and U
   const owner = createToken("Pagination owner");
   const other = createToken("Other owner");
   const insert = db().prepare(
-    "INSERT INTO files(id,filename,storage_path,media_type,bytes,sha256,created_by_token_id) VALUES(?,?,?,'text/plain',1,'fixture',?)",
+    "INSERT INTO files(id,filename,storage_path,media_type,bytes,sha256,created_by_token_id,created_at) VALUES(?,?,?,'text/plain',1,'fixture',?,'2026-01-01 00:00:00')",
   );
   for (let index = 0; index < 125; index++) {
     const id = `fixture-${String(index).padStart(4, "0")}`;

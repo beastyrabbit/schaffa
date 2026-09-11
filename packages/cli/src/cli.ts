@@ -38,6 +38,7 @@ import {
   recordChromeWindowGuide,
   recordDesktopGuide,
 } from "./desktop-recorder.js";
+import { doctor, formatDoctorReport } from "./doctor.js";
 import { inlinePresentationAssets } from "./presentation-assets.js";
 import {
   findBrowserExecutable,
@@ -53,6 +54,7 @@ const require = createRequire(import.meta.url);
 const help = `Schaffa publishes pages, presentations, files, and incrementally recorded guides.
 
 Usage:
+  schaffa doctor [--interactive] [--json] [--token <token> | --ignore-token]
   schaffa video record --browser <url> [--title <title>] [--output <file.webm>] [--upload] [--json]
   schaffa video export --manifest <video.json|manifest.json> --output <file.webm> [--json]
   schaffa guide video [--manifest <path>] [--output <file.webm>] [--json]
@@ -139,6 +141,7 @@ export function parseCliArgs(
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  if (args[0] === "doctor") return runDoctor(args.slice(1));
   if (args[0] === "video") return runVideo(args.slice(1));
   if (args[0] === "guide" && args[1] === "video") return runGuideVideo(args.slice(2));
   if (args[0] === "record") return runAutomaticRecorder(args.slice(1), false);
@@ -152,6 +155,27 @@ async function main(): Promise<void> {
   const { json, command: _command, ...uploadOptions } = options;
   const result = await upload(uploadOptions);
   process.stdout.write(json ? `${JSON.stringify(result)}\n` : `${result.publicUrl}\n`);
+}
+
+async function runDoctor(args: string[]): Promise<void> {
+  const { values } = parseArgs({
+    args,
+    strict: true,
+    options: {
+      help: { type: "boolean", short: "h" },
+      json: { type: "boolean" },
+      interactive: { type: "boolean" },
+      token: { type: "string" },
+      "ignore-token": { type: "boolean" },
+    },
+  });
+  if (values.help) return void process.stdout.write(help);
+  const report = await doctor({
+    ...values,
+    ...(process.env.SCHAFFA_URL ? { baseUrl: process.env.SCHAFFA_URL } : {}),
+  });
+  process.stdout.write(values.json ? `${JSON.stringify(report)}\n` : formatDoctorReport(report));
+  if (!report.ready) process.exitCode = 1;
 }
 
 async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<void> {

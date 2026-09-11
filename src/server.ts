@@ -246,6 +246,47 @@ export function buildServer(
   });
 
   app.get("/healthz", async () => ({ ok: true }));
+  app.get("/api/capabilities", async (request) => {
+    const auth = authenticateToken(bearerToken(request.headers.authorization));
+    if (request.headers.authorization !== undefined && !auth) {
+      throw new AppError("A valid bearer token is required.", 401, "unauthorized");
+    }
+    const settings = getInstanceSettings();
+    const account = auth?.userId
+      ? (db().prepare("SELECT can_publish_interactive FROM users WHERE id = ?").get(auth.userId) as
+          | { can_publish_interactive: number }
+          | undefined)
+      : undefined;
+    const permission = (reason: string | null) => ({ allowed: reason === null, reason });
+    const uploadReason = settings.writesLocked
+      ? "writes_locked"
+      : !auth
+        ? "token_required"
+        : !auth.scopes.has("upload") && !auth.scopes.has("admin")
+          ? "upload_scope_required"
+          : null;
+    const interactiveReason = settings.writesLocked
+      ? "writes_locked"
+      : !auth
+        ? "token_required"
+        : !auth.scopes.has("interactive")
+          ? "interactive_scope_required"
+          : !settings.interactivePublishingEnabled
+            ? "interactive_disabled"
+            : !account?.can_publish_interactive
+              ? "interactive_not_allowed"
+              : null;
+    return {
+      version: 1,
+      authenticated: Boolean(auth),
+      capabilities: {
+        staticHtml: permission(!auth && !settings.writesLocked ? null : uploadReason),
+        interactiveHtml: permission(interactiveReason),
+        fileUploads: permission(uploadReason),
+        guides: permission(uploadReason),
+      },
+    };
+  });
   app.get("/metrics", async (_request, reply) => {
     reply.header("Cache-Control", "no-store");
     return reply

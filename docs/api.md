@@ -19,6 +19,14 @@ Set `SCHAFFA_TOKEN="sfa_…"` for permanent pages, files, and updates. Public pa
 
 A first login creates a local user when signups are enabled. Users can create and revoke their own upload tokens from the dashboard; plaintext values are shown once. When an administrator enables Interactive Publishing both instance-wide and for a specific user, that user can also mint separate interactive-only tokens. Schaffa stores an HMAC hash of its local HttpOnly session token, not the Shoo ID token. Automated tests inject a local verifier and never call Shoo.
 
+## Check publishing permissions
+
+`GET /api/capabilities` checks the supplied bearer token without publishing content. Invalid or revoked tokens return `401`; omitting authorization reports anonymous permissions. Authentication updates the token's last-used timestamp.
+
+The JSON response includes `version: 1`, `authenticated`, and `capabilities`. Each capability, `staticHtml`, `interactiveHtml`, `fileUploads`, and `guides`, contains `allowed` and `reason`. Allowed operations have a `null` reason. Denials use `token_required`, `upload_scope_required`, `interactive_scope_required`, `interactive_disabled`, `interactive_not_allowed`, or `writes_locked`. The response uses `Cache-Control: no-store`.
+
+The CLI exposes this through `npx schaffa doctor --json`. Add `--interactive` to require interactive publishing permission. Uploads still enforce content validation, quotas, and scanning.
+
 ## Pages
 
 Create a page with a random, non-semantic slug:

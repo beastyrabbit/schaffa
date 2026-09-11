@@ -71,6 +71,8 @@ skills/schaffa-publish/scripts/publish.sh file examples/test-asset.png
 
 ## CLI
 
+Run `npx schaffa doctor` to find and validate your token and check publishing permissions without uploading anything. Agents can use `npx schaffa doctor --interactive --json` to require permission for interactive HTML and read the result as JSON. See [doctor output and exit codes](packages/cli/README.md#check-credentials-and-permissions).
+
 The separately publishable npm package lives in `packages/cli` and is available
 from npmjs.org:
 

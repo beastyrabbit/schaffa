@@ -18,6 +18,59 @@ export function openApiDocument() {
       { name: "Guides", description: "Record, edit, and publish incremental guides." },
     ],
     paths: {
+      "/api/capabilities": {
+        get: {
+          summary: "Check token validity and publishing permissions without publishing content",
+          description:
+            "Omit the bearer token to check anonymous access. A supplied token must be valid and not revoked. Authentication updates the token's last-used timestamp. Permissions reflect token scope, account approval, and instance settings; content validation, quotas, and scanning still apply at upload time.",
+          security: [{}, { bearerAuth: [] }],
+          responses: {
+            "200": {
+              description: "Current publishing permissions",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["version", "authenticated", "capabilities"],
+                    properties: {
+                      version: { const: 1 },
+                      authenticated: { type: "boolean" },
+                      capabilities: {
+                        type: "object",
+                        required: ["staticHtml", "interactiveHtml", "fileUploads", "guides"],
+                        properties: Object.fromEntries(
+                          ["staticHtml", "interactiveHtml", "fileUploads", "guides"].map((name) => [
+                            name,
+                            {
+                              type: "object",
+                              required: ["allowed", "reason"],
+                              properties: {
+                                allowed: { type: "boolean" },
+                                reason: {
+                                  enum: [
+                                    null,
+                                    "writes_locked",
+                                    "token_required",
+                                    "upload_scope_required",
+                                    "interactive_scope_required",
+                                    "interactive_disabled",
+                                    "interactive_not_allowed",
+                                  ],
+                                },
+                              },
+                            },
+                          ]),
+                        ),
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": errorResponse("Invalid or revoked bearer token"),
+          },
+        },
+      },
       "/api/pages": {
         post: {
           tags: ["Pages"],
