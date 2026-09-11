@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -159,7 +159,7 @@ test("CLI doctor uses real token lookup, JSON, text, exit codes, and anonymous c
   };
   let result = await run(["--json"]);
   assert.equal(result.code, 0);
-  assert.equal(JSON.parse(result.stdout).token.source, tokenFile);
+  assert.equal(JSON.parse(result.stdout).token.source, await realpath(tokenFile));
   result = await run(["--interactive", "--json"]);
   assert.equal(result.code, 1);
   assert.equal(JSON.parse(result.stdout).token.status, "valid");
