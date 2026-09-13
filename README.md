@@ -1,6 +1,18 @@
 # Schaffa
 
-Schaffa is the workhorse that connects an AI agent's output to the web. Its name comes from the Swabian word for working or getting things done. The self-hosted service publishes standalone HTML pages and public files from one origin.
+
+Schaffa publishes standalone HTML pages, files, and step-by-step guides from an AI agent or a local CLI. The self-hosted service keeps immutable revisions while a short public URL serves the latest page.
+
+![Published Schaffa asset](examples/test-asset.png)
+
+## Quick start
+
+```sh
+npx schaffa doctor
+npx schaffa upload file.html
+```
+
+The command prints a public URL. Deployment, recording, and API details live in `docs/`.
 
 Schaffa is heavily inspired by [PostPlan](https://postplan.dev) and [UploadThing](https://uploadthing.com), but built to be self-hosted.
 
