@@ -14,8 +14,6 @@ npx schaffa upload file.html
 
 The command prints a public URL. Deployment, recording, and API details live in `docs/`.
 
-Schaffa is heavily inspired by [PostPlan](https://postplan.dev) and [UploadThing](https://uploadthing.com), but built to be self-hosted.
-
 - Source: [github.com/beastyrabbit/schaffa](https://github.com/beastyrabbit/schaffa)
 - Image: `ghcr.io/beastyrabbit/schaffa:<version>` (`linux/amd64`)
 - License: MIT
