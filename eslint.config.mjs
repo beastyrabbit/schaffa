@@ -7,12 +7,7 @@ import tseslint from "typescript-eslint";
 const files = ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "packages/cli/src/**/*.ts"];
 export default tseslint.config(
   {
-    ignores: [
-      "**/node_modules/**",
-      "**/dist/**",
-      "data/**",
-      "coverage/**",
-    ],
+    ignores: ["**/node_modules/**", "**/dist/**", "data/**", "coverage/**"],
   },
   ...[
     eslint.configs.recommended,
