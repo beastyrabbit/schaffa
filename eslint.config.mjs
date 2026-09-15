@@ -10,7 +10,6 @@ export default tseslint.config(
     ignores: [
       "**/node_modules/**",
       "**/dist/**",
-      ".github/opengrep/vendor/**",
       "data/**",
       "coverage/**",
     ],

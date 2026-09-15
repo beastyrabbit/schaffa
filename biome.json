@@ -14,8 +14,7 @@
       "!!**/dist",
       "!!data",
       "!!node_modules",
-      "!!coverage",
-      "!!.github/opengrep/vendor"
+      "!!coverage"
     ]
   },
   "formatter": {

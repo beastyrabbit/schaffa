@@ -1,2 +1,0 @@
-# Preserve third-party rule text, patterns and license files as imported from upstream.
-.github/opengrep/vendor/** linguist-vendored whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
