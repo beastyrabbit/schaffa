@@ -194,7 +194,6 @@ async function runDelete(args: string[]): Promise<void> {
       help: { type: "boolean", short: "h" },
       json: { type: "boolean" },
       token: { type: "string" },
-      "ignore-token": { type: "boolean" },
     },
   });
   if (values.help) return void process.stdout.write(help);
