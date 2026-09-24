@@ -29,6 +29,7 @@ The command prints a public URL. Deployment, recording, and API details live in 
 - Publishes script-free Marp presentations with optional PDF/PPTX/source artifacts through the CLI.
 - Converts images to metadata-free WebP, limits them to 2560 px and preserves transparency.
 - Accepts new anonymous HTML pages for one hour; tokens make pages permanent and enable files or updates.
+- Lets the token that created a page, file, or guide delete it again from the CLI or API.
 - Lets users sign in through Shoo and issue revocable upload tokens for their own agents.
 - Lets administrators enable sandboxed interactive pages only for explicitly trusted users.
 - Returns a stable URL immediately, scans page/file uploads asynchronously, and never exposes unscanned bytes.
@@ -148,6 +149,13 @@ npx schaffa publish deck.md --kind presentation --export pdf --export pptx
 
 Requested PDF and PowerPoint exports appear as download links in the published presentation.
 Omit either `--export` option when that format should not be generated.
+
+Delete a page, file, or guide with the token that created it, or with an admin token:
+
+```sh
+npx schaffa delete guide <id>
+npx schaffa delete https://schaffa.dev/p/<slug>
+```
 
 The CLI defaults to `https://schaffa.dev`. Every new HTML page receives a random, non-semantic ID. New HTML pages work without a token and disappear after one hour. For permanent pages, files, presentations, and guides, the CLI automatically reads `SCHAFFA_TOKEN`, local `.env.local` and `.env` files, and [Schaffa token config files](packages/cli/README.md#use-a-token). An explicit `--token <token>` takes precedence. Use `--ignore-token` to skip token lookup and publish an anonymous HTML page.
 
