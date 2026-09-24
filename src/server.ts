@@ -27,6 +27,7 @@ import {
   createGuide,
   deleteGuide,
   deleteGuideStep,
+  deleteOwnedGuide,
   finishGuide,
   getGuideImage,
   getOwnedGuide,
@@ -48,8 +49,10 @@ import { pendingScanCount, processNextPendingScan, resetInterruptedScans } from 
 import {
   canRunInteractivePage,
   deleteFile,
+  deleteFileForToken,
   deleteFileForUser,
   deletePage,
+  deletePageForToken,
   deletePageForUser,
   deletePageVersion,
   deletePageVersionForUser,
@@ -510,6 +513,11 @@ export function buildServer(
     if (scanIntervalMs > 0) void runScan();
     return reply.code(202).send(result);
   });
+  app.delete<{ Params: { slug: string } }>("/api/pages/:slug", async (request, reply) => {
+    const auth = requireTokenAuth(request);
+    await deletePageForToken(auth.id, auth.scopes.has("admin"), request.params.slug);
+    return reply.code(204).send();
+  });
 
   app.post<{ Querystring: { title?: string | string[]; type?: string | string[] } }>(
     "/api/pages",
@@ -557,6 +565,11 @@ export function buildServer(
     if (scanIntervalMs > 0) void runScan();
     return reply.code(202).send(result);
   });
+  app.delete<{ Params: { id: string } }>("/api/files/:id", async (request, reply) => {
+    const auth = requireTokenAuth(request);
+    await deleteFileForToken(auth.id, auth.scopes.has("admin"), request.params.id);
+    return reply.code(204).send();
+  });
 
   app.post<{
     Body: { title?: unknown; description?: unknown; targetUrl?: unknown; language?: unknown };
@@ -591,6 +604,11 @@ export function buildServer(
       return guide;
     },
   );
+  app.delete<{ Params: { slug: string } }>("/api/guides/:slug", async (request, reply) => {
+    const auth = requireTokenAuth(request);
+    await deleteOwnedGuide(request.params.slug, auth.id, auth.scopes.has("admin"));
+    return reply.code(204).send();
+  });
   app.post<{ Params: { slug: string }; Body: Record<string, unknown> }>(
     "/api/guides/:slug/steps",
     async (request, reply) => {
@@ -1290,6 +1308,13 @@ async function guideStepPayload(request: FastifyRequest): Promise<{
 function requireApiAuth(request: FastifyRequest, scope: TokenScope) {
   const token = bearerToken(request.headers.authorization);
   return requireScope(authenticateToken(token), scope);
+}
+
+// Deletion is authorized by ownership, so any valid token scope may remove its own content.
+function requireTokenAuth(request: FastifyRequest) {
+  const auth = authenticateToken(bearerToken(request.headers.authorization));
+  if (!auth) throw new AppError("A valid bearer token is required.", 401, "unauthorized");
+  return auth;
 }
 
 function requireInteractiveApiAuth(request: FastifyRequest) {

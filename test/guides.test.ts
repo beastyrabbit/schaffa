@@ -1,12 +1,19 @@
+import { readdir } from "node:fs/promises";
 import {
   app,
   assert,
   assertLightNear,
   assertRedNear,
   createToken,
+  dataDir,
+  db,
   multipartFields,
+  path,
+  releaseStalledScans,
+  scannerState,
   sharp,
   test,
+  waitForStalledScanner,
 } from "./server-fixture.js";
 
 test("records, edits, publishes, and revisions a guide incrementally", async () => {
@@ -275,6 +282,63 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   assert.equal(unchanged.json().editRevision, 7);
   assert.equal(unchanged.json().revision, 2);
   assert.doesNotMatch(JSON.stringify(unchanged.json()), /must-not-become-public/);
+});
+
+test("rejects a screenshot upload cleanly when its guide is deleted during scanning", async () => {
+  const owner = createToken("guide delete race");
+  const auth = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/guides",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: { title: "Delete during upload" },
+  });
+  const slug = created.json().slug as string;
+  const screenshot = await sharp({
+    create: { width: 64, height: 64, channels: 4, background: "#4b5563" },
+  })
+    .png()
+    .toBuffer();
+  const body = multipartFields(
+    { step: JSON.stringify({ title: "Capture", description: "Capture the screen." }) },
+    "screenshot",
+    "capture.png",
+    "image/png",
+    screenshot,
+  );
+
+  scannerState.mode = "stall";
+  try {
+    const upload = app.inject({
+      method: "POST",
+      url: `/api/guides/${slug}/steps`,
+      headers: { ...auth, "content-type": body.contentType, "if-match": '"1"' },
+      payload: body.payload,
+    });
+    await waitForStalledScanner();
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: `/api/guides/${slug}`,
+      headers: auth,
+    });
+    assert.equal(deleted.statusCode, 204);
+    scannerState.mode = "ok";
+    releaseStalledScans();
+    const response = await upload;
+    assert.equal(response.statusCode, 404);
+    assert.equal(response.json().error, "not_found");
+  } finally {
+    scannerState.mode = "ok";
+    releaseStalledScans();
+  }
+  const leftovers = await readdir(path.join(dataDir, "guides", slug), { recursive: true }).catch(
+    () => [],
+  );
+  assert.deepEqual(
+    leftovers.filter((name) => name.endsWith(".webp")),
+    [],
+  );
+  assert.equal(db().prepare("SELECT 1 FROM guide_steps WHERE title = 'Capture'").get(), undefined);
 });
 
 test("accepts only safe web destinations for guides", async () => {

@@ -364,6 +364,76 @@ export async function waitForVideoScan(options: {
   );
 }
 
+export type DeleteKind = "page" | "file" | "guide";
+
+export interface DeleteTarget {
+  kind: DeleteKind;
+  id: string;
+}
+
+const deleteRoutes: Record<DeleteKind, { publicPrefix: string; apiPrefix: string }> = {
+  page: { publicPrefix: "p", apiPrefix: "/api/pages/" },
+  file: { publicPrefix: "f", apiPrefix: "/api/files/" },
+  guide: { publicPrefix: "g", apiPrefix: "/api/guides/" },
+};
+
+/**
+ * Accepts either `<kind> <id>` or a public Schaffa URL (`/p/…`, `/f/…`, `/g/…`).
+ * URLs must belong to the configured origin so an ID is never deleted on the wrong instance.
+ */
+export function parseDeleteTarget(args: string[], baseUrl = "https://schaffa.dev"): DeleteTarget {
+  const [first, second] = args;
+  if (!first || args.length > 2)
+    throw new Error("delete requires <page|file|guide> <id> or <url>.");
+  const kind = second === undefined ? undefined : first;
+  if (kind !== undefined && !Object.hasOwn(deleteRoutes, kind)) {
+    throw new Error("delete kind must be page, file, or guide.");
+  }
+  const value = second ?? first;
+  if (!/^https?:\/\//i.test(value)) {
+    if (!kind) throw new Error("delete requires <page|file|guide> <id> or <url>.");
+    if (!/^(?!\.+$)[A-Za-z0-9._-]+$/.test(value)) throw new Error("Invalid ID.");
+    return { kind: kind as DeleteKind, id: value };
+  }
+  const url = new URL(value);
+  if (url.origin !== canonicalOrigin(baseUrl)) {
+    throw new Error(`URL does not belong to ${canonicalOrigin(baseUrl)}. Set SCHAFFA_URL.`);
+  }
+  const segments = url.pathname.split("/").filter(Boolean);
+  const [prefix, id] = segments;
+  const detected = (Object.keys(deleteRoutes) as DeleteKind[]).find(
+    (candidate) => deleteRoutes[candidate].publicPrefix === prefix,
+  );
+  // Version and revision URLs are rejected so they are not mistaken for a partial delete.
+  if (!detected || !id || segments.length !== 2) {
+    throw new Error("URL must be the public URL of a Schaffa page, file, or guide.");
+  }
+  if (kind && kind !== detected) throw new Error(`URL points to a ${detected}, not a ${kind}.`);
+  return { kind: detected, id: decodeURIComponent(id) };
+}
+
+export async function deletePublication(
+  options: DeleteTarget & { token?: string; baseUrl?: string; fetch?: typeof fetch },
+): Promise<void> {
+  if (!options.token) throw new Error("SCHAFFA_TOKEN is required to delete content.");
+  const response = await (options.fetch || fetch)(
+    new URL(
+      `${deleteRoutes[options.kind].apiPrefix}${encodeURIComponent(options.id)}`,
+      canonicalOrigin(options.baseUrl || "https://schaffa.dev"),
+    ),
+    { method: "DELETE", headers: { Authorization: `Bearer ${options.token}` } },
+  );
+  if (!response.ok) {
+    const result = parseResponse(await response.text());
+    const detail = typeof result.message === "string" ? ` ${result.message}` : "";
+    throw new SchaffaRequestError(
+      response.status,
+      `Schaffa request failed with HTTP ${response.status}.${detail}`,
+      typeof result.error === "string" ? result.error : undefined,
+    );
+  }
+}
+
 export interface GuideMutationOptions {
   slug: string;
   editRevision: number;
