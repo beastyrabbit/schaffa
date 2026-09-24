@@ -212,6 +212,8 @@ export async function addGuideStep(
     .get(guide.id) as unknown as { position: number };
   db().exec("BEGIN IMMEDIATE");
   try {
+    // The guide may have been deleted while the screenshot was scanned.
+    loadGuide(guide.id);
     if (image) insertImage(image);
     db()
       .prepare(
@@ -315,6 +317,8 @@ export async function replaceGuideScreenshot(
   const image = await prepareGuideImage(guide, screenshot);
   db().exec("BEGIN IMMEDIATE");
   try {
+    // The guide may have been deleted while the screenshot was scanned.
+    loadGuide(guide.id);
     insertImage(image);
     db()
       .prepare(
