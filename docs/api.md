@@ -95,6 +95,31 @@ Recognized images are scanned in quarantine, then auto-oriented, resized, stripp
 
 File reads support byte ranges. Public file and version responses use a five-minute cache lifetime so an admin takedown is not hidden behind a year-long immutable cache. Potentially active types such as HTML, SVG, XML, JavaScript, and PDF are served as downloads rather than rendered inline; file responses also carry a sandboxed, deny-by-default CSP.
 
+## Delete content
+
+The token that created a page, file, or guide can delete it permanently. Admin tokens can delete any of them. Deletion also works during publishing lockdown and returns `204 No Content`:
+
+```sh
+curl --fail-with-body --silent --show-error -X DELETE \
+  -H "Authorization: Bearer $SCHAFFA_TOKEN" \
+  "$SCHAFFA_URL/api/guides/$ID"
+```
+
+| Endpoint | Removes |
+| --- | --- |
+| `DELETE /api/pages/:slug` | The page and all of its versions |
+| `DELETE /api/files/:id` | One file, addressed by ID or by its public filename such as `<id>.webp` |
+| `DELETE /api/guides/:slug` | The guide with all revisions and screenshots |
+
+A token that does not own the content receives `403`. An unknown ID returns `404`. Anonymous pages cannot be deleted through the API. A guide's attached video is a separate file and stays until it is deleted itself.
+
+The CLI provides the same operation and accepts either the type with an ID or a public URL:
+
+```sh
+npx schaffa delete guide "$ID"
+npx schaffa delete https://schaffa.dev/p/<slug>
+```
+
 ## Administration
 
 Administration is intentionally not part of the public HTTP API or OpenAPI contract. Use the protected `/admin` interface to list and remove pages, individual page versions, and files; create and revoke upload or admin tokens; delete users; grant interactive publishing per user; and control publishing lockdown, interactive publishing, signups, and logins.

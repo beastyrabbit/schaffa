@@ -125,6 +125,17 @@ Queue time can exceed this wait. If the deadline expires, the CLI prints the
 existing file and status URLs. Check them before uploading again; the pending
 upload remains on the server and is not cancelled by the CLI deadline.
 
+## Delete something
+
+Delete a page, file, or guide with the token that created it, or with an admin token:
+
+```sh
+npx schaffa delete guide abc234def567
+npx schaffa delete https://schaffa.dev/f/<id>.webp
+```
+
+Deletion is permanent. Pages lose all versions and guides lose all revisions.
+
 ## Check credentials and permissions
 
 ```sh

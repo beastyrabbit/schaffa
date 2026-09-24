@@ -592,6 +592,71 @@ test("supports emergency page, version, and file takedown", async () => {
   );
 });
 
+test("deletes pages, files, and guides through the API only for the owning or admin token", async () => {
+  const owner = createToken("delete owner");
+  const stranger = createToken("delete stranger");
+  const remove = (url: string, token?: string) =>
+    app.inject({
+      method: "DELETE",
+      url,
+      headers: {
+        host: "schaffa.test",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+    });
+  const read = async (url: string) =>
+    (await app.inject({ method: "GET", url, headers: { host: "schaffa.test" } })).statusCode;
+
+  const page = await publishHtmlWithToken("api-delete-page", "<h1>Delete me</h1>", owner.token);
+  const pageSlug = String(page.json().slug);
+  assert.equal((await remove(`/api/pages/${pageSlug}`)).statusCode, 401);
+  const foreignPage = await remove(`/api/pages/${pageSlug}`, stranger.token);
+  assert.equal(foreignPage.statusCode, 403);
+  assert.equal(foreignPage.json().error, "forbidden");
+  assert.equal(await read(`/p/${pageSlug}`), 200);
+  const deletedPage = await remove(`/api/pages/${pageSlug}`, owner.token);
+  assert.equal(deletedPage.statusCode, 204);
+  assert.equal(deletedPage.body, "");
+  assert.equal(await read(`/p/${pageSlug}`), 404);
+  assert.equal((await remove(`/api/pages/${pageSlug}`, owner.token)).statusCode, 404);
+
+  const body = multipart("file", "remove.txt", "text/plain", "remove me");
+  const file = await app.inject({
+    method: "POST",
+    url: "/api/files",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${owner.token}`,
+      "content-type": body.contentType,
+    },
+    payload: body.payload,
+  });
+  await finishPendingScans();
+  const filePath = new URL(file.json().publicUrl).pathname;
+  const filename = filePath.split("/").at(-1) as string;
+  assert.equal((await remove(`/api/files/${filename}`, stranger.token)).statusCode, 403);
+  assert.equal(await read(filePath), 200);
+  assert.equal((await remove(`/api/files/${filename}`, owner.token)).statusCode, 204);
+  assert.equal(await read(filePath), 404);
+  assert.equal((await remove(`/api/files/${file.json().id}`, owner.token)).statusCode, 404);
+
+  const guide = await app.inject({
+    method: "POST",
+    url: "/api/guides",
+    headers: {
+      host: "schaffa.test",
+      authorization: `Bearer ${owner.token}`,
+      "content-type": "application/json",
+    },
+    payload: { title: "Delete me" },
+  });
+  const guideSlug = String(guide.json().slug);
+  assert.equal((await remove(`/api/guides/${guideSlug}`, stranger.token)).statusCode, 403);
+  assert.equal((await remove(`/api/guides/${guideSlug}`, bootstrapToken)).statusCode, 204);
+  assert.equal(db().prepare("SELECT 1 FROM guides WHERE slug = ?").get(guideSlug), undefined);
+  assert.equal((await remove(`/api/guides/${guideSlug}`, owner.token)).statusCode, 404);
+});
+
 test("enforces a persistent per-token upload rate limit", async () => {
   const limited = createToken("rate-limited");
   for (let index = 0; index < config.authenticatedUploadsPerHour; index += 1) {

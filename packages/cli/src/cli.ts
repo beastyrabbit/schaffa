@@ -22,9 +22,11 @@ import { parseArgs, promisify } from "node:util";
 import {
   addGuideStep,
   deleteGuideStep,
+  deletePublication,
   finishGuide,
   type GuideResult,
   getGuide,
+  parseDeleteTarget,
   replaceGuideScreenshot,
   setGuideVideo,
   startGuide,
@@ -72,6 +74,8 @@ Usage:
   schaffa guide replace-screenshot --step <number|id> --screenshot <path> [--json]
   schaffa guide sync [--manifest <path>] [--json]
   schaffa guide finish [--json]
+  schaffa delete <page|file|guide> <id> [--token <token>] [--json]
+  schaffa delete <public-url> [--token <token>] [--json]
 
 Environment:
   SCHAFFA_TOKEN  Required for permanent publishing, files, presentations, and guides.
@@ -79,6 +83,8 @@ Environment:
 
 The guide commands persist the active random slug and edit revision in
 .schaffa/guide-session.json so an interrupted recording can be resumed.
+delete permanently removes a page with all versions, a file, or a guide with all
+revisions. It requires the token that created the content or an admin token.
 Add --video to record or guide record to export and attach a video walkthrough.
 Video export requires local ffmpeg with libvpx-vp9 and Chromium. Standalone video is local unless --upload is requested.
 Automatic recordings also keep every original screenshot and a manifest under
@@ -150,6 +156,7 @@ async function main(): Promise<void> {
     return runGuide(args.slice(1));
   }
   if (args[0] === "publish") return runPresentation(args.slice(1));
+  if (args[0] === "delete") return runDelete(args.slice(1));
   const options = parseCliArgs(args);
   if ("help" in options) return void process.stdout.write(help);
   const { json, command: _command, ...uploadOptions } = options;
@@ -176,6 +183,30 @@ async function runDoctor(args: string[]): Promise<void> {
   });
   process.stdout.write(values.json ? `${JSON.stringify(report)}\n` : formatDoctorReport(report));
   if (!report.ready) process.exitCode = 1;
+}
+
+async function runDelete(args: string[]): Promise<void> {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      help: { type: "boolean", short: "h" },
+      json: { type: "boolean" },
+      token: { type: "string" },
+      "ignore-token": { type: "boolean" },
+    },
+  });
+  if (values.help) return void process.stdout.write(help);
+  const baseUrl = process.env.SCHAFFA_URL || "https://schaffa.dev";
+  const target = parseDeleteTarget(positionals, baseUrl);
+  const token = resolveToken(values);
+  await deletePublication({ ...target, baseUrl, ...(token ? { token } : {}) });
+  process.stdout.write(
+    values.json
+      ? `${JSON.stringify({ deleted: true, ...target })}\n`
+      : `Deleted ${target.kind} ${target.id}.\n`,
+  );
 }
 
 async function runAutomaticRecorder(args: string[], legacy: boolean): Promise<void> {

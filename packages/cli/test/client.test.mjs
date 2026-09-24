@@ -10,8 +10,10 @@ import { addPresentationDownloads, parseCliArgs } from "../dist/cli.js";
 import {
   addGuideStep,
   deleteGuideStep,
+  deletePublication,
   finishGuide,
   getGuide,
+  parseDeleteTarget,
   replaceGuideScreenshot,
   startGuide,
   updateGuideStep,
@@ -232,6 +234,77 @@ test("reports API errors without exposing the bearer token", async () => {
     }),
     (error) => {
       assert.match(error.message, /HTTP 422.*Upload rejected/);
+      assert.doesNotMatch(error.message, new RegExp(token));
+      return true;
+    },
+  );
+});
+
+test("parses delete targets from kind and ID or from a same-origin public URL", () => {
+  assert.deepEqual(parseDeleteTarget(["guide", "abc234def567"]), {
+    kind: "guide",
+    id: "abc234def567",
+  });
+  assert.deepEqual(parseDeleteTarget(["https://schaffa.dev/p/0123456789abcdef"]), {
+    kind: "page",
+    id: "0123456789abcdef",
+  });
+  assert.deepEqual(
+    parseDeleteTarget(["file", "https://schaffa.dev/f/AAAAAAAAAAAAAAAAAAAAAA.webp"]),
+    {
+      kind: "file",
+      id: "AAAAAAAAAAAAAAAAAAAAAA.webp",
+    },
+  );
+  assert.deepEqual(
+    parseDeleteTarget(["https://self.example/g/abc234def567"], "https://self.example"),
+    { kind: "guide", id: "abc234def567" },
+  );
+  assert.throws(() => parseDeleteTarget(["abc234def567"]), /page\|file\|guide/);
+  assert.throws(() => parseDeleteTarget(["video", "abc"]), /page, file, or guide/);
+  assert.throws(() => parseDeleteTarget(["guide", "../pages/x"]), /Invalid ID/);
+  assert.throws(() => parseDeleteTarget(["guide", ".."]), /Invalid ID/);
+  assert.throws(() => parseDeleteTarget(["toString", "abc"]), /page, file, or guide/);
+  assert.throws(() => parseDeleteTarget(["https://other.example/g/abc234def567"]), /SCHAFFA_URL/);
+  assert.throws(() => parseDeleteTarget(["https://schaffa.dev/p/abc/2"]), /public URL/);
+  assert.throws(
+    () => parseDeleteTarget(["page", "https://schaffa.dev/g/abc234def567"]),
+    /points to a guide, not a page/,
+  );
+});
+
+test("deletes content with the bearer token and reports API errors", async () => {
+  const requests = [];
+  await deletePublication({
+    kind: "guide",
+    id: "abc234def567",
+    token,
+    baseUrl: "https://self.example",
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return new Response(null, { status: 204 });
+    },
+  });
+  assert.equal(requests[0].url, "https://self.example/api/guides/abc234def567");
+  assert.equal(requests[0].init.method, "DELETE");
+  assert.equal(requests[0].init.headers.Authorization, `Bearer ${token}`);
+
+  await assert.rejects(
+    deletePublication({ kind: "page", id: "abc", fetch: async () => new Response(null) }),
+    /SCHAFFA_TOKEN is required/,
+  );
+  await assert.rejects(
+    deletePublication({
+      kind: "file",
+      id: "abc",
+      token,
+      fetch: async () =>
+        jsonResponse({ error: "forbidden", message: "This token does not own the file." }, 403),
+    }),
+    (error) => {
+      assert.equal(error.status, 403);
+      assert.equal(error.code, "forbidden");
+      assert.match(error.message, /HTTP 403.*does not own the file/);
       assert.doesNotMatch(error.message, new RegExp(token));
       return true;
     },

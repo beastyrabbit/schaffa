@@ -589,6 +589,15 @@ export async function deleteGuide(slug: string): Promise<void> {
   await removeGuide(slug);
 }
 
+export async function deleteOwnedGuide(
+  slug: string,
+  tokenId: string,
+  isAdmin: boolean,
+): Promise<void> {
+  requireOwnedGuide(slug, tokenId, isAdmin);
+  await deleteGuide(slug);
+}
+
 export type GuideSummary = GuideRow & {
   step_count: number;
   uploader_id: string;

@@ -117,6 +117,22 @@ export function openApiDocument() {
             "503": errorResponse("Publishing is locked or virus scanning is not configured"),
           },
         },
+        delete: {
+          tags: ["Pages"],
+          summary: "Delete a page",
+          description:
+            "Permanently deletes the page and all of its versions. Only the token that created the page or an admin token may delete it.",
+          operationId: "deletePage",
+          security: [{ bearerAuth: [] }],
+          parameters: [slugParameter],
+          responses: {
+            "204": { description: "Page deleted" },
+            "401": errorResponse("Missing or invalid token"),
+            "403": errorResponse("The token does not own this page"),
+            "404": errorResponse("Page not found"),
+            "422": errorResponse("Invalid slug"),
+          },
+        },
       },
       "/p/{slug}": pageRead("Read the latest page version", "getLatestPage", [slugParameter]),
       "/p/{slug}/{version}": pageRead("Read a specific page version", "getPageVersion", [
@@ -169,6 +185,30 @@ export function openApiDocument() {
             "429": errorResponse("Upload rate limit exceeded"),
             "422": errorResponse("Invalid multipart input"),
             "503": errorResponse("Publishing is locked or virus scanning is not configured"),
+          },
+        },
+      },
+      "/api/files/{id}": {
+        delete: {
+          tags: ["Files"],
+          summary: "Delete a file",
+          description:
+            "Permanently deletes an uploaded file. Accepts the file ID or its public filename. Only the token that uploaded the file or an admin token may delete it.",
+          operationId: "deleteFile",
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "204": { description: "File deleted" },
+            "401": errorResponse("Missing or invalid token"),
+            "403": errorResponse("The token does not own this file"),
+            "404": errorResponse("File not found"),
           },
         },
       },
@@ -280,6 +320,21 @@ export function openApiDocument() {
           responses: {
             "200": jsonResponse("Updated guide", { $ref: "#/components/schemas/Guide" }),
             "409": errorResponse("Edit revision conflict"),
+          },
+        },
+        delete: {
+          tags: ["Guides"],
+          summary: "Delete a guide",
+          description:
+            "Permanently deletes the guide, all of its revisions, and its screenshots. Only the token that created the guide or an admin token may delete it.",
+          operationId: "deleteGuide",
+          security: [{ bearerAuth: [] }],
+          parameters: [slugParameter],
+          responses: {
+            "204": { description: "Guide deleted" },
+            "401": errorResponse("Missing or invalid token"),
+            "403": errorResponse("The token does not own this guide"),
+            "404": errorResponse("Guide not found"),
           },
         },
       },

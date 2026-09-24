@@ -506,6 +506,24 @@ export async function deletePageForUser(userId: string, slugValue: string): Prom
   });
 }
 
+export async function deletePageForToken(
+  tokenId: string,
+  isAdmin: boolean,
+  slugValue: string,
+): Promise<void> {
+  return serializeMetadataWrite(async () => {
+    const slug = validateSlug(slugValue);
+    const page = db().prepare("SELECT owner_token_id FROM pages WHERE slug = ?").get(slug) as
+      | { owner_token_id: string | null }
+      | undefined;
+    if (!page) throw new AppError("Page not found.", 404, "not_found");
+    if (page.owner_token_id !== tokenId && !isAdmin) {
+      throw new AppError("This token does not own the page.", 403, "forbidden");
+    }
+    await deletePageLocked(slug);
+  });
+}
+
 async function deletePageLocked(slugValue: string): Promise<void> {
   const slug = validateSlug(slugValue);
   const result = db().prepare("DELETE FROM pages WHERE slug = ?").run(slug);
@@ -595,6 +613,23 @@ export async function deleteFileForUser(userId: string, id: string): Promise<voi
       .get(id, userId);
     if (!owned) throw new AppError("File not found.", 404, "not_found");
     await deleteFileLocked(id);
+  });
+}
+
+export async function deleteFileForToken(
+  tokenId: string,
+  isAdmin: boolean,
+  idOrFilename: string,
+): Promise<void> {
+  return serializeMetadataWrite(async () => {
+    const file = db()
+      .prepare("SELECT id, created_by_token_id FROM files WHERE id = ? OR filename = ?")
+      .get(idOrFilename, idOrFilename) as { id: string; created_by_token_id: string } | undefined;
+    if (!file) throw new AppError("File not found.", 404, "not_found");
+    if (file.created_by_token_id !== tokenId && !isAdmin) {
+      throw new AppError("This token does not own the file.", 403, "forbidden");
+    }
+    await deleteFileLocked(file.id);
   });
 }
 
