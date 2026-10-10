@@ -51,8 +51,8 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.equal(privacy.statusCode, 200);
   assert.match(privacy.headers["content-type"] || "", /^text\/html/);
   assert.match(privacy.body, /Datenschutzerklärung/);
-  assert.match(privacy.body, /beastyrabbit/);
-  assert.match(privacy.body, /datenschutz@beastyrabbit\.de/);
+  assert.match(privacy.body, /Betreiber dieser Schaffa-Instanz/);
+  assert.match(privacy.body, /SCHAFFA_PRIVACY_CONTROLLER_EMAIL/);
   assert.match(privacy.body, /Administrator/);
   assert.match(String(privacy.headers["content-security-policy"]), /default-src 'none'/);
 

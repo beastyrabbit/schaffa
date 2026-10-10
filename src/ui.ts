@@ -79,6 +79,12 @@ export function renderSkills(): string {
 }
 
 export function renderPrivacy(): string {
+  const controllerContact = config.privacyControllerEmail
+    ? `<address>${escapeHtml(config.privacyControllerName)}<br><a href="mailto:${escapeHtml(config.privacyControllerEmail)}">${escapeHtml(config.privacyControllerEmail)}</a></address>`
+    : `<p>${escapeHtml(config.privacyControllerName)}</p><p>Der Betreiber dieser Instanz muss vor dem Einsatz die deployment-spezifischen Kontaktdaten über <code>SCHAFFA_PRIVACY_CONTROLLER_NAME</code> und <code>SCHAFFA_PRIVACY_CONTROLLER_EMAIL</code> konfigurieren.</p>`;
+  const controllerEmail = config.privacyControllerEmail
+    ? `<a href="mailto:${escapeHtml(config.privacyControllerEmail)}">${escapeHtml(config.privacyControllerEmail)}</a>`
+    : "die konfigurierte Datenschutz-Kontaktadresse";
   return layout(
     "Datenschutz",
     `<div class="landing-page legal-page"><header class="landing-nav">
@@ -88,7 +94,7 @@ export function renderPrivacy(): string {
     <main class="legal-content">
       <header class="legal-heading"><p class="kicker">Datenschutz</p><h1>Datenschutzerklärung</h1><p>Stand: September 2026</p></header>
 
-      <section><h2>1. Verantwortlicher</h2><p>Verantwortlich für die Verarbeitung personenbezogener Daten auf Schaffa ist:</p><address>beastyrabbit<br><a href="mailto:datenschutz@beastyrabbit.de">datenschutz@beastyrabbit.de</a></address></section>
+      <section><h2>1. Verantwortlicher</h2><p>Verantwortlich für die Verarbeitung personenbezogener Daten auf dieser Schaffa-Instanz ist:</p>${controllerContact}</section>
 
       <section><h2>2. Was Schaffa verarbeitet</h2><p>Schaffa verarbeitet Daten, die beim Aufruf, bei der Nutzung und bei der Verwaltung der Plattform anfallen. Dazu gehören insbesondere IP-Adresse und Request-Zeitpunkt, aufgerufene URL, HTTP-Methode, Statuscode, User-Agent und technische Request-IDs, soweit diese Angaben in den Server- oder Proxy-Protokollen anfallen.</p><p>Wenn du Inhalte hochlädst, verarbeitet Schaffa die hochgeladenen Dateien und HTML-Seiten, Titel, Dateityp, Dateigröße, Prüfsummen, Versionen, Veröffentlichungszeitpunkte sowie die Zuordnung zum verwendeten Token oder Nutzerkonto.</p><p>Veröffentlichte Inhalte sind öffentlich abrufbar. Öffentliche URLs sind keine Zugriffskontrolle. Inhalte können von Suchmaschinen, Browsern und Dritten gespeichert oder weiterverbreitet werden.</p></section>
 
@@ -108,7 +114,7 @@ export function renderPrivacy(): string {
 
       <section><h2>10. Speicherdauer</h2><p>Dauerhafte Veröffentlichungen bleiben bis zur Löschung durch den Nutzer, einen Administrator oder aufgrund einer gesetzlichen oder sicherheitsbezogenen Maßnahme gespeichert. Versionen und technische Metadaten können entsprechend den Betriebs- und Speichergrenzen der Instanz gelöscht werden. Sitzungen, Rate-Limit-Daten und temporäre Uploads werden nach den oben genannten Fristen oder bei der nächsten Bereinigung gelöscht.</p><p>Die konkrete Aufbewahrung von Server-, Proxy- und Backup-Protokollen richtet sich nach der Betriebsumgebung der jeweiligen Instanz und wird auf das für Sicherheit, Betrieb und Nachweisführung erforderliche Maß begrenzt.</p></section>
 
-      <section><h2>11. Deine Rechte</h2><p>Du hast im Rahmen der gesetzlichen Voraussetzungen das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch gegen Verarbeitungen auf Grundlage berechtigter Interessen. Du kannst dich jederzeit an <a href="mailto:datenschutz@beastyrabbit.de">datenschutz@beastyrabbit.de</a> wenden. Außerdem besteht ein Beschwerderecht bei einer Datenschutzaufsichtsbehörde.</p></section>
+      <section><h2>11. Deine Rechte</h2><p>Du hast im Rahmen der gesetzlichen Voraussetzungen das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch gegen Verarbeitungen auf Grundlage berechtigter Interessen. Du kannst dich jederzeit an ${controllerEmail} wenden. Außerdem besteht ein Beschwerderecht bei einer Datenschutzaufsichtsbehörde.</p></section>
 
       <section><h2>12. Änderungen</h2><p>Diese Datenschutzerklärung kann geändert werden, wenn sich Schaffa, die eingesetzten Dienstleister oder die Datenverarbeitung ändern. Es gilt die jeweils auf dieser Seite veröffentlichte Fassung.</p></section>
     </main>

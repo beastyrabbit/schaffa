@@ -81,6 +81,8 @@ Anonymous rate limiting uses the client address reported by the trusted reverse 
 | `CLAMGATE_PUBLIC_KEY_ID` | Operator-confirmed ID of that signing key |
 | `SHOO_BASE_URL` | Shoo authorization and JWKS origin; defaults to `https://shoo.dev` |
 | `SHOO_ISSUER` | Exact accepted Shoo token issuer; defaults to `SHOO_BASE_URL` |
+| `SCHAFFA_PRIVACY_CONTROLLER_NAME` | Name of the deployment-specific data controller shown on `/datenschutz` |
+| `SCHAFFA_PRIVACY_CONTROLLER_EMAIL` | Contact address of that controller shown on `/datenschutz` |
 
 `SCHAFFA_BOOTSTRAP_TOKEN` is required only for initial setup. After creating and verifying a separate admin token, revoke bootstrap and remove the variable; Schaffa revokes any previously active bootstrap row when the value is absent. Optional limits and defaults are documented in [.env.example](../.env.example). Notable defaults are a one-hour anonymous visibility window, 30-day anonymous retention, 20 GiB total storage, 512 MiB anonymous storage, 25 versions per page, 32 MiB image input, two concurrent image pipelines, and 120 writes per token per hour.
 
