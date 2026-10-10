@@ -83,6 +83,7 @@ import {
   renderInteractiveWarning,
   renderLanding,
   renderManagementError,
+  renderPrivacy,
   renderPublicNotFound,
   renderScanStatusPage,
   renderSkills,
@@ -305,6 +306,10 @@ export function buildServer(
   app.get("/skills", async (_request, reply) => {
     publicSiteHeaders(reply);
     return reply.type("text/html; charset=utf-8").send(renderSkills());
+  });
+  app.get("/datenschutz", async (_request, reply) => {
+    publicSiteHeaders(reply);
+    return reply.type("text/html; charset=utf-8").send(renderPrivacy());
   });
   app.get("/skills/all.md", async (_request, reply) => {
     publicTextHeaders(reply);

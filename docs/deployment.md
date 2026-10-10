@@ -53,9 +53,10 @@ Set `SCHAFFA_BASE_URL=https://schaffa.dev`. Keep Pangolin authentication enabled
 - `g/*`
 - `g/*/*`
 - `g/*/*/*`
+- `datenschutz`
 - `metadata/*`
 
-Pangolin matches each path segment separately, so the additional patterns cover the landing page, OpenAPI metadata, page versions, `/raw`, API operations containing an ID or slug, and the Shoo user login flow. Requests to `/admin` therefore continue to Pangolin authentication. API clients, user accounts, public pages, and files remain directly reachable on the same hostname. Pangolin evaluates rules by priority; do not add a broader bypass rule that also matches `/admin`.
+Pangolin matches each path segment separately, so the additional patterns cover the landing page, privacy notice, OpenAPI metadata, page versions, `/raw`, API operations containing an ID or slug, and the Shoo user login flow. Requests to `/admin` therefore continue to Pangolin authentication. API clients, user accounts, public pages, and files remain directly reachable on the same hostname. Pangolin evaluates rules by priority; do not add a broader bypass rule that also matches `/admin`.
 
 The health check should normally stay on the private backend at `/healthz`; it does not need a public Pangolin route.
 
@@ -81,6 +82,8 @@ Anonymous rate limiting uses the client address reported by the trusted reverse 
 | `CLAMGATE_PUBLIC_KEY_ID` | Operator-confirmed ID of that signing key |
 | `SHOO_BASE_URL` | Shoo authorization and JWKS origin; defaults to `https://shoo.dev` |
 | `SHOO_ISSUER` | Exact accepted Shoo token issuer; defaults to `SHOO_BASE_URL` |
+| `SCHAFFA_PRIVACY_CONTROLLER_NAME` | Name of the deployment-specific data controller shown on `/datenschutz` |
+| `SCHAFFA_PRIVACY_CONTROLLER_EMAIL` | Contact address of that controller shown on `/datenschutz` |
 
 `SCHAFFA_BOOTSTRAP_TOKEN` is required only for initial setup. After creating and verifying a separate admin token, revoke bootstrap and remove the variable; Schaffa revokes any previously active bootstrap row when the value is absent. Optional limits and defaults are documented in [.env.example](../.env.example). Notable defaults are a one-hour anonymous visibility window, 30-day anonymous retention, 20 GiB total storage, 512 MiB anonymous storage, 25 versions per page, 32 MiB image input, two concurrent image pipelines, and 120 writes per token per hour.
 
