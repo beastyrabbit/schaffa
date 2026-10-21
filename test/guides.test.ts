@@ -19,7 +19,7 @@ import {
 test("records, edits, publishes, and revisions a guide incrementally", async () => {
   const owner = createToken("guide owner");
   const other = createToken("guide stranger");
-  const auth = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const auth = { host: "schaffa.dev", authorization: `Bearer ${owner.token}` };
   const created = await app.inject({
     method: "POST",
     url: "/api/guides",
@@ -40,7 +40,7 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   const privateBeforePublish = await app.inject({
     method: "GET",
     url: `/g/${slug}`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(privateBeforePublish.statusCode, 404);
 
@@ -122,7 +122,7 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   const privateImage = await app.inject({
     method: "GET",
     url: imagePath,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(privateImage.statusCode, 404);
   const ownerImage = await app.inject({ method: "GET", url: imagePath, headers: auth });
@@ -152,7 +152,7 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   const stranger = await app.inject({
     method: "GET",
     url: `/api/guides/${slug}`,
-    headers: { host: "schaffa.test", authorization: `Bearer ${other.token}` },
+    headers: { host: "schaffa.dev", authorization: `Bearer ${other.token}` },
   });
   assert.equal(stranger.statusCode, 403);
 
@@ -189,10 +189,13 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   const publicGuide = await app.inject({
     method: "GET",
     url: `/g/${slug}`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(publicGuide.statusCode, 200);
   assert.match(publicGuide.body, /Projekt anlegen/);
+  assert.match(publicGuide.body, /data-schaffa-legal/);
+  assert.match(publicGuide.body, /href="\/impressum">Impressum/);
+  assert.match(publicGuide.body, /href="\/datenschutz">Datenschutz/);
   assert.match(publicGuide.body, /Projektübersicht öffnen/);
   assert.match(
     publicGuide.body,
@@ -206,7 +209,7 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   assert.doesNotMatch(publicGuide.body, /<code>navigate<\/code>/);
   assert.match(
     publicGuide.body,
-    /class="screenshot-link" href="https:\/\/schaffa.test\/g\/[^" ]+" target="_blank"/,
+    /class="screenshot-link" href="https:\/\/schaffa.dev\/g\/[^" ]+" target="_blank"/,
   );
   assert.match(publicGuide.body, /class="zoom-hint"[^>]*>Bild vergrößern/);
   assert.doesNotMatch(publicGuide.body, /role="dialog"|aria-modal/);
@@ -216,7 +219,7 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   const publicImage = await app.inject({
     method: "GET",
     url: imagePath,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(publicImage.statusCode, 200);
   assert.deepEqual(
@@ -228,12 +231,12 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   const json = await app.inject({
     method: "GET",
     url: `/g/${slug}.json`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   const markdown = await app.inject({
     method: "GET",
     url: `/g/${slug}.md`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(json.statusCode, 200);
   assert.equal(json.json().revision, 1);
@@ -256,13 +259,13 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
   const immutableV1 = await app.inject({
     method: "GET",
     url: `/g/${slug}/1`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.doesNotMatch(immutableV1.body, /Revision zwei/);
   const latest = await app.inject({
     method: "GET",
     url: `/g/${slug}`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.match(latest.body, /Revision zwei/);
 
@@ -286,7 +289,7 @@ test("records, edits, publishes, and revisions a guide incrementally", async () 
 
 test("rejects a screenshot upload cleanly when its guide is deleted during scanning", async () => {
   const owner = createToken("guide delete race");
-  const auth = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const auth = { host: "schaffa.dev", authorization: `Bearer ${owner.token}` };
   const created = await app.inject({
     method: "POST",
     url: "/api/guides",
@@ -344,7 +347,7 @@ test("rejects a screenshot upload cleanly when its guide is deleted during scann
 test("accepts only safe web destinations for guides", async () => {
   const owner = createToken("guide URL owner");
   const headers = {
-    host: "schaffa.test",
+    host: "schaffa.dev",
     authorization: `Bearer ${owner.token}`,
     "content-type": "application/json",
   };
@@ -366,7 +369,7 @@ test("accepts only safe web destinations for guides", async () => {
 test("sets, clears, and limits a guide destination", async () => {
   const owner = createToken("guide destination owner");
   const headers = {
-    host: "schaffa.test",
+    host: "schaffa.dev",
     authorization: `Bearer ${owner.token}`,
     "content-type": "application/json",
   };
@@ -408,7 +411,7 @@ test("sets, clears, and limits a guide destination", async () => {
 
 test("rejects sensitive guide text during publication", async () => {
   const owner = createToken("sensitive guide owner");
-  const auth = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const auth = { host: "schaffa.dev", authorization: `Bearer ${owner.token}` };
   const created = await app.inject({
     method: "POST",
     url: "/api/guides",
@@ -433,7 +436,7 @@ test("rejects sensitive guide text during publication", async () => {
   const privateGuide = await app.inject({
     method: "GET",
     url: `/g/${slug}`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(privateGuide.statusCode, 404);
 });

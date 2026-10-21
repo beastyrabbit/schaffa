@@ -13,7 +13,7 @@ test("capabilities validate tokens and reflect publishing policy without creatin
     app.inject({
       method: "GET",
       url: "/api/capabilities",
-      headers: { host: "schaffa.test", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      headers: { host: "schaffa.dev", ...(token ? { authorization: `Bearer ${token}` } : {}) },
     });
   const counts = () =>
     ["pages", "files", "guides"].map(

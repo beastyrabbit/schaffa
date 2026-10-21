@@ -54,7 +54,7 @@ test("rejects unauthenticated writes and unexpected hosts", async () => {
   const unauthorized = await app.inject({
     method: "PUT",
     url: "/api/pages/hello",
-    headers: { host: "schaffa.test", "content-type": body.contentType },
+    headers: { host: "schaffa.dev", "content-type": body.contentType },
     payload: body.payload,
   });
   assert.equal(unauthorized.statusCode, 401);
@@ -69,14 +69,14 @@ test("rejects unauthenticated writes and unexpected hosts", async () => {
   const spoofedForwardedHost = await app.inject({
     method: "GET",
     url: "/admin",
-    headers: { host: "unexpected.test", "x-forwarded-host": "schaffa.test" },
+    headers: { host: "unexpected.test", "x-forwarded-host": "schaffa.dev" },
   });
   assert.equal(spoofedForwardedHost.statusCode, 404);
 
   const missingPage = await app.inject({
     method: "GET",
     url: "/p/missing",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(missingPage.statusCode, 404);
   assert.match(missingPage.headers["content-type"] || "", /^text\/html/);
@@ -102,10 +102,10 @@ test("serves one general read skill and focused writing skills", async () => {
     /description: Use when the user asks to communicate through an HTML document, or if they mention "HTML" with no additional context\./,
   );
   assert.match(htmlSkill.markdown, /-F "html=@<html-file>;type=text\/html"/);
-  assert.match(htmlSkill.markdown, /https:\/\/schaffa\.test\/api\/pages/);
+  assert.match(htmlSkill.markdown, /https:\/\/schaffa\.dev\/api\/pages/);
   assert.doesNotMatch(htmlSkill.markdown, /SCHAFFA_URL/);
   assert.match(fileSkill.markdown, /-F "file=@<file>"/);
-  assert.match(fileSkill.markdown, /https:\/\/schaffa\.test\/api\/files/);
+  assert.match(fileSkill.markdown, /https:\/\/schaffa\.dev\/api\/files/);
   assert.doesNotMatch(fileSkill.markdown, /SCHAFFA_URL/);
   assert.doesNotMatch(htmlSkill.markdown, /npx schaffa upload/);
   assert.doesNotMatch(fileSkill.markdown, /npx schaffa upload/);
@@ -128,7 +128,7 @@ test("serves one general read skill and focused writing skills", async () => {
   const page = await app.inject({
     method: "GET",
     url: "/skills",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(page.statusCode, 200);
   assert.match(page.headers["content-type"] || "", /^text\/html/);
@@ -149,7 +149,7 @@ test("serves one general read skill and focused writing skills", async () => {
     const raw = await app.inject({
       method: "GET",
       url: `/skills/${skill.slug}/SKILL.md`,
-      headers: { host: "schaffa.test" },
+      headers: { host: "schaffa.dev" },
     });
     assert.equal(raw.statusCode, 200);
     assert.match(raw.headers["content-type"] || "", /^text\/markdown/);
@@ -160,14 +160,14 @@ test("serves one general read skill and focused writing skills", async () => {
   const missing = await app.inject({
     method: "GET",
     url: "/skills/missing/SKILL.md",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(missing.statusCode, 404);
 
   const allSkills = await app.inject({
     method: "GET",
     url: "/skills/all.md",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(allSkills.statusCode, 200);
   assert.match(allSkills.headers["content-type"] || "", /^text\/markdown/);
@@ -178,12 +178,12 @@ test("serves one general read skill and focused writing skills", async () => {
   const llm = await app.inject({
     method: "GET",
     url: "/llm.txt",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   const llms = await app.inject({
     method: "GET",
     url: "/llms.txt",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(llm.statusCode, 200);
   assert.match(llm.headers["content-type"] || "", /^text\/plain/);
@@ -196,16 +196,13 @@ test("serves one general read skill and focused writing skills", async () => {
   assert.match(llm.body, /All returned publication URLs are public/);
   assert.match(llm.body, /Writes require a bearer token/);
   assert.match(llm.body, /202 Accepted/);
-  assert.match(llm.body, /https:\/\/schaffa\.test\/skills/);
-  assert.match(llm.body, /https:\/\/schaffa\.test\/skills\/all\.md/);
-  assert.match(llm.body, /https:\/\/schaffa\.test\/skills\/read\/SKILL\.md/);
+  assert.match(llm.body, /https:\/\/schaffa\.dev\/skills/);
+  assert.match(llm.body, /https:\/\/schaffa\.dev\/skills\/all\.md/);
+  assert.match(llm.body, /https:\/\/schaffa\.dev\/skills\/read\/SKILL\.md/);
   for (const slug of ["html", "file", "guide", "presentation"]) {
-    assert.match(
-      llm.body,
-      new RegExp(`https:\\/\\/schaffa\\.test\\/skills\\/${slug}\\/SKILL\\.md`),
-    );
+    assert.match(llm.body, new RegExp(`https:\\/\\/schaffa\\.dev\\/skills\\/${slug}\\/SKILL\\.md`));
   }
-  assert.match(llm.body, /https:\/\/schaffa\.test\/metadata\/openapi\.json/);
+  assert.match(llm.body, /https:\/\/schaffa\.dev\/metadata\/openapi\.json/);
 });
 
 test("keeps legacy readable slugs but rejects new caller-chosen slugs", async () => {
@@ -214,7 +211,7 @@ test("keeps legacy readable slugs but rejects new caller-chosen slugs", async ()
   const existing = await app.inject({
     method: "GET",
     url: "/p/legacy-readable-page",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(existing.statusCode, 200);
   assert.equal(existing.body, "<h1>Existing page</h1>");
@@ -224,7 +221,7 @@ test("keeps legacy readable slugs but rejects new caller-chosen slugs", async ()
     method: "PUT",
     url: "/api/pages/new-readable-page",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -240,7 +237,7 @@ test("keeps legacy readable slugs but rejects new caller-chosen slugs", async ()
 
 test("keeps hidden-step screenshots private and maps multipart errors to 4xx", async () => {
   const owner = createToken("hidden screenshot owner");
-  const auth = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const auth = { host: "schaffa.dev", authorization: `Bearer ${owner.token}` };
   const created = await app.inject({
     method: "POST",
     url: "/api/guides",
@@ -298,7 +295,7 @@ test("keeps hidden-step screenshots private and maps multipart errors to 4xx", a
   const hidden = await app.inject({
     method: "GET",
     url: hiddenPath,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(hidden.statusCode, 404);
 });

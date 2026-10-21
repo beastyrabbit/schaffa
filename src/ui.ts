@@ -9,6 +9,7 @@ import { config } from "./config.js";
 import type { TokenRow } from "./db.js";
 import { exampleSkills } from "./example-skills.js";
 import type { GuideSummary } from "./guides.js";
+import { legalFooter, legalFooterStyles } from "./legal-footer.js";
 import type { FileSummary, PageSummary } from "./service.js";
 import { filePublicUrl } from "./service.js";
 import type { InstanceSettings } from "./settings.js";
@@ -379,9 +380,9 @@ function layout(
   <meta name="theme-color" content="#20211e">
   ${extraHead}
   <title>${escapeHtml(title)} · Schaffa</title>
-  <style>${styles}${extraStyles}</style>
+  <style>${styles}${extraStyles}${legalFooterStyles}</style>
 </head>
-<body>${content}${scripts}</body>
+<body>${content}${legalFooter(language)}${scripts}</body>
 </html>`;
 }
 

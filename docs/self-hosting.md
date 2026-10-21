@@ -5,6 +5,10 @@ Infisical runtime secret injection, persistent storage, and an HTTPS reverse
 proxy. It deliberately keeps secret values out of Git, Compose files, shell
 history, and Docker image layers.
 
+The built-in legal notice, privacy policy and legal footer are enabled only when
+`SCHAFFA_BASE_URL` has the hostname `schaffa.dev`. Self-hosters must provide their
+own legal notice and privacy policy.
+
 ## What you will run
 
 ```text

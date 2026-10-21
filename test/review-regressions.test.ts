@@ -87,7 +87,7 @@ test("real publication and error responses match their OpenAPI schemas", async (
   assert.ok(validatePage(published.json()), JSON.stringify(validatePage.errors));
   const missing = await app.inject({
     url: "/api/guides/abc234def567",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   const validateError = ajv.compile(schemas.Error);
   assert.ok(validateError(missing.json()), JSON.stringify(validateError.errors));
@@ -132,7 +132,7 @@ test("mixed scan queues make progress while a page keeps failing", async () => {
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -165,7 +165,7 @@ test("image conversion rejects positive quota growth and keeps converted bytes p
     method: "POST",
     url: "/api/files?image=true",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -182,14 +182,14 @@ test("image conversion rejects positive quota growth and keeps converted bytes p
   assert.equal(result.status, "rejected");
   const publicUrl = new URL(uploaded.json().publicUrl).pathname;
   assert.notEqual(
-    (await app.inject({ url: publicUrl, headers: { host: "schaffa.test" } })).statusCode,
+    (await app.inject({ url: publicUrl, headers: { host: "schaffa.dev" } })).statusCode,
     200,
   );
 });
 
 test("guide metadata and step budgets roll back failed edits", async () => {
   const owner = createToken("guide budget fixture", ["upload"]);
-  const headers = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const headers = { host: "schaffa.dev", authorization: `Bearer ${owner.token}` };
   const metadataBudget = config.maxGuideMetadataBytes;
   config.maxGuideMetadataBytes = 1;
   const rejected = await app.inject({

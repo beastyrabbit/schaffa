@@ -39,7 +39,7 @@ test("quarantine cleanup failure preserves the committed public image", {}, asyn
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -69,7 +69,7 @@ test("quarantine cleanup failure preserves the committed public image", {}, asyn
   assert.equal(current.scan_status, "clean");
   const download = await app.inject({
     url: new URL(response.json().publicUrl).pathname,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(download.statusCode, 200);
   assert.equal((await sharp(download.rawPayload).metadata()).format, "webp");
@@ -191,24 +191,24 @@ test("public guide validators return 304 but still enforce takedown", async () =
     `/g/${guide.slug}.json`,
     `/g/${guide.slug}.md`,
   ]) {
-    const first = await app.inject({ url, headers: { host: "schaffa.test" } });
+    const first = await app.inject({ url, headers: { host: "schaffa.dev" } });
     assert.equal(first.statusCode, 200);
     assert.ok(first.headers.etag);
     const cached = await app.inject({
       url,
-      headers: { host: "schaffa.test", "if-none-match": `"different", W/${first.headers.etag}` },
+      headers: { host: "schaffa.dev", "if-none-match": `"different", W/${first.headers.etag}` },
     });
     assert.equal(cached.statusCode, 304);
     assert.equal(cached.body, "");
   }
   const url = `/g/${guide.slug}/1`;
-  const first = await app.inject({ url, headers: { host: "schaffa.test" } });
+  const first = await app.inject({ url, headers: { host: "schaffa.dev" } });
   await guides.deleteGuide(guide.slug);
   assert.equal(
     (
       await app.inject({
         url,
-        headers: { host: "schaffa.test", "if-none-match": String(first.headers.etag) },
+        headers: { host: "schaffa.dev", "if-none-match": String(first.headers.etag) },
       })
     ).statusCode,
     404,

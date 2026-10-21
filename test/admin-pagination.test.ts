@@ -16,7 +16,7 @@ test("management form failures offer HTML recovery while API clients retain JSON
       method: "POST",
       url: "/admin/tokens",
       headers: {
-        host: "schaffa.test",
+        host: "schaffa.dev",
         cookie: adminCookie(bootstrapToken),
         accept,
         "content-type": "application/x-www-form-urlencoded",
@@ -60,7 +60,7 @@ test("admin filtering precedes pagination and preserves totals, uploaders, and U
   assert.ok(first.ids.files.every((id) => !last.ids.files.includes(id)));
   const page = await app.inject({
     url: `/admin?kind=files&q=%C3%BCbung&uploader=${owner.id}&page=2`,
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(page.statusCode, 200);
   assert.match(page.body, /120 Treffer · Seite 2 von 3/);
