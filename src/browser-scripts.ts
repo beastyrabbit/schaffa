@@ -7,6 +7,7 @@ declare global {
   interface Window {
     CookieConsent: typeof import("vanilla-cookieconsent");
     Sentry?: typeof import("@sentry/browser");
+    SchaffaScrub?: typeof import("./telemetry-scrub-core.js");
     umami?: { track(name: string, data?: Record<string, string | boolean>): void };
     schaffaTelemetry?: {
       track(name: string, data?: Record<string, string | boolean>): void;

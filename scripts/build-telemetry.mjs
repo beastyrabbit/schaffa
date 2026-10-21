@@ -16,3 +16,14 @@ await build({
   sourcemap: false,
   define: { __SENTRY_DEBUG__: "false" },
 });
+
+await build({
+  entryPoints: ["src/telemetry-scrub-core.ts"],
+  outfile: "public/vendor/telemetry-scrub.js",
+  bundle: true,
+  platform: "browser",
+  format: "iife",
+  globalName: "SchaffaScrub",
+  minify: true,
+  sourcemap: false,
+});

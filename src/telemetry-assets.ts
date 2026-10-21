@@ -10,6 +10,10 @@ const files = {
   consentJs: [path.join(consentDirectory, "cookieconsent.umd.js"), "application/javascript"],
   consentCss: [path.join(consentDirectory, "cookieconsent.css"), "text/css"],
   sentry: [new URL("../public/vendor/sentry.js", import.meta.url), "application/javascript"],
+  scrub: [
+    new URL("../public/vendor/telemetry-scrub.js", import.meta.url),
+    "application/javascript",
+  ],
   client: [new URL("../public/scripts/telemetry.js", import.meta.url), "application/javascript"],
 } as const;
 
@@ -44,7 +48,7 @@ export function telemetryHead(route: string | undefined, statusCode: number): st
     .replaceAll("&", "&amp;")
     .replaceAll('"', "&quot;")
     .replaceAll("<", "&lt;");
-  return `<meta name="schaffa-telemetry" content="${encoded}"><style>#cc-main{--cc-font-family:ui-sans-serif,system-ui,sans-serif;--cc-bg:#fbfaf6;--cc-primary-color:#20211e;--cc-secondary-color:#484942;--cc-btn-primary-bg:#a43f24;--cc-btn-primary-border-color:#a43f24;--cc-btn-primary-hover-bg:#82321d;--cc-btn-primary-hover-border-color:#82321d;--cc-btn-secondary-bg:#f3f0e8;--cc-btn-secondary-color:#20211e;--cc-btn-secondary-border-color:#20211e;--cc-cookie-category-block-bg:#f3f0e8;--cc-modal-border-radius:0;--cc-btn-border-radius:0}</style><link rel="stylesheet" href="${telemetryAssets.consentCss.url}"><script src="${telemetryAssets.client.url}"></script>`;
+  return `<meta name="schaffa-telemetry" content="${encoded}"><style>#cc-main{--cc-font-family:ui-sans-serif,system-ui,sans-serif;--cc-bg:#fbfaf6;--cc-primary-color:#20211e;--cc-secondary-color:#484942;--cc-btn-primary-bg:#a43f24;--cc-btn-primary-border-color:#a43f24;--cc-btn-primary-hover-bg:#82321d;--cc-btn-primary-hover-border-color:#82321d;--cc-btn-secondary-bg:#f3f0e8;--cc-btn-secondary-color:#20211e;--cc-btn-secondary-border-color:#20211e;--cc-cookie-category-block-bg:#f3f0e8;--cc-modal-border-radius:0;--cc-btn-border-radius:0}</style><link rel="stylesheet" href="${telemetryAssets.consentCss.url}"><script src="${telemetryAssets.scrub.url}"></script><script src="${telemetryAssets.client.url}"></script>`;
 }
 
 import { config } from "./config.js";

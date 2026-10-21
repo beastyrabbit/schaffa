@@ -227,6 +227,7 @@ test("client consent uses safe GET navigation and excludes account and secret pa
     const scripts: string[] = [];
     const events: string[] = [];
     const window = {
+      SchaffaScrub: browserScrubber(),
       addEventListener() {},
       CookieConsent: {
         acceptedCategory: () => accepted,
@@ -313,6 +314,7 @@ test("analytics bounds and clears its loading queue and counts visible errors on
     let accepted = false;
     let sync = () => {};
     const window = {
+      SchaffaScrub: browserScrubber(),
       addEventListener() {},
       umami: undefined as typeof tracker | undefined,
       schaffaTelemetry: undefined as { track: typeof tracker.track } | undefined,
@@ -459,6 +461,7 @@ test("browser analytics uses server route templates and a fixed path for unknown
     const encoded = /name="schaffa-telemetry" content="([^"]*)"/.exec(head)?.[1] || "";
     const content = encoded.replaceAll("&quot;", '"').replaceAll("&amp;", "&");
     const window = {
+      SchaffaScrub: browserScrubber(),
       addEventListener() {},
       CookieConsent: {
         acceptedCategory: () => true,
@@ -570,6 +573,7 @@ test("consent follows the document language and links only to enabled legal page
           setTimeout,
           location: { hostname: "schaffa.dev", pathname: "/", hash: "" },
           window: {
+            SchaffaScrub: browserScrubber(),
             addEventListener() {},
             CookieConsent: {
               run: async (options: { language: typeof language }) => {
@@ -658,21 +662,50 @@ test("account client shows server rejection without reporting it and reports net
 });
 
 function browserScrubber() {
-  const window: Record<string, unknown> = { addEventListener() {} };
-  const context = {
-    window,
-    location: { hostname: "schaffa.dev", pathname: "/" },
-    document: {
-      readyState: "loading",
-      querySelector: () => ({ getAttribute: () => JSON.stringify({ baseHost: "schaffa.dev" }) }),
-    },
-  };
+  const context: {
+    URL: typeof URL;
+    SchaffaScrub?: typeof import("../src/telemetry-scrub-core.js");
+  } = { URL };
   vm.runInNewContext(
-    readFileSync(new URL("../public/scripts/telemetry.js", import.meta.url), "utf8"),
+    readFileSync(new URL("../public/vendor/telemetry-scrub.js", import.meta.url), "utf8"),
     context,
   );
-  return window.schaffaTelemetry as { scrub(value: unknown): unknown };
+  assert.ok(context.SchaffaScrub);
+  return context.SchaffaScrub;
 }
+
+test("shared scrubber is served immutably before the client without exposing a source map", async () => {
+  const { telemetryAssets, telemetryHead } = await import("../src/telemetry-assets.js");
+  config.telemetry = {
+    ...config.telemetry,
+    umamiUrl: "https://metrics.invalid",
+    umamiWebsiteId: "fixture",
+  };
+  const head = telemetryHead("/account", 200);
+  const scrubScript = `<script src="${telemetryAssets.scrub.url}"></script>`;
+  assert.ok(head.includes(scrubScript));
+  assert.ok(
+    head.indexOf(scrubScript) < head.indexOf(`<script src="${telemetryAssets.client.url}"`),
+  );
+  const response = await app.inject({
+    url: telemetryAssets.scrub.url,
+    headers: { host: "schaffa.dev" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["cache-control"], "public, max-age=31536000, immutable");
+  assert.match(response.headers["content-type"] || "", /application\/javascript/);
+  assert.equal(response.body, telemetryAssets.scrub.body.toString());
+  assert.doesNotMatch(response.body, /sourceMappingURL|node:|AppError/);
+  assert.equal(
+    (
+      await app.inject({
+        url: `${telemetryAssets.scrub.url}.map`,
+        headers: { host: "schaffa.dev" },
+      })
+    ).statusCode,
+    404,
+  );
+});
 
 test("server and browser scrubbers remove private values, request data, users and URL secrets", () => {
   const browser = browserScrubber();
@@ -687,7 +720,7 @@ test("server and browser scrubbers remove private values, request data, users an
       "sfa_abcdefghijkl sus_session Bearer secret person@example.com eyJabc.def.ghi /account?code=secret#fragment",
   };
   const server = scrubTelemetry(input);
-  assert.deepEqual(JSON.parse(JSON.stringify(browser.scrub(input))), server);
+  assert.deepEqual(JSON.parse(JSON.stringify(browser.scrubTelemetry(input))), server);
   assert.equal(JSON.stringify(server).includes("secret"), false);
   assert.equal(JSON.stringify(server).includes("person@example.com"), false);
   assert.equal("user" in server, false);
@@ -733,6 +766,7 @@ test("browser Sentry hooks normalize request, breadcrumb and transaction URLs wi
       {
         URL,
         window: {
+          SchaffaScrub: browserScrubber(),
           Sentry: sdk,
           addEventListener() {},
           removeEventListener() {},
@@ -829,7 +863,7 @@ test("scrubbers preserve email and path redaction and handle long adversarial in
     ["/path/no-query /a/b?private=yes#fragment /c/d#private", "/path/no-query /a/b /c/d"],
   ]) {
     assert.equal(scrubText(value || ""), expected);
-    assert.equal(browser.scrub(value), expected);
+    assert.equal(browser.scrubTelemetry(value), expected);
   }
   const started = performance.now();
   for (const adversarial of [
@@ -838,11 +872,11 @@ test("scrubbers preserve email and path redaction and handle long adversarial in
     "@[".repeat(50_000),
   ]) {
     assert.equal(scrubText(adversarial), adversarial);
-    assert.equal(browser.scrub(adversarial), adversarial);
+    assert.equal(browser.scrubTelemetry(adversarial), adversarial);
   }
   const quotedAdversarial = ['"', String.raw`\" `.repeat(25_000), 'end"@example.com'].join("");
   assert.equal(scrubText(quotedAdversarial), "[email]");
-  assert.equal(browser.scrub(quotedAdversarial), "[email]");
+  assert.equal(browser.scrubTelemetry(quotedAdversarial), "[email]");
   assert.ok(performance.now() - started < 1000, "both scrubbers finish within one second");
 });
 

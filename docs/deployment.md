@@ -155,12 +155,12 @@ Static transaction envelopes are used for GlitchTip compatibility.
 `POST /admin/api/telemetry-test` requires the existing admin cookie and emits
 `Schaffa GlitchTip test error — safe to ignore` for operator verification.
 
-The official Sentry npm package does not ship its CDN bundles. A vendor-only
-esbuild step creates a minified SDK asset with tracing and without replay or
-feedback; application browser scripts remain unbundled and unminified. Runtime
-serves that asset and CookieConsent's npm dist JS/CSS under content-hashed,
-immutable first-party URLs. The browser SDK is a build dependency; its generated
-asset stays in the runtime image. No vendor maps are exposed. Docker injects server
+The official Sentry npm package does not ship its CDN bundles. An esbuild step
+creates a minified SDK asset with tracing and without replay or feedback, plus
+the browser-safe scrubber shared with the server. The UI scripts remain unbundled
+and unminified. Runtime serves these assets and CookieConsent's npm dist JS/CSS
+under content-hashed, immutable first-party URLs. The browser SDK is a build
+dependency; its generated asset stays in the runtime image. No vendor maps are exposed. Docker injects server
 debug IDs offline after tsc, then deletes all `dist/**/*.js.map` files before
 copying `/app/dist` into the runtime image. The SDK uses the retained debug IDs;
 runtime does not need local maps. Do not enable Node's `--enable-source-maps`.

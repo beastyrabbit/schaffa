@@ -6,112 +6,9 @@
   if (location.hostname !== config.baseHost) return;
   const admin = /^\/admin(?:\/|$)/.test(location.pathname);
   const pagePath = config.pagePath || "/404";
-  /** @param {string} value @param {number} at */
-  function emailMatchEnd(value, at) {
-    if (value[at + 1] === "[") {
-      const literal = /\[[^\]]{1,64}\]/y;
-      literal.lastIndex = at + 1;
-      const match = literal.exec(value);
-      return match ? at + 1 + match[0].length : 0;
-    }
-    const domain = /[\p{L}\p{M}\p{N}.+_-]*/uy;
-    domain.lastIndex = at + 1;
-    const text = domain.exec(value)?.[0] || "";
-    let end = 0;
-    for (const suffix of text.matchAll(/\.(?:xn--[\p{L}\p{N}-]+|[\p{L}\p{M}]{2,})/giu)) {
-      if (suffix.index > 0) end = at + 1 + suffix.index + suffix[0].length;
-    }
-    if (end && value[end] === ".") end++;
-    return end;
-  }
-  /** @param {string} value @param {number} at @param {number} cursor */
-  function emailLocalStart(value, at, cursor) {
-    let start = at;
-    let quoted = false;
-    while (start > cursor) {
-      const character = value[start - 1] || "";
-      if (!quoted && /[\s<(,;:]/.test(character)) break;
-      start--;
-      if (character !== '"') continue;
-      let backslashes = 0;
-      while (start > cursor && value[start - 1] === "\\") {
-        start--;
-        backslashes++;
-      }
-      if (backslashes % 2 === 0) quoted = !quoted;
-    }
-    return start;
-  }
-  // Scan each side of an @ once rather than retrying an email regex at every character.
-  /** @param {string} value */
-  function scrubEmails(value) {
-    const parts = [];
-    let cursor = 0;
-    for (const match of value.matchAll(/@/g)) {
-      if (match.index < cursor) continue;
-      // Validate first: invalid @ sequences must not repeatedly scan the local token.
-      const end = emailMatchEnd(value, match.index);
-      if (!end) continue;
-      const start = emailLocalStart(value, match.index, cursor);
-      if (start === match.index) continue;
-      parts.push(value.slice(cursor, start), "[email]");
-      cursor = end;
-    }
-    parts.push(value.slice(cursor));
-    return parts.join("");
-  }
-  /** @param {string} value */
-  const scrubText = (value) =>
-    scrubEmails(
-      value
-        .replace(/\bBearer\s+[^\s"'<>]+/gi, "Bearer [redacted]")
-        .replace(/\b(?:sfa|sus)_[\w-]+/g, "[redacted]")
-        .replace(/\beyJ[\w-]*\.[\w-]+\.[\w-]+/g, "[redacted]"),
-    )
-      .replace(/https?:\/\/[^\s"'<>]+/gi, (url) => url.split(/[?#]/, 1)[0] || "")
-      // Matching paths without a query too avoids retrying every slash on failure.
-      .replace(/\/[\w/%.:@-]+(?:[?#][^\s"'<>]*)?/g, (url) => url.split(/[?#]/, 1)[0] || "");
-  /** @param {string} value */
-  const safeUrl = (value) => {
-    try {
-      const url = new URL(value, location.origin);
-      if (url.origin === location.origin && url.pathname === location.pathname) return pagePath;
-    } catch {}
-    return "/[redacted]";
-  };
-  /** @param {string} key @param {unknown} value @returns {unknown} */
-  const scrubUrlField = (key, value) => {
-    if (typeof value !== "string") return value;
-    if (key === "transaction") return pagePath;
-    if (/^(url|from|to|http\.url|url\.full|url\.path)$/.test(key)) return safeUrl(value);
-    if (key === "description") {
-      const url = value.replace(/^(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\s+/, "");
-      if (/^(?:https?:\/\/|\/)/.test(url)) return safeUrl(url);
-    }
-    return value;
-  };
-  /** @param {unknown} value @param {number} [depth] @param {boolean} [normalizeUrls] @returns {unknown} */
-  const scrub = (value, depth = 0, normalizeUrls = false) => {
-    if (depth > 12) return "[truncated]";
-    if (typeof value === "string") return scrubText(value);
-    if (Array.isArray(value)) return value.map((item) => scrub(item, depth + 1, normalizeUrls));
-    if (value && typeof value === "object")
-      return Object.fromEntries(
-        Object.entries(value).flatMap(([key, item]) =>
-          /^(user|ip_address|email|authorization|cookie|set-cookie|password|token|data|body|query_string|query|search|hash)$/i.test(
-            key,
-          )
-            ? []
-            : [
-                [
-                  key,
-                  scrub(normalizeUrls ? scrubUrlField(key, item) : item, depth + 1, normalizeUrls),
-                ],
-              ],
-        ),
-      );
-    return value;
-  };
+  if (!window.SchaffaScrub) return;
+  const { scrubText, scrubTelemetry: scrub } = window.SchaffaScrub;
+  const page = { origin: location.origin, pathname: location.pathname, pagePath };
   /** @type {Error[]} */
   const queue = [];
   /** @type {Array<[string, Record<string, string | boolean>]>} */
@@ -210,9 +107,9 @@
           tracesSampleRate: config.tracesSampleRate,
           traceLifecycle: "static",
           tracePropagationTargets: [/^\/(?!\/)/, new RegExp(`^${origin}/`)],
-          beforeSend: (event) => /** @type {typeof event} */ (scrub(event, 0, true)),
-          beforeSendTransaction: (event) => /** @type {typeof event} */ (scrub(event, 0, true)),
-          beforeBreadcrumb: (crumb) => /** @type {typeof crumb} */ (scrub(crumb, 0, true)),
+          beforeSend: (event) => scrub(event, page),
+          beforeSendTransaction: (event) => scrub(event, page),
+          beforeBreadcrumb: (crumb) => scrub(crumb, page),
         });
         ready = true;
         window.removeEventListener("error", earlyError);
