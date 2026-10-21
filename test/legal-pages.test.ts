@@ -73,6 +73,19 @@ function assertPrivacyDraft(html: string, german: boolean): void {
     german ? "siehe Abschnitt 6" : "see section 6",
     german ? "Der Eintrag bleibt gespeichert" : "The entry remains stored",
     german ? "Die Speicherdauer legt Shoo fest" : "Shoo determines the retention period",
+    ...(german
+      ? [
+          "Seiten und Dateien können im Konto, mit dem zugehörigen Token über CLI/API oder durch den Administrator gelöscht werden.",
+          "Einzelne Seitenversionen können im Konto oder durch den Administrator gelöscht werden.",
+          "Die Löschung im Konto ist auf Seiten und Dateien beschränkt, die einem Token dieses Kontos gehören.",
+          "Guides können mit dem zugehörigen Token über CLI/API oder durch den Administrator gelöscht werden.",
+        ]
+      : [
+          "Pages and files can be deleted through the account, by the owning token through the CLI/API, or by the administrator.",
+          "Individual page versions can be deleted through the account or by the administrator.",
+          "Deletion through the account is limited to pages and files owned by one of that account's tokens.",
+          "Guides can be deleted by their owning token through the CLI/API or by the administrator.",
+        ]),
   ]) {
     assert.ok(html.includes(text), `Privacy disclosure must include ${text}`);
   }
