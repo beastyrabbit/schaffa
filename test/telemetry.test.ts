@@ -657,23 +657,39 @@ test("scrubbers preserve email and path redaction and handle long adversarial in
   const browser = browserScrubber();
   for (const [value, expected] of [
     ["first.last+tag@sub.example.co.uk", "[email]"],
+    ['"john doe"@example.com', "[email]"],
+    ['"first name"@example.com "second name"@example.org', "[email] [email]"],
+    ["e\u0301@example.com", "[email]"],
+    ["o'connor@example.com", "[email]"],
+    ["用户@example.com", "[email]"],
+    ["mailto:a@b.de", "mailto:[email]"],
+    ["<x@y.org>", "<[email]>"],
+    ["(a@b.de, x@y.org; mailto:z@t.io", "([email], [email]; mailto:[email]"],
+    [
+      "@sentry/node @scope/pkg user@localhost @decorator",
+      "@sentry/node @scope/pkg user@localhost @decorator",
+    ],
     ["o'connor@example.com a!b=c@example.com", "[email] [email]"],
     ["!#$%&'*+/=?^_`{|}~.-@example.com", "[email]"],
     ["jörg@example.com 用户@example.com", "[email] [email]"],
     ["用户@例子.公司 𐐀name@例子.公司", "[email] [email]"],
     ["a@b.com1c@d.com", "[email][email]"],
-    ["a@b.c+cc@d.ee", "a@[email]"],
-    ["a@.com a@b.c a@@b.com", "a@.com a@b.c a@@b.com"],
+    ["a@b.c+cc@d.ee", "[email]"],
+    ["a@.com a@b.c a@@b.com", "a@.com a@b.c [email]"],
     ["a@example.com123! next@example.org", "[email]123! [email]"],
     ["/path/no-query /a/b?private=yes#fragment /c/d#private", "/path/no-query /a/b /c/d"],
   ]) {
     assert.equal(scrubText(value || ""), expected);
     assert.equal(browser.scrub(value), expected);
   }
-  const adversarial = `${"a".repeat(100_000)} ${"/".repeat(100_000)} a@${"a.".repeat(50_000)}`;
   const started = performance.now();
-  assert.equal(scrubText(adversarial), adversarial);
-  assert.equal(browser.scrub(adversarial), adversarial);
+  for (const adversarial of [
+    `${"a".repeat(100_000)} ${"/".repeat(100_000)} a@${"a.".repeat(50_000)}`,
+    `${"a".repeat(100_000)}${"@".repeat(100_000)}`,
+  ]) {
+    assert.equal(scrubText(adversarial), adversarial);
+    assert.equal(browser.scrub(adversarial), adversarial);
+  }
   assert.ok(performance.now() - started < 1000, "both scrubbers finish within one second");
 });
 

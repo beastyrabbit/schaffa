@@ -13,12 +13,12 @@ function emailMatchEnd(value: string, at: number): number {
 }
 
 function emailLocalStart(value: string, at: number, cursor: number): number {
-  let start = at;
-  while (start > cursor) {
-    const width = (value.codePointAt(start - 2) || 0) > 0xffff ? 2 : 1;
-    if (!/[\p{L}\p{N}!#$%&'*+/=?^_`{|}~.-]/u.test(value.slice(start - width, start))) break;
-    start -= width;
+  if (value[at - 1] === '"') {
+    for (let opening = at - 2; opening >= cursor; opening--)
+      if (value[opening] === '"') return opening;
   }
+  let start = at;
+  while (start > cursor && !/[\s<(,;:]/.test(value[start - 1] || "")) start--;
   return start;
 }
 
@@ -26,10 +26,11 @@ function scrubEmails(value: string): string {
   const parts: string[] = [];
   let cursor = 0;
   for (const match of value.matchAll(/@/g)) {
-    const start = emailLocalStart(value, match.index, cursor);
-    if (start === match.index) continue;
+    // Validate first: invalid @ sequences must not repeatedly scan the local token.
     const end = emailMatchEnd(value, match.index);
     if (!end) continue;
+    const start = emailLocalStart(value, match.index, cursor);
+    if (start === match.index) continue;
     parts.push(value.slice(cursor, start), "[email]");
     cursor = end;
   }
