@@ -22,7 +22,7 @@
     let start = at;
     while (start > cursor) {
       const width = (value.codePointAt(start - 2) || 0) > 0xffff ? 2 : 1;
-      if (!/[\p{L}\p{N}.+_-]/u.test(value.slice(start - width, start))) break;
+      if (!/[\p{L}\p{N}!#$%&'*+/=?^_`{|}~.-]/u.test(value.slice(start - width, start))) break;
       start -= width;
     }
     return start;
@@ -54,11 +54,30 @@
       .replace(/https?:\/\/[^\s"'<>]+/gi, (url) => url.split(/[?#]/, 1)[0] || "")
       // Matching paths without a query too avoids retrying every slash on failure.
       .replace(/\/[\w/%.:@-]+(?:[?#][^\s"'<>]*)?/g, (url) => url.split(/[?#]/, 1)[0] || "");
-  /** @param {unknown} value @param {number} [depth] @returns {unknown} */
-  const scrub = (value, depth = 0) => {
+  /** @param {string} value */
+  const safeUrl = (value) => {
+    try {
+      const url = new URL(value, location.origin);
+      if (url.origin === location.origin && url.pathname === location.pathname) return pagePath;
+    } catch {}
+    return "/[redacted]";
+  };
+  /** @param {string} key @param {unknown} value @returns {unknown} */
+  const scrubUrlField = (key, value) => {
+    if (typeof value !== "string") return value;
+    if (key === "transaction") return pagePath;
+    if (/^(url|from|to|http\.url|url\.full|url\.path)$/.test(key)) return safeUrl(value);
+    if (key === "description") {
+      const url = value.replace(/^(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\s+/, "");
+      if (/^(?:https?:\/\/|\/)/.test(url)) return safeUrl(url);
+    }
+    return value;
+  };
+  /** @param {unknown} value @param {number} [depth] @param {boolean} [normalizeUrls] @returns {unknown} */
+  const scrub = (value, depth = 0, normalizeUrls = false) => {
     if (depth > 12) return "[truncated]";
     if (typeof value === "string") return scrubText(value);
-    if (Array.isArray(value)) return value.map((item) => scrub(item, depth + 1));
+    if (Array.isArray(value)) return value.map((item) => scrub(item, depth + 1, normalizeUrls));
     if (value && typeof value === "object")
       return Object.fromEntries(
         Object.entries(value).flatMap(([key, item]) =>
@@ -66,7 +85,12 @@
             key,
           )
             ? []
-            : [[key, scrub(item, depth + 1)]],
+            : [
+                [
+                  key,
+                  scrub(normalizeUrls ? scrubUrlField(key, item) : item, depth + 1, normalizeUrls),
+                ],
+              ],
         ),
       );
     return value;
@@ -160,9 +184,9 @@
           tracesSampleRate: config.tracesSampleRate,
           traceLifecycle: "static",
           tracePropagationTargets: [/^\/(?!\/)/, new RegExp(`^${origin}/`)],
-          beforeSend: (event) => /** @type {typeof event} */ (scrub(event)),
-          beforeSendTransaction: (event) => /** @type {typeof event} */ (scrub(event)),
-          beforeBreadcrumb: (crumb) => /** @type {typeof crumb} */ (scrub(crumb)),
+          beforeSend: (event) => /** @type {typeof event} */ (scrub(event, 0, true)),
+          beforeSendTransaction: (event) => /** @type {typeof event} */ (scrub(event, 0, true)),
+          beforeBreadcrumb: (crumb) => /** @type {typeof crumb} */ (scrub(crumb, 0, true)),
         });
         ready = true;
         window.removeEventListener("error", earlyError);

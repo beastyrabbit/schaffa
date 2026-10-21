@@ -2,6 +2,16 @@ import * as Sentry from "@sentry/node";
 import { config } from "./config.js";
 import { scrubTelemetry, shouldReportServerError } from "./telemetry-scrub.js";
 
+export function scrubServerEvent<T extends Sentry.Event>(event: T): T {
+  if (event.request) {
+    // beforeSend has no trusted Fastify request. Keep the SDK's route-template
+    // transaction name, and omit the concrete request URL rather than infer it.
+    const { method } = event.request;
+    event.request = method ? { method } : {};
+  }
+  return scrubTelemetry(event);
+}
+
 if (config.telemetry.glitchtipDsn) {
   const origin = new URL(config.baseUrl).origin.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
   Sentry.init({
@@ -32,14 +42,8 @@ if (config.telemetry.glitchtipDsn) {
         shouldHandleError: shouldReportServerError,
       }),
     ],
-    beforeSend(event) {
-      if (event.request) {
-        const { method, url } = event.request;
-        event.request = { ...(method ? { method } : {}), ...(url ? { url } : {}) };
-      }
-      return scrubTelemetry(event);
-    },
-    beforeSendTransaction: (event) => scrubTelemetry(event),
+    beforeSend: scrubServerEvent,
+    beforeSendTransaction: scrubServerEvent,
     beforeBreadcrumb: (breadcrumb) => scrubTelemetry(breadcrumb),
   });
 }

@@ -561,10 +561,104 @@ test("server and browser scrubbers remove private values, request data, users an
   assert.equal(scrubText("https://schaffa.dev/a?private=1#fragment"), "https://schaffa.dev/a");
 });
 
+test("server Sentry events omit concrete request URLs and retain route-template transactions", async () => {
+  const { scrubServerEvent } = await import("../src/instrumentation.js");
+  for (const transaction of ["POST /account/pages/:slug/versions/:version/delete", undefined]) {
+    const event = scrubServerEvent({
+      ...(transaction ? { transaction } : {}),
+      request: {
+        method: "POST",
+        url: "https://schaffa.dev/account/pages/private-slug/versions/private-version/delete?secret=1",
+      },
+    });
+    assert.deepEqual(event.request, { method: "POST" });
+    assert.equal(event.transaction, transaction);
+    assert.doesNotMatch(JSON.stringify(event), /private-slug|private-version|secret/);
+  }
+  assert.deepEqual(scrubServerEvent({ message: "Background failure" }), {
+    message: "Background failure",
+  });
+});
+
+test("browser Sentry hooks normalize request, breadcrumb and transaction URLs without exposing IDs", async () => {
+  for (const pagePath of ["/account/pages/:slug/versions/:version/delete", "/404", "/skills"]) {
+    const pathname = "/account/pages/private-slug/versions/private-version/delete";
+    const url = `https://schaffa.dev${pathname}?secret=1#private`;
+    const hooks: Record<string, (event: unknown) => unknown> = {};
+    const integration = () => ({});
+    const sdk = {
+      init: (options: typeof hooks) => Object.assign(hooks, options),
+      eventFiltersIntegration: integration,
+      dedupeIntegration: integration,
+      linkedErrorsIntegration: integration,
+      globalHandlersIntegration: integration,
+      breadcrumbsIntegration: integration,
+      browserTracingIntegration: integration,
+    };
+    vm.runInNewContext(
+      readFileSync(new URL("../public/scripts/telemetry.js", import.meta.url), "utf8"),
+      {
+        URL,
+        window: {
+          Sentry: sdk,
+          addEventListener() {},
+          removeEventListener() {},
+          requestIdleCallback: (callback: () => void) => callback(),
+        },
+        console: { error() {} },
+        location: { origin: "https://schaffa.dev", hostname: "schaffa.dev", pathname },
+        document: {
+          readyState: "complete",
+          addEventListener() {},
+          querySelector: () => ({
+            getAttribute: () =>
+              JSON.stringify({ baseHost: "schaffa.dev", glitchtipDsn: "fixture", pagePath }),
+          }),
+          createElement: () => ({}),
+          head: { append: (script: { onload(): void }) => script.onload() },
+        },
+      },
+    );
+    await delay(0);
+    for (const name of ["beforeSend", "beforeSendTransaction"]) {
+      const result = JSON.parse(
+        JSON.stringify(
+          hooks[name]?.({
+            request: { url },
+            transaction: pathname,
+            breadcrumbs: [
+              { data: { url, from: pathname, to: "/account/tokens/private-token/revoke" } },
+            ],
+            spans: [
+              { description: `POST ${url}` },
+              { description: "GET /account/tokens/private-token/revoke" },
+            ],
+          }),
+        ),
+      );
+      assert.equal(result.request.url, pagePath);
+      assert.equal(result.transaction, pagePath);
+      assert.equal(result.spans[0].description, pagePath);
+      assert.equal(result.spans[1].description, "/[redacted]");
+      assert.doesNotMatch(
+        JSON.stringify(result),
+        /private-slug|private-version|private-token|secret/,
+      );
+    }
+    const breadcrumb = hooks.beforeBreadcrumb?.({
+      data: { url, from: pathname },
+      message: "Navigation",
+    });
+    assert.doesNotMatch(JSON.stringify(breadcrumb), /private-slug|private-version|secret/);
+  }
+});
+
 test("scrubbers preserve email and path redaction and handle long adversarial inputs quickly", () => {
   const browser = browserScrubber();
   for (const [value, expected] of [
     ["first.last+tag@sub.example.co.uk", "[email]"],
+    ["o'connor@example.com a!b=c@example.com", "[email] [email]"],
+    ["!#$%&'*+/=?^_`{|}~.-@example.com", "[email]"],
     ["jörg@example.com 用户@example.com", "[email] [email]"],
     ["用户@例子.公司 𐐀name@例子.公司", "[email] [email]"],
     ["a@b.com1c@d.com", "[email][email]"],

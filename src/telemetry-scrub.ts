@@ -16,7 +16,7 @@ function emailLocalStart(value: string, at: number, cursor: number): number {
   let start = at;
   while (start > cursor) {
     const width = (value.codePointAt(start - 2) || 0) > 0xffff ? 2 : 1;
-    if (!/[\p{L}\p{N}.+_-]/u.test(value.slice(start - width, start))) break;
+    if (!/[\p{L}\p{N}!#$%&'*+/=?^_`{|}~.-]/u.test(value.slice(start - width, start))) break;
     start -= width;
   }
   return start;
