@@ -112,6 +112,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   assert.match(api.body, /src="js\/scalar\.js"/);
   assert.match(api.body, /"favicon": "\/assets\/favicon-c\.svg"/);
   assert.match(api.body, /"showDeveloperTools": "localhost"/);
+  assert.match(api.body, /"hideDarkModeToggle": true/);
   assert.doesNotMatch(api.body, /https?:\/\/.*(?:jsdelivr|scalar\.com)/);
   assert.match(String(api.headers["content-security-policy"]), /connect-src 'self'/);
   assert.doesNotMatch(String(api.headers["content-security-policy"]), /unsafe-eval/);

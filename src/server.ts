@@ -434,6 +434,7 @@ export function buildServer(
       withDefaultFonts: false,
       persistAuth: false,
       hideClientButton: true,
+      hideDarkModeToggle: true,
       showDeveloperTools: "localhost",
       defaultHttpClient: { targetKey: "shell", clientKey: "curl" },
       agent: { disabled: true },

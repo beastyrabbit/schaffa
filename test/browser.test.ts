@@ -64,6 +64,24 @@ void test("built legal pages are reachable from home on desktop and mobile witho
       void request.abort();
     }
   });
+  await page.evaluateOnNewDocument(() => {
+    const writes: string[] = [];
+    Object.assign(window, { storageWrites: writes });
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      writes.push(key);
+      return setItem.call(this, key, value);
+    };
+  });
+  await page.goto(`${origin}/api/`, { waitUntil: "networkidle0" });
+  await page.waitForFunction(() => localStorage.getItem("scalar-reference-selected-client-v2"));
+  assert.equal(await page.evaluate(() => localStorage.getItem("colorMode")), null);
+  assert.equal(
+    await page.evaluate(() =>
+      (window as Window & { storageWrites?: string[] }).storageWrites?.includes("colorMode"),
+    ),
+    false,
+  );
   for (const viewport of [
     { width: 1280, height: 800 },
     { width: 390, height: 844 },
