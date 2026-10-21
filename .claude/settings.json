@@ -1,3 +1,8 @@
 {
-  "enabledMcpjsonServers": ["glitchtip", "umami"]
+  "enabledMcpjsonServers": [
+    "glitchtip",
+    "kubernetes",
+    "talos",
+    "umami"
+  ]
 }
