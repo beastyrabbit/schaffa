@@ -17,6 +17,11 @@ that belong to at least one published revision. Editing a published guide
 automatically publishes a new immutable revision and never changes an older
 revision.
 
+The stored revision snapshot is immutable. When serving the HTML view at
+`/g/:slug` or `/g/:slug/:revision`, Schaffa adds its own site footer with legal
+links; this footer may change with Schaffa releases, including on older
+revisions. The stored snapshot and the `.json` and `.md` responses stay unchanged.
+
 The preflight blocks empty guides, incomplete visible steps, and likely tokens, secrets, passwords, or email addresses in text. Missing screenshots are warnings because terminal and API steps are intentionally allowed to remain text-only. Image OCR and pixel-level redaction remain future capture-quality work; users must still review visible screenshot contents before publication.
 
 Preflight covers guide title, description, destination URL, and visible step fields. Findings identify the affected field. URL-encoded text is checked too. Public guide revisions and screenshots use five-minute caches with revalidation, matching page/file takedown timing. Existing downloaded copies and caches created under older one-year headers cannot be recalled.

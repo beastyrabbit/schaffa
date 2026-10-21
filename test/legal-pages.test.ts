@@ -69,7 +69,7 @@ function assertPrivacyDraft(html: string, german: boolean): void {
     german ? "nach 30 Tagen bereinigt" : "pruned after 30 days",
     german ? "keine automatische Löschfrist" : "no automatic deletion period",
     german ? "aktiven Sperre" : "active block",
-    german ? "unter /account, sieben Tage" : "at /account, seven days",
+    german ? "unter /account, 7 Tage" : "at /account, 7 days",
     german ? "siehe Abschnitt 6" : "see section 6",
     german ? "Der Eintrag bleibt gespeichert" : "The entry remains stored",
     german ? "Die Speicherdauer legt Shoo fest" : "Shoo determines the retention period",
@@ -157,7 +157,7 @@ void test("management errors and scan screens include legal navigation", () => {
   }
 });
 
-void test("self-hosted instances hide legal routes and every generated footer", async () => {
+void test("self-hosted instances hide legal routes and every generated footer", {}, async (t) => {
   const auth = { ...host, authorization: `Bearer ${bootstrapToken}` };
   const created = await app.inject({
     method: "POST",
@@ -182,6 +182,8 @@ void test("self-hosted instances hide legal routes and every generated footer", 
   });
   assert.equal(finished.statusCode, 201);
 
+  const original = { baseHost: config.baseHost, baseUrl: config.baseUrl };
+  t.after(() => Object.assign(config, original));
   config.baseHost = "publish.example.com";
   config.baseUrl = "https://publish.example.com";
   const headers = { host: config.baseHost, accept: "text/html" };
@@ -205,6 +207,79 @@ void test("self-hosted instances hide legal routes and every generated footer", 
     renderScanStatusPage({ status: "pending", message: null }),
     /data-schaffa-legal/,
   );
+});
+
+void test("privacy disclosures follow runtime configuration in both languages", async () => {
+  const original = {
+    userSessionTtlHours: config.userSessionTtlHours,
+    anonymousPageTtlSeconds: config.anonymousPageTtlSeconds,
+    anonymousPageRetentionDays: config.anonymousPageRetentionDays,
+    maxPageVersions: config.maxPageVersions,
+  };
+  try {
+    for (const [values, de, en] of [
+      [
+        [168, 3600, 30, 25],
+        ["7 Tage", "1 Stunde", "30 Tagen", "25 Versionen"],
+        ["7 days", "1 hour", "30 days", "25 versions"],
+      ],
+      [
+        [1, 300, 1, 1],
+        ["1 Stunde", "5 Minuten", "einem Tag", "1 Version"],
+        ["1 hour", "5 minutes", "1 day", "1 version"],
+      ],
+      [
+        [25, 7200, 2, 2],
+        ["25 Stunden", "2 Stunden", "2 Tagen", "2 Versionen"],
+        ["25 hours", "2 hours", "2 days", "2 versions"],
+      ],
+      [
+        [48, 86400, 365, 1000],
+        ["2 Tage", "1 Tag", "365 Tagen", "1.000 Versionen"],
+        ["2 days", "1 day", "365 days", "1,000 versions"],
+      ],
+      [
+        [720, 301, 1, 1],
+        ["30 Tage", "301 Sekunden", "einem Tag", "1 Version"],
+        ["30 days", "301 seconds", "1 day", "1 version"],
+      ],
+    ] as const) {
+      [
+        config.userSessionTtlHours,
+        config.anonymousPageTtlSeconds,
+        config.anonymousPageRetentionDays,
+        config.maxPageVersions,
+      ] = values;
+      for (const [route, expected] of [
+        ["/datenschutz", de],
+        ["/privacy", en],
+      ] as const) {
+        const response = await app.inject({ method: "GET", url: route, headers: host });
+        assert.equal(response.statusCode, 200);
+        const [session, availability, retention, versions] = expected;
+        const snippets =
+          route === "/datenschutz"
+            ? [
+                `Eine Kontositzung ist ${session} gültig;`,
+                `unter /account, ${session}.</li>`,
+                `Anonyme HTML-Seiten sind ${availability} öffentlich erreichbar.`,
+                `nach ${retention} beim nächsten`,
+                `HTML-Seiten behalten bis zu ${versions},`,
+              ]
+            : [
+                `An account session is valid for ${session};`,
+                `at /account, ${session}.</li>`,
+                `Anonymous HTML pages are publicly available for ${availability}.`,
+                `after ${retention} at the next`,
+                `HTML pages retain up to ${versions},`,
+              ];
+        for (const snippet of snippets)
+          assert.ok(response.body.includes(snippet), `${route}: ${snippet}`);
+      }
+    }
+  } finally {
+    Object.assign(config, original);
+  }
 });
 
 function assertFooter(html: string, german: boolean): void {
