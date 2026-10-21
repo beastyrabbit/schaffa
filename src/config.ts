@@ -115,6 +115,9 @@ export const config = {
   dataDir: path.resolve(process.env.SCHAFFA_DATA_DIR || "./data"),
   baseUrl,
   baseHost: new URL(baseUrl).hostname,
+  privacyControllerName:
+    process.env.SCHAFFA_PRIVACY_CONTROLLER_NAME || "Betreiber dieser Schaffa-Instanz",
+  privacyControllerEmail: process.env.SCHAFFA_PRIVACY_CONTROLLER_EMAIL || "",
   tokenPepper: process.env.SCHAFFA_TOKEN_PEPPER || "",
   bootstrapToken: process.env.SCHAFFA_BOOTSTRAP_TOKEN || "",
   shooBaseUrl,

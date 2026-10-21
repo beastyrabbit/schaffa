@@ -43,7 +43,7 @@ export function renderLanding(): string {
         <pre><code>npx schaffa upload ./mypage.html</code></pre>
       </section>
     </main>
-    <footer class="landing-footer"><span>Schaffa means getting work done.</span><span>Inspired by <a href="https://postplan.dev">PostPlan</a> and <a href="https://uploadthing.com">UploadThing</a>. Built to be self-hosted.</span></footer></div>`,
+    <footer class="landing-footer"><span>Schaffa means getting work done.</span><span><a href="/datenschutz">Datenschutz</a> · Inspired by <a href="https://postplan.dev">PostPlan</a> and <a href="https://uploadthing.com">UploadThing</a>. Built to be self-hosted.</span></footer></div>`,
     "",
     "en",
   );
@@ -71,10 +71,57 @@ export function renderSkills(): string {
       <section class="skill-install" aria-labelledby="use-skill"><h2 id="use-skill">Read any Schaffa URL</h2><pre><code>curl --fail --silent --show-error --location "&lt;schaffa-url&gt;"</code></pre></section>
       <div class="skill-grid">${skills}</div>
     </main>
-    <footer class="landing-footer"><span><a href="/llm.txt">llm.txt</a></span><span><a href="/metadata/openapi.json">OpenAPI</a></span></footer></div>`,
+    <footer class="landing-footer"><span><a href="/llm.txt">llm.txt</a></span><span><a href="/datenschutz">Datenschutz</a> · <a href="/metadata/openapi.json">OpenAPI</a></span></footer></div>`,
     "",
     "en",
     skillStyles,
+  );
+}
+
+export function renderPrivacy(): string {
+  const controllerContact = config.privacyControllerEmail
+    ? `<address>${escapeHtml(config.privacyControllerName)}<br><a href="mailto:${escapeHtml(config.privacyControllerEmail)}">${escapeHtml(config.privacyControllerEmail)}</a></address>`
+    : `<p>${escapeHtml(config.privacyControllerName)}</p><p>Der Betreiber dieser Instanz muss vor dem Einsatz die deployment-spezifischen Kontaktdaten über <code>SCHAFFA_PRIVACY_CONTROLLER_NAME</code> und <code>SCHAFFA_PRIVACY_CONTROLLER_EMAIL</code> konfigurieren.</p>`;
+  const controllerEmail = config.privacyControllerEmail
+    ? `<a href="mailto:${escapeHtml(config.privacyControllerEmail)}">${escapeHtml(config.privacyControllerEmail)}</a>`
+    : "die konfigurierte Datenschutz-Kontaktadresse";
+  return layout(
+    "Datenschutz",
+    `<div class="landing-page legal-page"><header class="landing-nav">
+      <a class="wordmark" href="/">Schaffa</a>
+      <nav aria-label="Primary navigation"><a href="/skills">Skills</a><a href="/api">API</a><a class="nav-action" href="/account">Anmelden</a></nav>
+    </header>
+    <main class="legal-content">
+      <header class="legal-heading"><p class="kicker">Datenschutz</p><h1>Datenschutzerklärung</h1><p>Stand: September 2026</p></header>
+
+      <section><h2>1. Verantwortlicher</h2><p>Verantwortlich für die Verarbeitung personenbezogener Daten auf dieser Schaffa-Instanz ist:</p>${controllerContact}</section>
+
+      <section><h2>2. Was Schaffa verarbeitet</h2><p>Schaffa verarbeitet Daten, die beim Aufruf, bei der Nutzung und bei der Verwaltung der Plattform anfallen. Dazu gehören insbesondere IP-Adresse und Request-Zeitpunkt, aufgerufene URL, HTTP-Methode, Statuscode, User-Agent und technische Request-IDs, soweit diese Angaben in den Server- oder Proxy-Protokollen anfallen.</p><p>Wenn du Inhalte hochlädst, verarbeitet Schaffa die hochgeladenen Dateien und HTML-Seiten, Titel, Dateityp, Dateigröße, Prüfsummen, Versionen, Veröffentlichungszeitpunkte sowie die Zuordnung zum verwendeten Token oder Nutzerkonto.</p><p>Veröffentlichte Inhalte sind öffentlich abrufbar. Öffentliche URLs sind keine Zugriffskontrolle. Inhalte können von Suchmaschinen, Browsern und Dritten gespeichert oder weiterverbreitet werden.</p></section>
+
+      <section><h2>3. Öffentliche Inhalte und Administratorzugriff</h2><p>Der Betreiber und berechtigte Administratoren können veröffentlichte Seiten, Dateien, Guides, Versionen, Nutzerkonten und technische Metadaten einsehen, verwalten, sperren und löschen. Das dient dem Betrieb, der Sicherheits- und Virenprüfung, der Missbrauchsbekämpfung, dem Support, der Fehleranalyse, der Wiederherstellung und der Erfüllung gesetzlicher Pflichten.</p><p>Bitte veröffentliche keine vertraulichen oder besonders schützenswerten Informationen, wenn du nicht über die erforderliche Berechtigung verfügst. Für Inhalte, die du selbst hochlädst, bleibst du für die Rechtmäßigkeit der Veröffentlichung verantwortlich.</p></section>
+
+      <section><h2>4. Anonyme Uploads</h2><p>Anonyme HTML-Seiten können ohne Nutzerkonto veröffentlicht werden. Sie sind standardmäßig eine Stunde öffentlich abrufbar. Die zugehörigen Daten können aus Betriebs- und Sicherheitsgründen bis zu 30 Tage gespeichert und danach automatisch gelöscht werden. Dateien, dauerhafte Seiten und Aktualisierungen benötigen ein gültiges Upload-Token.</p><p>Zur Begrenzung von Missbrauch wird die IP-Adresse für Rate-Limits nicht im Klartext gespeichert. Schaffa verwendet dafür einen mit einem serverseitigen Schlüssel erzeugten HMAC-Wert. Abgelaufene Rate-Limit-Einträge werden bei der nächsten Prüfung nach einem Tag bereinigt.</p></section>
+
+      <section><h2>5. Nutzerkonto und Shoo</h2><p>Die Anmeldung erfolgt über Shoo. Auf der Anmeldeseite wird das Shoo-Skript geladen. Shoo verwendet nach der aktuellen Schaffa-Konfiguration Google OAuth und PKCE. Für die Anmeldung kann Shoo eine pseudonyme Identität sowie, wenn verfügbar, E-Mail-Adresse, Name und Profilbild an Schaffa übermitteln.</p><p>Schaffa speichert daraus eine lokale Nutzerkennung, die genannten Profildaten, Erstellungs- und letzte Anmeldezeit sowie eine eigene Sitzung. Das Shoo-ID-Token wird nicht als dauerhafte lokale Sitzung gespeichert. Die lokale Sitzung wird als HttpOnly-Cookie geführt und läuft standardmäßig nach sieben Tagen ab.</p></section>
+
+      <section><h2>6. Cookies und ähnliche Technologien</h2><p>Schaffa selbst verwendet nur technisch erforderliche HttpOnly-Cookies für Nutzer- und Administratorsitzungen. Das Admin-Cookie läuft standardmäßig nach acht Stunden ab. Es gibt auf Schaffa derzeit keine eigenen Werbe-, Analyse- oder Tracking-Cookies.</p><p>Shoo kann im eigenen Login-Ablauf zusätzliche Speichertechnologien verwenden. Dafür gelten ergänzend die Datenschutzhinweise von Shoo.</p></section>
+
+      <section><h2>7. Tokens und Verwaltung</h2><p>Für Uploads und Verwaltung verarbeitet Schaffa Tokenname, Berechtigungsumfang, Erstellungszeitpunkt, letzte Nutzung und Widerrufsstatus. Der eigentliche Tokenwert wird nach seiner einmaligen Ausgabe nicht im Klartext gespeichert. Administratoren können Token widerrufen und Nutzerkonten löschen. Das Löschen eines Nutzerkontos entfernt nicht automatisch bereits veröffentlichte Inhalte; diese können separat entfernt werden.</p></section>
+
+      <section><h2>8. Virenprüfung und Dienstleister</h2><p>Hochgeladene Inhalte werden vor der Veröffentlichung durch ClamGate geprüft. Dafür können Dateiinhalt, Dateityp, Größe, Prüfsumme und technische Prüfungsdaten an den für diese Instanz konfigurierten ClamGate-Dienst übertragen werden. Die Übertragung erfolgt verschlüsselt.</p><p>Für Hosting, Reverse Proxy, Backups, Identitätsprüfung und Virenprüfung können technische Dienstleister eingesetzt werden. Welche Anbieter und Speicherorte konkret verwendet werden, hängt von der jeweiligen Schaffa-Installation und ihrer Betriebsumgebung ab.</p></section>
+
+      <section><h2>9. Zwecke und Rechtsgrundlagen</h2><p>Schaffa verarbeitet Daten zur Bereitstellung angeforderter Funktionen, zur Verwaltung von Nutzerkonten und Veröffentlichungen, zur Abwehr von Missbrauch, zur technischen Sicherheit, zur Fehleranalyse und zur Erfüllung rechtlicher Pflichten. Rechtsgrundlagen sind je nach Vorgang Art. 6 Abs. 1 lit. b, lit. c und lit. f DSGVO.</p></section>
+
+      <section><h2>10. Speicherdauer</h2><p>Dauerhafte Veröffentlichungen bleiben bis zur Löschung durch den Nutzer, einen Administrator oder aufgrund einer gesetzlichen oder sicherheitsbezogenen Maßnahme gespeichert. Versionen und technische Metadaten können entsprechend den Betriebs- und Speichergrenzen der Instanz gelöscht werden. Sitzungen, Rate-Limit-Daten und temporäre Uploads werden nach den oben genannten Fristen oder bei der nächsten Bereinigung gelöscht.</p><p>Die konkrete Aufbewahrung von Server-, Proxy- und Backup-Protokollen richtet sich nach der Betriebsumgebung der jeweiligen Instanz und wird auf das für Sicherheit, Betrieb und Nachweisführung erforderliche Maß begrenzt.</p></section>
+
+      <section><h2>11. Deine Rechte</h2><p>Du hast im Rahmen der gesetzlichen Voraussetzungen das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch gegen Verarbeitungen auf Grundlage berechtigter Interessen. Du kannst dich jederzeit an ${controllerEmail} wenden. Außerdem besteht ein Beschwerderecht bei einer Datenschutzaufsichtsbehörde.</p></section>
+
+      <section><h2>12. Änderungen</h2><p>Diese Datenschutzerklärung kann geändert werden, wenn sich Schaffa, die eingesetzten Dienstleister oder die Datenverarbeitung ändern. Es gilt die jeweils auf dieser Seite veröffentlichte Fassung.</p></section>
+    </main>
+    <footer class="landing-footer"><span><a href="/">Schaffa</a></span><span><a href="/datenschutz" aria-current="page">Datenschutz</a> · <a href="/metadata/openapi.json">OpenAPI</a></span></footer></div>`,
+    "",
+    "de",
+    legalStyles,
   );
 }
 
@@ -427,6 +474,10 @@ function formatDate(value: string): string {
 
 const skillStyles = `
 .skill-docs{max-width:1240px;margin:0 auto;padding:64px 32px 88px}.skill-docs>header{padding-bottom:32px;border-bottom:2px solid var(--ink)}.skill-docs h1{margin:0;font:700 clamp(42px,6vw,70px)/.95 Georgia,"Times New Roman",serif;letter-spacing:-.05em}.skill-docs>header p{margin:16px 0 0;color:var(--muted);font-size:16px}.skill-install{display:grid;grid-template-columns:180px minmax(0,1fr);gap:24px;align-items:start;padding:32px 0;border-bottom:2px solid var(--ink)}.skill-install h2{margin:0;font-size:17px}.skill-install pre{margin:0;overflow:auto;padding:18px;background:#292a26;color:#f6f2e9;white-space:pre-wrap;overflow-wrap:anywhere}.skill-install code{font-size:12px;line-height:1.65}.skill-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;padding-top:32px}.skill-example{min-width:0;padding:0;border:2px solid var(--ink);background:var(--surface)}.skill-example>div{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;border-bottom:2px solid var(--ink)}.skill-example h2{margin:0;font-size:17px}.skill-example a{font-size:13px;font-weight:700;color:var(--accent)}.skill-example pre{margin:0;overflow:auto;padding:18px;background:#292a26;color:#f6f2e9;white-space:pre-wrap;overflow-wrap:anywhere}.skill-example code{font-size:12px;line-height:1.65}.skills-page .landing-footer{margin-top:0}@media(max-width:760px){.skill-docs{padding:42px 18px 64px}.skill-install{grid-template-columns:1fr;gap:12px}.skill-grid{grid-template-columns:1fr}.skills-page .landing-nav a[href="/"]{display:none}}
+`;
+
+const legalStyles = `
+.legal-content{max-width:900px;margin:0 auto;padding:64px 32px 88px}.legal-heading{padding-bottom:32px;border-bottom:2px solid var(--ink)}.legal-heading h1{margin:0;font:700 clamp(42px,6vw,70px)/.95 Georgia,"Times New Roman",serif;letter-spacing:-.05em;overflow-wrap:anywhere}.legal-heading>p:last-child{margin:18px 0 0;color:var(--muted)}.legal-content section{padding:32px 0 0}.legal-content h2{margin:0 0 12px;font:700 23px/1.1 Georgia,"Times New Roman",serif}.legal-content p{max-width:760px;margin:0 0 14px;color:#484942;line-height:1.65}.legal-content address{font-style:normal;line-height:1.6}.legal-content a{color:var(--accent)}@media(max-width:680px){.legal-content{padding:42px 18px 64px}.legal-content h2{font-size:21px}}
 `;
 
 const styles = `
