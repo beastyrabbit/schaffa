@@ -288,8 +288,16 @@ test("client consent uses safe GET navigation and excludes account and secret pa
   }
 });
 
-test("analytics queues at most 20 events until ready and discards them on withdrawal or load failure", async () => {
-  for (const outcome of ["ready", "withdrawn", "failed", "missing"]) {
+test("analytics bounds and clears its loading queue and counts visible errors once", async () => {
+  for (const outcome of [
+    "ready",
+    "queued-error",
+    "sent-error",
+    "visible-error",
+    "withdrawn",
+    "failed",
+    "missing",
+  ]) {
     interface Script {
       src: string;
       onload(): void;
@@ -335,7 +343,9 @@ test("analytics queues at most 20 events until ready and discards them on withdr
                       consentJs: "/consent.js",
                     }),
                 }
-              : null,
+              : selector === ".error:not([hidden])" && outcome.endsWith("-error")
+                ? {}
+                : null,
           createElement: () => ({ setAttribute() {} }),
           head: {
             append: (script: Script) => {
@@ -352,21 +362,36 @@ test("analytics queues at most 20 events until ready and discards them on withdr
     telemetry.track("before-consent", {});
     accepted = true;
     sync();
-    for (let index = 0; index < 25; index++) telemetry.track(`event-${index}`, { pending: true });
-    assert.deepEqual([...events], [], "no delivery before the script loads");
+    if (outcome === "sent-error") window.umami = tracker;
+    if (outcome === "queued-error" || outcome === "sent-error") {
+      telemetry.track("error-shown", { area: "sign-in" });
+    } else if (outcome !== "visible-error") {
+      for (let index = 0; index < 25; index++) telemetry.track(`event-${index}`, { pending: true });
+    }
+    if (outcome !== "sent-error")
+      assert.deepEqual([...events], [], "no delivery before the script loads");
     const script = scripts[0];
     assert.ok(script);
-    if (outcome === "ready") {
+    if (outcome === "ready" || outcome.endsWith("-error")) {
       window.umami = tracker;
       script.onload();
       await delay(0);
-      assert.deepEqual(
-        events,
-        Array.from({ length: 20 }, (_, index) => ({
-          name: `event-${index}`,
-          data: { pending: true },
-        })),
-      );
+      if (outcome === "ready") {
+        assert.deepEqual(
+          events,
+          Array.from({ length: 20 }, (_, index) => ({
+            name: `event-${index}`,
+            data: { pending: true },
+          })),
+        );
+      } else {
+        const data = outcome === "visible-error" ? {} : { area: "sign-in" };
+        assert.deepEqual(
+          events,
+          [{ name: "error-shown", data }],
+          "each visible error is counted once",
+        );
+      }
       telemetry.track("after-ready", {});
       assert.equal(events.at(-1)?.name, "after-ready");
       continue;
@@ -765,6 +790,17 @@ test("scrubbers preserve email and path redaction and handle long adversarial in
   const browser = browserScrubber();
   for (const [value, expected] of [
     ["first.last+tag@sub.example.co.uk", "[email]"],
+    ["user@[127.0.0.1]", "[email]"],
+    ["user@[IPv6:2001:db8::1]", "[email]"],
+    ['"a b"@[10.0.0.1]', "[email]"],
+    ["user@EXAMPLE.COM", "[email]"],
+    ["user@example.com.", "[email]"],
+    ["user@xn--bcher-kva.xn--p1ai", "[email]"],
+    ["user@e\u0301xample.com", "[email]"],
+    ["user@[other@domain.com] next@example.org", "[email] [email]"],
+    [`user@[${"a".repeat(64)}]`, "[email]"],
+    [`user@[${"a".repeat(65)}]`, `user@[${"a".repeat(65)}]`],
+    ["user@[]", "user@[]"],
     ['"john doe"@example.com', "[email]"],
     [String.raw`"john\"doe"@example.com`, "[email]"],
     [String.raw`"john\" doe"@example.com`, "[email]"],
@@ -799,6 +835,7 @@ test("scrubbers preserve email and path redaction and handle long adversarial in
   for (const adversarial of [
     `${"a".repeat(100_000)} ${"/".repeat(100_000)} a@${"a.".repeat(50_000)}`,
     `${"a".repeat(100_000)}${"@".repeat(100_000)}`,
+    "@[".repeat(50_000),
   ]) {
     assert.equal(scrubText(adversarial), adversarial);
     assert.equal(browser.scrub(adversarial), adversarial);

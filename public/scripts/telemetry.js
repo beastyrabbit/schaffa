@@ -8,13 +8,20 @@
   const pagePath = config.pagePath || "/404";
   /** @param {string} value @param {number} at */
   function emailMatchEnd(value, at) {
-    const domain = /[\p{L}\p{N}.+_-]*/uy;
+    if (value[at + 1] === "[") {
+      const literal = /\[[^\]]{1,64}\]/y;
+      literal.lastIndex = at + 1;
+      const match = literal.exec(value);
+      return match ? at + 1 + match[0].length : 0;
+    }
+    const domain = /[\p{L}\p{M}\p{N}.+_-]*/uy;
     domain.lastIndex = at + 1;
     const text = domain.exec(value)?.[0] || "";
     let end = 0;
-    for (const suffix of text.matchAll(/\.\p{L}{2,}/gu)) {
+    for (const suffix of text.matchAll(/\.(?:xn--[\p{L}\p{N}-]+|[\p{L}\p{M}]{2,})/giu)) {
       if (suffix.index > 0) end = at + 1 + suffix.index + suffix[0].length;
     }
+    if (end && value[end] === ".") end++;
     return end;
   }
   /** @param {string} value @param {number} at @param {number} cursor */
@@ -41,6 +48,7 @@
     const parts = [];
     let cursor = 0;
     for (const match of value.matchAll(/@/g)) {
+      if (match.index < cursor) continue;
       // Validate first: invalid @ sequences must not repeatedly scan the local token.
       const end = emailMatchEnd(value, match.index);
       if (!end) continue;
@@ -111,11 +119,14 @@
   let ready = false;
   let analytics = false;
   let analyticsLoading = false;
+  let errorShownTracked = false;
   /** @param {string} name @param {Record<string, string | boolean>} [data] */
   const track = (name, data = {}) => {
     if (!analytics || admin) return;
-    if (window.umami) window.umami.track(name, data);
-    else if (analyticsLoading && analyticsQueue.length < 20)
+    if (window.umami) {
+      window.umami.track(name, data);
+      if (name === "error-shown") errorShownTracked = true;
+    } else if (analyticsLoading && analyticsQueue.length < 20)
       analyticsQueue.push([name, { ...data }]);
   };
   /** @param {unknown} cause */
@@ -239,7 +250,8 @@
         analyticsQueue.splice(0).forEach(([name, data]) => {
           track(name, data);
         });
-        if (document.querySelector(".error:not([hidden])")) track("error-shown");
+        if (!errorShownTracked && document.querySelector(".error:not([hidden])"))
+          track("error-shown");
         // Recorder metadata includes full URLs. Never record a secret-bearing URL.
         if (
           analytics &&
