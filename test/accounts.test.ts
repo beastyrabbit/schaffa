@@ -32,7 +32,7 @@ test("keeps administration out of the public API", async () => {
     const response = await app.inject({
       method,
       url,
-      headers: { host: "schaffa.test", authorization: `Bearer ${bootstrapToken}` },
+      headers: { host: "schaffa.dev", authorization: `Bearer ${bootstrapToken}` },
     });
     assert.equal(response.statusCode, 404, `${method} ${url} must not be an admin API`);
   }
@@ -40,7 +40,7 @@ test("keeps administration out of the public API", async () => {
   const admin = await app.inject({
     method: "GET",
     url: "/admin",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(admin.statusCode, 200);
   assert.match(admin.body, /Lockdown aktivieren/);
@@ -53,7 +53,7 @@ test("keeps administration out of the public API", async () => {
     method: "POST",
     url: "/admin/tokens",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       cookie: adminCookie(bootstrapToken),
       "content-type": "application/x-www-form-urlencoded",
     },
@@ -124,7 +124,7 @@ test("filters admin publications by user and then uploader token", async () => {
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${otherUserUploader.token}`,
       "content-type": fileBody.contentType,
     },
@@ -138,7 +138,7 @@ test("filters admin publications by user and then uploader token", async () => {
     method: "POST",
     url: "/api/guides",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${guideOnlyUploader.token}`,
       "content-type": "application/json",
     },
@@ -154,7 +154,7 @@ test("filters admin publications by user and then uploader token", async () => {
     method: "POST",
     url: "/api/guides",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${otherUserUploader.token}`,
       "content-type": "application/json",
     },
@@ -169,7 +169,7 @@ test("filters admin publications by user and then uploader token", async () => {
   const byUser = await app.inject({
     method: "GET",
     url: `/admin?user=${firstUserId}`,
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(byUser.statusCode, 200);
   assert.match(byUser.body, /name="user"/);
@@ -190,7 +190,7 @@ test("filters admin publications by user and then uploader token", async () => {
   const byUploader = await app.inject({
     method: "GET",
     url: `/admin?user=${firstUserId}&uploader=${secondUploader.id}`,
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(byUploader.statusCode, 200);
   assert.match(byUploader.body, /filter-first-automation/);
@@ -201,7 +201,7 @@ test("filters admin publications by user and then uploader token", async () => {
   const byGuideUploader = await app.inject({
     method: "GET",
     url: `/admin?user=${firstUserId}&uploader=${guideOnlyUploader.id}`,
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(byGuideUploader.statusCode, 200);
   assert.match(byGuideUploader.body, new RegExp(firstGuideSlug));
@@ -212,7 +212,7 @@ test("filters admin publications by user and then uploader token", async () => {
   const byGuideSearch = await app.inject({
     method: "GET",
     url: "/admin?q=guide-search-needle",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(byGuideSearch.statusCode, 200);
   assert.match(byGuideSearch.body, new RegExp(firstGuideSlug));
@@ -223,7 +223,7 @@ test("filters admin publications by user and then uploader token", async () => {
   const guidesOnly = await app.inject({
     method: "GET",
     url: "/admin?kind=guides",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(guidesOnly.statusCode, 200);
   assert.match(guidesOnly.body, /value="guides" selected/);
@@ -235,7 +235,7 @@ test("filters admin publications by user and then uploader token", async () => {
   const pagesOnly = await app.inject({
     method: "GET",
     url: "/admin?kind=pages",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(pagesOnly.statusCode, 200);
   assert.doesNotMatch(pagesOnly.body, new RegExp(firstGuideSlug));
@@ -244,7 +244,7 @@ test("filters admin publications by user and then uploader token", async () => {
   const filesOnly = await app.inject({
     method: "GET",
     url: "/admin?kind=files",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(filesOnly.statusCode, 200);
   assert.doesNotMatch(filesOnly.body, new RegExp(firstGuideSlug));
@@ -253,7 +253,7 @@ test("filters admin publications by user and then uploader token", async () => {
   const permanentGuides = await app.inject({
     method: "GET",
     url: "/admin?kind=guides&lifetime=permanent",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(permanentGuides.statusCode, 200);
   assert.match(permanentGuides.body, new RegExp(firstGuideSlug));
@@ -262,7 +262,7 @@ test("filters admin publications by user and then uploader token", async () => {
   const anonymousOnly = await app.inject({
     method: "GET",
     url: "/admin?kind=guides&lifetime=anonymous-active",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(anonymousOnly.statusCode, 200);
   assert.doesNotMatch(anonymousOnly.body, new RegExp(firstGuideSlug));
@@ -272,7 +272,7 @@ test("filters admin publications by user and then uploader token", async () => {
   const filterScript = await app.inject({
     method: "GET",
     url: "/assets/admin-filters.js",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(filterScript.statusCode, 200);
   assert.match(filterScript.headers["content-type"] || "", /^application\/javascript/);
@@ -284,7 +284,7 @@ test("write lockdown blocks publishing but leaves takedown available", async () 
     method: "POST",
     url: "/admin/settings",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       cookie: adminCookie(bootstrapToken),
       "content-type": "application/x-www-form-urlencoded",
     },
@@ -298,7 +298,7 @@ test("write lockdown blocks publishing but leaves takedown available", async () 
     method: "POST",
     url: "/admin/settings",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       cookie: adminCookie(bootstrapToken),
       "content-type": "application/x-www-form-urlencoded",
     },
@@ -310,7 +310,7 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
   const formLogin = await app.inject({
     method: "POST",
     url: "/auth/shoo",
-    headers: { host: "schaffa.test", "content-type": "application/x-www-form-urlencoded" },
+    headers: { host: "schaffa.dev", "content-type": "application/x-www-form-urlencoded" },
     payload: "idToken=login-csrf-attempt-1234567890",
   });
   assert.equal(formLogin.statusCode, 415);
@@ -318,7 +318,7 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
   const loginPage = await app.inject({
     method: "GET",
     url: "/account",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(loginPage.statusCode, 200);
   assert.match(loginPage.body, /shoo\.dev\/shoo\.js/);
@@ -329,7 +329,7 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
   const account = await app.inject({
     method: "GET",
     url: "/account",
-    headers: { host: "schaffa.test", cookie },
+    headers: { host: "schaffa.dev", cookie },
   });
   assert.equal(account.statusCode, 200);
   assert.match(account.body, /Agenten-Tokens/);
@@ -338,7 +338,7 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
     method: "POST",
     url: "/account/tokens",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       cookie,
       "content-type": "application/x-www-form-urlencoded",
     },
@@ -358,7 +358,7 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
   const setupScript = await app.inject({
     method: "GET",
     url: "/assets/token-setup.js",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(setupScript.statusCode, 200);
   assert.match(setupScript.body, /~\/\.zshrc/);
@@ -385,7 +385,7 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${token}`,
       "content-type": fileBody.contentType,
     },
@@ -397,9 +397,11 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
   const populatedAccount = await app.inject({
     method: "GET",
     url: "/account",
-    headers: { host: "schaffa.test", cookie },
+    headers: { host: "schaffa.dev", cookie },
   });
   assert.match(populatedAccount.body, /Dein Konto/);
+  assert.match(populatedAccount.body, /href="\/impressum">Impressum/);
+  assert.match(populatedAccount.body, /href="\/datenschutz">Datenschutz/);
   assert.match(populatedAccount.body, /account-owned-page/);
   assert.match(populatedAccount.body, new RegExp(fileId));
   assert.match(populatedAccount.body, /my-agent/);
@@ -407,7 +409,7 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
   const revoked = await app.inject({
     method: "POST",
     url: `/account/tokens/${tokenRow.id}/revoke`,
-    headers: { host: "schaffa.test", cookie },
+    headers: { host: "schaffa.dev", cookie },
   });
   assert.equal(revoked.statusCode, 302);
   assert.ok(
@@ -420,7 +422,7 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
   const accountAfterRevoke = await app.inject({
     method: "GET",
     url: "/account",
-    headers: { host: "schaffa.test", cookie },
+    headers: { host: "schaffa.dev", cookie },
   });
   assert.match(accountAfterRevoke.body, /account-owned-page/);
   assert.match(accountAfterRevoke.body, new RegExp(fileId));
@@ -430,20 +432,20 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
   const deniedPageDelete = await app.inject({
     method: "POST",
     url: "/account/pages/account-owned-page/delete",
-    headers: { host: "schaffa.test", cookie: otherCookie },
+    headers: { host: "schaffa.dev", cookie: otherCookie },
   });
   assert.equal(deniedPageDelete.statusCode, 404);
   const deniedFileDelete = await app.inject({
     method: "POST",
     url: `/account/files/${fileId}/delete`,
-    headers: { host: "schaffa.test", cookie: otherCookie },
+    headers: { host: "schaffa.dev", cookie: otherCookie },
   });
   assert.equal(deniedFileDelete.statusCode, 404);
 
   const deletedVersion = await app.inject({
     method: "POST",
     url: "/account/pages/account-owned-page/versions/1/delete",
-    headers: { host: "schaffa.test", cookie },
+    headers: { host: "schaffa.dev", cookie },
   });
   assert.equal(deletedVersion.statusCode, 302);
   const remainingVersions = db()
@@ -455,13 +457,13 @@ test("creates Shoo users and lets them manage their own tokens and uploads", asy
   const deletedPage = await app.inject({
     method: "POST",
     url: "/account/pages/account-owned-page/delete",
-    headers: { host: "schaffa.test", cookie },
+    headers: { host: "schaffa.dev", cookie },
   });
   assert.equal(deletedPage.statusCode, 302);
   const deletedFile = await app.inject({
     method: "POST",
     url: `/account/files/${fileId}/delete`,
-    headers: { host: "schaffa.test", cookie },
+    headers: { host: "schaffa.dev", cookie },
   });
   assert.equal(deletedFile.statusCode, 302);
   assert.equal(
@@ -493,7 +495,7 @@ test("admin controls Shoo signups and logins", async () => {
   const expiredSession = await app.inject({
     method: "GET",
     url: "/account",
-    headers: { host: "schaffa.test", cookie },
+    headers: { host: "schaffa.dev", cookie },
   });
   assert.match(expiredSession.body, /Anmeldungen sind.+deaktiviert/);
 
@@ -508,7 +510,7 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
     method: "PUT",
     url: "/api/pages/trusted-interactive?type=interactive",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": disabledBody.contentType,
     },
@@ -527,7 +529,7 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
     method: "POST",
     url: `/admin/users/${user.id}/interactive`,
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       cookie: adminCookie(bootstrapToken),
       "content-type": "application/x-www-form-urlencoded",
     },
@@ -539,7 +541,7 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
     method: "POST",
     url: "/account/tokens",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       cookie,
       "content-type": "application/x-www-form-urlencoded",
     },
@@ -554,7 +556,7 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
     method: "POST",
     url: "/api/pages?type=interactive",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${token}`,
       "content-type": body.contentType,
     },
@@ -569,20 +571,23 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
   const warning = await app.inject({
     method: "GET",
     url: `/p/${pageSlug}`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(warning.statusCode, 200);
   assert.match(warning.body, /Diese Seite führt Code aus/);
+  assert.match(warning.body, /data-schaffa-legal/);
+  assert.match(warning.body, /href="\/datenschutz">Datenschutz/);
   assert.doesNotMatch(warning.body, /document\.body\.dataset/);
   assert.match(warning.body, new RegExp(`/p/${pageSlug}/run`));
 
   const run = await app.inject({
     method: "GET",
     url: `/p/${pageSlug}/run`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(run.statusCode, 200);
   assert.equal(run.body, interactiveHtml);
+  assert.doesNotMatch(run.body, /data-schaffa-legal/);
   assert.match(String(run.headers["content-security-policy"]), /sandbox allow-scripts/);
   assert.match(String(run.headers["content-security-policy"]), /connect-src 'none'/);
   assert.match(String(run.headers["content-security-policy"]), /webrtc 'block'/);
@@ -593,7 +598,7 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
   const raw = await app.inject({
     method: "GET",
     url: `/p/${pageSlug}/raw`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.match(raw.headers["content-type"] || "", /^text\/plain/);
   assert.equal(raw.body, interactiveHtml);
@@ -608,7 +613,7 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
     method: "PUT",
     url: "/api/pages/external-interactive?type=interactive",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${token}`,
       "content-type": externalBody.contentType,
     },
@@ -622,7 +627,7 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
     method: "PUT",
     url: `/api/pages/${pageSlug}`,
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": staticBody.contentType,
     },
@@ -635,14 +640,14 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
   const globallyStoppedRun = await app.inject({
     method: "GET",
     url: `/p/${pageSlug}/run`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(globallyStoppedRun.statusCode, 503);
   assert.equal(globallyStoppedRun.json().error, "interactive_disabled");
   const globallyStoppedWarning = await app.inject({
     method: "GET",
     url: `/p/${pageSlug}`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.doesNotMatch(globallyStoppedWarning.body, /Seite isoliert starten/);
   await updateSettings({ interactivePublishingEnabled: true });
@@ -651,7 +656,7 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
     method: "POST",
     url: `/admin/users/${user.id}/interactive`,
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       cookie: adminCookie(bootstrapToken),
       "content-type": "application/x-www-form-urlencoded",
     },
@@ -660,14 +665,14 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
   const stoppedRun = await app.inject({
     method: "GET",
     url: `/p/${pageSlug}/run`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(stoppedRun.statusCode, 503);
   assert.equal(stoppedRun.json().error, "interactive_disabled");
   const stoppedWarning = await app.inject({
     method: "GET",
     url: `/p/${pageSlug}`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.match(stoppedWarning.body, /Ausführung wurde.+deaktiviert/);
   assert.doesNotMatch(stoppedWarning.body, /Seite isoliert starten/);
@@ -676,7 +681,7 @@ test("allows only explicitly trusted users to publish sandboxed interactive page
     method: "PUT",
     url: "/api/pages/revoked-interactive?type=interactive",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${token}`,
       "content-type": revokedBody.contentType,
     },
@@ -693,7 +698,7 @@ test("admin deletion removes a Shoo user and revokes their tokens", async () => 
     method: "POST",
     url: "/account/tokens",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       cookie,
       "content-type": "application/x-www-form-urlencoded",
     },
@@ -708,7 +713,7 @@ test("admin deletion removes a Shoo user and revokes their tokens", async () => 
   const removed = await app.inject({
     method: "POST",
     url: `/admin/users/${user.id}/delete`,
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(removed.statusCode, 302);
   assert.equal(db().prepare("SELECT 1 FROM users WHERE id = ?").get(user.id), undefined);
@@ -725,7 +730,7 @@ test("admin deletion removes a Shoo user and revokes their tokens", async () => 
   const oldSession = await app.inject({
     method: "GET",
     url: "/account",
-    headers: { host: "schaffa.test", cookie },
+    headers: { host: "schaffa.dev", cookie },
   });
   assert.match(oldSession.body, /Mit Google anmelden/);
 });
@@ -735,7 +740,7 @@ test("bootstrap can be revoked after another admin exists and never resurrects",
   const revoked = await app.inject({
     method: "POST",
     url: "/admin/tokens/bootstrap/revoke",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(revoked.statusCode, 302);
   assert.deepEqual(seedBootstrapToken(), { active: false, created: false });
@@ -743,13 +748,13 @@ test("bootstrap can be revoked after another admin exists and never resurrects",
   const oldToken = await app.inject({
     method: "GET",
     url: "/admin",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.match(oldToken.body, /Admin-Zugang/);
   const newToken = await app.inject({
     method: "GET",
     url: "/admin",
-    headers: { host: "schaffa.test", cookie: adminCookie(replacement.token) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(replacement.token) },
   });
   assert.equal(newToken.statusCode, 200);
   assert.match(newToken.body, /Publikationen/);
@@ -768,13 +773,13 @@ test("rotating the bootstrap value reactivates it as the admin recovery path", a
   const oldToken = await app.inject({
     method: "GET",
     url: "/admin",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.match(oldToken.body, /Admin-Zugang/);
   const rotated = await app.inject({
     method: "GET",
     url: "/admin",
-    headers: { host: "schaffa.test", cookie: adminCookie(rotatedToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(rotatedToken) },
   });
   assert.equal(rotated.statusCode, 200);
   assert.match(rotated.body, /Publikationen/);

@@ -218,7 +218,7 @@ test("ClamGate page publication waits for verification and refuses changed quara
   assert.equal((await processNextPendingScan()).status, "pending");
   const response = await app.inject({
     url: new URL(queued.json().publicUrl).pathname,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(response.statusCode, 202);
   assert.doesNotMatch(response.body, /changed after scan|<h1>Original/);
@@ -237,7 +237,7 @@ test("ClamGate publishes clean page bytes at the original URL", {}, async (t) =>
   assert.equal((await processNextPendingScan()).status, "clean");
   const response = await app.inject({
     url: new URL(queued.json().publicUrl).pathname,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(response.statusCode, 200);
   assert.equal(response.body, html);
@@ -251,7 +251,7 @@ test("ClamGate invalid signatures leave file bytes quarantined", {}, async (t) =
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -266,7 +266,7 @@ test("ClamGate invalid signatures leave file bytes quarantined", {}, async (t) =
   assert.equal(await readFile(path.join(dataDir, row.storage_path), "utf8"), "private fixture");
   const response = await app.inject({
     url: new URL(queued.json().publicUrl).pathname,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(response.statusCode, 202);
   assert.doesNotMatch(response.body, /private fixture/);
@@ -296,7 +296,7 @@ test("ClamGate scans both original and published WebP bytes for files and guide 
   const image = await sharp({ create: { width: 2, height: 2, channels: 3, background: "white" } })
     .png()
     .toBuffer();
-  const auth = { host: "schaffa.test", authorization: `Bearer ${bootstrapToken}` };
+  const auth = { host: "schaffa.dev", authorization: `Bearer ${bootstrapToken}` };
   const body = multipart("file", "fixture.png", "image/png", image);
   const queued = await app.inject({
     method: "POST",
@@ -311,7 +311,7 @@ test("ClamGate scans both original and published WebP bytes for files and guide 
   assert.equal((await processNextPendingScan()).status, "clean");
   const published = await app.inject({
     url: new URL(queued.json().publicUrl).pathname,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(published.statusCode, 200);
   assert.deepEqual(service.uploads[0], image);
@@ -421,7 +421,7 @@ test("background WebP scans use the remote deadline while guide buffers keep the
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },

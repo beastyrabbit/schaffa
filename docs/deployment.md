@@ -30,6 +30,10 @@ Create one public Pangolin resource for `schaffa.dev` and point it at the Schaff
 Set `SCHAFFA_BASE_URL=https://schaffa.dev`. Keep Pangolin authentication enabled on the resource, then add high-priority **Bypass Auth** path rules for:
 
 - `/`
+- `impressum` (exact path `/impressum`)
+- `datenschutz` (exact path `/datenschutz`)
+- `legal-notice` (exact path `/legal-notice`)
+- `privacy` (exact path `/privacy`)
 - `api`
 - `api/*`
 - `api/*/*`
@@ -56,6 +60,8 @@ Set `SCHAFFA_BASE_URL=https://schaffa.dev`. Keep Pangolin authentication enabled
 - `metadata/*`
 
 Pangolin matches each path segment separately, so the additional patterns cover the landing page, OpenAPI metadata, page versions, `/raw`, API operations containing an ID or slug, and the Shoo user login flow. Requests to `/admin` therefore continue to Pangolin authentication. API clients, user accounts, public pages, and files remain directly reachable on the same hostname. Pangolin evaluates rules by priority; do not add a broader bypass rule that also matches `/admin`.
+
+The four legal pages are self-contained server-rendered HTML with inline CSS and no JavaScript or asset dependencies. Add only those four exact bypass paths for them, without wildcards. Each sends both a noindex meta tag and an X-Robots-Tag header.
 
 The health check should normally stay on the private backend at `/healthz`; it does not need a public Pangolin route.
 

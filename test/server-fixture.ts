@@ -59,7 +59,7 @@ const restoreScanner = await installClamGateFixture(dataDir);
 process.env.SCHAFFA_DATA_DIR = dataDir;
 process.env.SCHAFFA_TOKEN_PEPPER = "test-only-pepper-with-enough-entropy";
 process.env.SCHAFFA_BOOTSTRAP_TOKEN = bootstrapToken;
-process.env.SCHAFFA_BASE_URL = "https://schaffa.test";
+process.env.SCHAFFA_BASE_URL = "https://schaffa.dev";
 process.env.ANONYMOUS_UPLOADS_PER_HOUR = "3";
 process.env.AUTHENTICATED_UPLOADS_PER_HOUR = "50";
 process.env.MAX_PAGE_VERSIONS = "2";
@@ -107,7 +107,7 @@ async function shooLogin(idToken: string) {
   return app.inject({
     method: "POST",
     url: "/auth/shoo",
-    headers: { host: "schaffa.test", "content-type": "application/json" },
+    headers: { host: "schaffa.dev", "content-type": "application/json" },
     payload: { idToken },
   });
 }
@@ -118,7 +118,7 @@ async function updateSettings(settings: Record<string, boolean>) {
       method: "POST",
       url: "/admin/settings",
       headers: {
-        host: "schaffa.test",
+        host: "schaffa.dev",
         cookie: adminCookie(bootstrapToken),
         "content-type": "application/x-www-form-urlencoded",
       },
@@ -156,7 +156,7 @@ async function queueHtmlWithToken(slug: string, html: string, token: string, tit
     method: exists ? "PUT" : "POST",
     url: `${exists ? `/api/pages/${slug}` : "/api/pages"}${title ? `?title=${encodeURIComponent(title)}` : ""}`,
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${token}`,
       "content-type": body.contentType,
     },

@@ -34,7 +34,7 @@ test("keeps monotonic page versions isolated from stale scan workers", async () 
   const deleted = await app.inject({
     method: "POST",
     url: "/admin/pages/scan-race/versions/2/delete",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(deleted.statusCode, 302);
 
@@ -43,7 +43,7 @@ test("keeps monotonic page versions isolated from stale scan workers", async () 
   assert.equal(replacement.statusCode, 202);
   assert.equal(replacement.json().version, 3);
   assert.equal(
-    (await app.inject({ url: "/p/scan-race/2", headers: { host: "schaffa.test" } })).statusCode,
+    (await app.inject({ url: "/p/scan-race/2", headers: { host: "schaffa.dev" } })).statusCode,
     404,
   );
   const replacementRow = db()
@@ -70,7 +70,7 @@ test("keeps monotonic page versions isolated from stale scan workers", async () 
   const published = await app.inject({
     method: "GET",
     url: "/p/scan-race",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(published.statusCode, 200);
   assert.equal(published.body, replacementHtml);
@@ -82,7 +82,7 @@ test("rejects anonymous files, updates, malware, and scanner failures", async ()
   const file = await app.inject({
     method: "POST",
     url: "/api/files",
-    headers: { host: "schaffa.test", "content-type": fileBody.contentType },
+    headers: { host: "schaffa.dev", "content-type": fileBody.contentType },
     payload: fileBody.payload,
   });
   assert.equal(file.statusCode, 401);
@@ -91,7 +91,7 @@ test("rejects anonymous files, updates, malware, and scanner failures", async ()
   const update = await app.inject({
     method: "PUT",
     url: "/api/pages/no-anonymous-update",
-    headers: { host: "schaffa.test", "content-type": updateBody.contentType },
+    headers: { host: "schaffa.dev", "content-type": updateBody.contentType },
     payload: updateBody.payload,
   });
   assert.equal(update.statusCode, 401);
@@ -101,7 +101,7 @@ test("rejects anonymous files, updates, malware, and scanner failures", async ()
   const infected = await app.inject({
     method: "POST",
     url: "/api/pages",
-    headers: { host: "schaffa.test", "content-type": infectedBody.contentType },
+    headers: { host: "schaffa.dev", "content-type": infectedBody.contentType },
     payload: infectedBody.payload,
   });
   assert.equal(infected.statusCode, 202);
@@ -109,7 +109,7 @@ test("rejects anonymous files, updates, malware, and scanner failures", async ()
   const infectedPage = await app.inject({
     method: "GET",
     url: new URL(infected.json().publicUrl).pathname,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(infectedPage.statusCode, 422);
   assert.match(infectedPage.body, /malware was detected/);
@@ -120,7 +120,7 @@ test("rejects anonymous files, updates, malware, and scanner failures", async ()
   const unavailable = await app.inject({
     method: "POST",
     url: "/api/pages",
-    headers: { host: "schaffa.test", "content-type": unavailableBody.contentType },
+    headers: { host: "schaffa.dev", "content-type": unavailableBody.contentType },
     payload: unavailableBody.payload,
   });
   assert.equal(unavailable.statusCode, 202);
@@ -128,7 +128,7 @@ test("rejects anonymous files, updates, malware, and scanner failures", async ()
   const unavailablePage = await app.inject({
     method: "GET",
     url: new URL(unavailable.json().publicUrl).pathname,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(unavailablePage.statusCode, 202);
   scannerState.mode = "ok";
@@ -138,7 +138,7 @@ test("rejects anonymous files, updates, malware, and scanner failures", async ()
   const limited = await app.inject({
     method: "POST",
     url: "/api/pages",
-    headers: { host: "schaffa.test", "content-type": limitedBody.contentType },
+    headers: { host: "schaffa.dev", "content-type": limitedBody.contentType },
     payload: limitedBody.payload,
   });
   assert.equal(limited.statusCode, 429);
@@ -175,7 +175,7 @@ test("scans authenticated pages and files", async () => {
   const rejectedPage = await app.inject({
     method: "GET",
     url: new URL(page.json().publicUrl).pathname,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(rejectedPage.statusCode, 422);
   assert.match(rejectedPage.body, /malware was detected/);
@@ -185,7 +185,7 @@ test("scans authenticated pages and files", async () => {
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -196,7 +196,7 @@ test("scans authenticated pages and files", async () => {
   const rejectedFile = await app.inject({
     method: "GET",
     url: new URL(file.json().publicUrl).pathname,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(rejectedFile.statusCode, 422);
   assert.match(rejectedFile.body, /malware was detected/);
@@ -224,7 +224,7 @@ test("scans authenticated pages and files", async () => {
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": scannerErrorBody.contentType,
     },
@@ -235,7 +235,7 @@ test("scans authenticated pages and files", async () => {
   const scannerErrorPage = await app.inject({
     method: "GET",
     url: new URL(scannerError.json().publicUrl).pathname,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(scannerErrorPage.statusCode, 422);
   assert.doesNotMatch(scannerErrorPage.body, /INSTREAM/);

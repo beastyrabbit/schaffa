@@ -39,6 +39,8 @@ import {
   updateGuideStep,
 } from "./guides.js";
 import { landingBackgroundSvg } from "./landing-background.js";
+import { legalPagesEnabled, withLegalFooter } from "./legal-footer.js";
+import { legalRoutes, renderLegalPage } from "./legal-pages.js";
 import { openApiDocument } from "./openapi.js";
 import {
   consumeAnonymousUpload,
@@ -245,6 +247,13 @@ export function buildServer(
     ) {
       reply.header("Cache-Control", "no-store");
     }
+    if (
+      request.url.split("?", 1)[0] === "/api/" &&
+      typeof payload === "string" &&
+      reply.getHeader("content-type")?.toString().startsWith("text/html")
+    ) {
+      return withLegalFooter(payload);
+    }
     return payload;
   });
 
@@ -302,6 +311,22 @@ export function buildServer(
     publicSiteHeaders(reply);
     return reply.type("text/html; charset=utf-8").send(renderLanding());
   });
+  for (const route of legalRoutes) {
+    app.get(route, async (_request, reply) => {
+      if (!legalPagesEnabled()) {
+        reply.callNotFound();
+        return reply;
+      }
+      reply.headers({
+        "Content-Security-Policy":
+          "default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+        "X-Frame-Options": "DENY",
+        "X-Robots-Tag": "noindex",
+        "Cache-Control": "no-store",
+      });
+      return reply.type("text/html; charset=utf-8").send(renderLegalPage(route));
+    });
+  }
   app.get("/skills", async (_request, reply) => {
     publicSiteHeaders(reply);
     return reply.type("text/html; charset=utf-8").send(renderSkills());
@@ -939,10 +964,18 @@ export function buildServer(
     },
   );
 
-  app.setNotFoundHandler(async (_request, reply) => {
+  app.setNotFoundHandler(async (request, reply) => {
+    if (wantsPublicHtml(request)) {
+      publicSiteHeaders(reply);
+      return reply.code(404).type("text/html; charset=utf-8").send(renderPublicNotFound());
+    }
     return reply.code(404).send({ error: "not_found", message: "Route not found." });
   });
   app.setErrorHandler(async (error, request, reply) => {
+    if (error instanceof AppError && error.statusCode === 404 && wantsPublicHtml(request)) {
+      publicSiteHeaders(reply);
+      return reply.code(404).type("text/html; charset=utf-8").send(renderPublicNotFound());
+    }
     if (error instanceof AppError) {
       if (
         request.headers.accept?.includes("text/html") &&
@@ -1236,8 +1269,17 @@ async function sendGuide(
   const result = getPublishedGuide(slug, revision);
   if (!result) throw new AppError("Guide not found.", 404, "not_found");
   publicGuideHeaders(reply, result.revision, Boolean(revision));
-  if (notModified(request, reply, sha256(Buffer.from(result.html)))) return reply.code(304).send();
-  return reply.type("text/html; charset=utf-8").send(result.html);
+  const html = withLegalFooter(result.html, result.guide.language);
+  if (notModified(request, reply, sha256(Buffer.from(html)))) return reply.code(304).send();
+  return reply.type("text/html; charset=utf-8").send(html);
+}
+
+function wantsPublicHtml(request: FastifyRequest): boolean {
+  return (
+    request.method === "GET" &&
+    !request.url.startsWith("/api") &&
+    Boolean(request.headers.accept?.includes("text/html"))
+  );
 }
 
 function notModified(request: FastifyRequest, reply: FastifyReply, digest: string): boolean {

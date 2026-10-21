@@ -22,6 +22,94 @@ const { findBrowserExecutable, recordBrowserGuide } = (await import(
   new URL("../packages/cli/dist/recorder.js", import.meta.url).href
 )) as typeof import("../packages/cli/src/recorder.js");
 
+void test("built legal pages are reachable from home on desktop and mobile without third-party requests", {}, async (t) => {
+  let executablePath: string;
+  try {
+    executablePath = findBrowserExecutable(process.env.SCHAFFA_TEST_BROWSER);
+  } catch (error) {
+    if (process.env.CI || process.env.SCHAFFA_TEST_BROWSER) throw error;
+    t.skip("Install Chrome, Edge, or Chromium to run the browser integration test.");
+    return;
+  }
+  await exec("pnpm", ["build:server"]);
+  const built = (await import(
+    new URL("../dist/server.js", import.meta.url).href
+  )) as typeof import("../src/server.js");
+  const { config: builtConfig } = (await import(
+    new URL("../dist/config.js", import.meta.url).href
+  )) as typeof import("../src/config.js");
+  builtConfig.baseHost = "schaffa.dev";
+  builtConfig.cookieSecure = false;
+  const server = built.buildServer({ scanIntervalMs: 0 });
+  // Keep browser traffic on loopback while exercising the schaffa.dev configuration.
+  server.server.prependListener("request", (request) => {
+    request.headers.host = "schaffa.dev";
+  });
+  const origin = await server.listen({ host: "127.0.0.1", port: 0 });
+  const browser = await puppeteer.launch({
+    executablePath,
+    headless: true,
+    args: ["--no-sandbox"],
+  });
+  t.after(() => browser.close());
+  t.after(() => server.close());
+  const page = await browser.newPage();
+  const externalRequests: string[] = [];
+  await page.setRequestInterception(true);
+  page.on("request", (request) => {
+    if (request.url().startsWith(origin) || request.url().startsWith("data:")) {
+      void request.continue();
+    } else {
+      externalRequests.push(new URL(request.url()).hostname);
+      void request.abort();
+    }
+  });
+  for (const viewport of [
+    { width: 1280, height: 800 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewport(viewport);
+    for (const route of ["/legal-notice", "/privacy"]) {
+      await page.goto(origin);
+      const link = `footer a[href="${route}"]`;
+      await page.waitForSelector(link, { visible: true });
+      await Promise.all([page.waitForNavigation(), page.click(link)]);
+      assert.equal(new URL(page.url()).pathname, route);
+      assert.ok(
+        (await page.$eval("main", (element) => element.textContent)).includes("Tobias Heer"),
+      );
+      assert.ok(await page.$('a[href="https://beastyrabbit.com/kontakt?from=schaffa"]'));
+      assert.equal(
+        await page.$eval('meta[name="robots"]', (meta) => meta.getAttribute("content")),
+        "noindex",
+      );
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        true,
+      );
+      const counterpart = route === "/privacy" ? "/datenschutz" : "/impressum";
+      await Promise.all([page.waitForNavigation(), page.click(`header a[href="${counterpart}"]`)]);
+      assert.equal(new URL(page.url()).pathname, counterpart);
+      assert.equal(await page.$eval("html", (element) => element.lang), "de");
+      assert.ok(await page.$('footer a[href="/datenschutz"]'));
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        true,
+      );
+      if (process.env.SCHAFFA_TEST_EVIDENCE_DIR) {
+        await mkdir(process.env.SCHAFFA_TEST_EVIDENCE_DIR, { recursive: true });
+        await page.screenshot({
+          path: path.join(
+            process.env.SCHAFFA_TEST_EVIDENCE_DIR,
+            `legal-${counterpart.slice(1)}-${String(viewport.width)}.png`,
+          ),
+        });
+      }
+    }
+  }
+  assert.deepEqual(externalRequests, []);
+});
+
 test("local presentation assets, screenshot keyboard navigation, and browser recording work in Chrome", {}, async (t) => {
   let executablePath: string;
   try {
@@ -73,6 +161,7 @@ test("local presentation assets, screenshot keyboard navigation, and browser rec
   const publication = JSON.parse(published.stdout) as { publicUrl: string };
   const page = await browser.newPage();
   await page.goto(publication.publicUrl);
+  assert.equal(await page.$(".schaffa-presentation-legal, [data-schaffa-legal]"), null);
   await page.waitForFunction(
     () =>
       [...document.images].length > 0 &&
@@ -128,6 +217,7 @@ test("local presentation assets, screenshot keyboard navigation, and browser rec
   assert.equal(finished.status, 201);
   const result = await finished.json();
   await page.goto(result.guide.publicUrl);
+  assert.equal(await page.$("[data-schaffa-legal]"), null);
   assert.equal(await page.$('[aria-modal="true"]'), null);
   await page.focus(".screenshot-link");
   if (process.env.SCHAFFA_TEST_EVIDENCE_DIR) {

@@ -145,7 +145,7 @@ test("keeps a tiny checkbox target and its adjacent label visible", async () => 
 
 test("keeps annotation pixels already present in a replacement screenshot", async () => {
   const owner = createToken("pre-annotated replacement owner");
-  const auth = { host: "schaffa.test", authorization: `Bearer ${owner.token}` };
+  const auth = { host: "schaffa.dev", authorization: `Bearer ${owner.token}` };
   const created = await app.inject({
     method: "POST",
     url: "/api/guides",
@@ -247,7 +247,7 @@ test("downscales images, preserves alpha, and strips identifying metadata", asyn
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -266,7 +266,7 @@ test("downscales images, preserves alpha, and strips identifying metadata", asyn
   const download = await app.inject({
     method: "GET",
     url: publicPath,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(download.statusCode, 200);
   assert.equal(download.headers["content-type"], "image/webp");
@@ -289,7 +289,7 @@ test("downscales images, preserves alpha, and strips identifying metadata", asyn
   const original = await app.inject({
     method: "GET",
     url: `${publicPath}/original`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(original.statusCode, 404);
 });

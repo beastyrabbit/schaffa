@@ -23,7 +23,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   const landing = await app.inject({
     method: "GET",
     url: "/",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(landing.statusCode, 200);
   assert.match(landing.headers["content-type"] || "", /^text\/html/);
@@ -46,7 +46,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   const background = await app.inject({
     method: "GET",
     url: "/assets/landing-bg.svg",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(background.statusCode, 200);
   assert.match(background.headers["content-type"] || "", /^image\/svg\+xml/);
@@ -55,7 +55,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   const favicon = await app.inject({
     method: "GET",
     url: "/assets/favicon-c.svg",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(favicon.statusCode, 200);
   assert.match(favicon.headers["content-type"] || "", /^image\/svg\+xml/);
@@ -64,7 +64,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
     const png = await app.inject({
       method: "GET",
       url: `/assets/favicon-${size}.png`,
-      headers: { host: "schaffa.test" },
+      headers: { host: "schaffa.dev" },
     });
     assert.equal(png.statusCode, 200);
     assert.match(png.headers["content-type"] || "", /^image\/png/);
@@ -76,7 +76,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   const legacyFavicon = await app.inject({
     method: "GET",
     url: "/favicon.ico",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(legacyFavicon.statusCode, 200);
   assert.match(legacyFavicon.headers["content-type"] || "", /^image\/x-icon/);
@@ -86,7 +86,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   const manifest = await app.inject({
     method: "GET",
     url: "/site.webmanifest",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(manifest.statusCode, 200);
   assert.equal(manifest.json().name, "Schaffa");
@@ -95,7 +95,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   const apiRedirect = await app.inject({
     method: "GET",
     url: "/api",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(apiRedirect.statusCode, 301);
   assert.equal(apiRedirect.headers.location, "/api/");
@@ -103,7 +103,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   const api = await app.inject({
     method: "GET",
     url: "/api/",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(api.statusCode, 200);
   assert.match(api.headers["content-type"] || "", /^text\/html/);
@@ -119,7 +119,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   const scalarScript = await app.inject({
     method: "GET",
     url: "/api/js/scalar.js",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(scalarScript.statusCode, 200);
   assert.match(scalarScript.headers["content-type"] || "", /^application\/javascript/);
@@ -128,7 +128,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
   const specification = await app.inject({
     method: "GET",
     url: "/metadata/openapi.json",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(specification.statusCode, 200);
   assert.match(specification.headers["content-type"] || "", /^application\/json/);
@@ -137,7 +137,7 @@ test("serves a minimal public landing page while keeping API discovery machine-r
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   ) as { version: string };
   assert.equal(specification.json().info.version, packageJson.version);
-  assert.equal(specification.json().servers[0].url, "https://schaffa.test");
+  assert.equal(specification.json().servers[0].url, "https://schaffa.dev");
   assert.ok(specification.json().paths["/api/pages"].post);
   assert.ok(specification.json().paths["/api/pages/{slug}"].put);
   assert.ok(specification.json().paths["/api/files"].post);
@@ -197,8 +197,8 @@ test("publishes immutable page versions under a stable slug", async () => {
   const first = await publishHtml("hello", firstHtml);
   assert.equal(first.statusCode, 202);
   assert.equal(first.json().version, 1);
-  assert.equal(first.json().publicUrl, "https://schaffa.test/p/hello");
-  assert.equal(first.json().rawUrl, "https://schaffa.test/p/hello/raw");
+  assert.equal(first.json().publicUrl, "https://schaffa.dev/p/hello");
+  assert.equal(first.json().rawUrl, "https://schaffa.dev/p/hello/raw");
 
   const second = await publishHtml("hello", secondHtml);
   assert.equal(second.statusCode, 202);
@@ -207,7 +207,7 @@ test("publishes immutable page versions under a stable slug", async () => {
   const latest = await app.inject({
     method: "GET",
     url: "/p/hello",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(latest.statusCode, 200);
   assert.equal(latest.body, secondHtml);
@@ -218,7 +218,7 @@ test("publishes immutable page versions under a stable slug", async () => {
   const v1 = await app.inject({
     method: "GET",
     url: "/p/hello/1",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(v1.body, firstHtml);
   assert.equal(v1.headers["cache-control"], "public, max-age=300");
@@ -226,7 +226,7 @@ test("publishes immutable page versions under a stable slug", async () => {
   const raw = await app.inject({
     method: "GET",
     url: "/p/hello/1/raw",
-    headers: { host: "schaffa.test", "user-agent": "curl/8" },
+    headers: { host: "schaffa.dev", "user-agent": "curl/8" },
   });
   assert.equal(raw.statusCode, 200);
   assert.equal(raw.body, firstHtml);
@@ -235,7 +235,7 @@ test("publishes immutable page versions under a stable slug", async () => {
   const admin = await app.inject({
     method: "GET",
     url: "/admin",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.match(admin.body, /hello/);
   assert.match(admin.body, new RegExp(`${Buffer.byteLength(secondHtml)} B`));
@@ -260,7 +260,7 @@ test("retains a page title when an update omits it", async () => {
     method: "PUT",
     url: `/api/pages/long-title?title=${"x".repeat(161)}`,
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": longTitleBody.contentType,
     },
@@ -276,7 +276,7 @@ test("rejects repeated page query parameters as a client error", async () => {
     method: "PUT",
     url: "/api/pages/repeated-query?title=one&title=two",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -299,7 +299,7 @@ test("returns 404 when page metadata outlives its stored content", async () => {
   const missing = await app.inject({
     method: "GET",
     url: "/p/missing-page-content",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(missing.statusCode, 404);
   db().prepare("DELETE FROM pages WHERE slug = ?").run("missing-page-content");
@@ -311,7 +311,7 @@ test("creates pages with non-semantic random slugs", async () => {
     method: "POST",
     url: "/api/pages",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -321,7 +321,7 @@ test("creates pages with non-semantic random slugs", async () => {
   await finishPendingScans();
   assert.match(created.json().slug, /^[a-z0-9]{16}$/);
   assert.doesNotMatch(created.json().slug, /named|plan/);
-  assert.equal(created.json().rawUrl, `https://schaffa.test/p/${created.json().slug}/raw`);
+  assert.equal(created.json().rawUrl, `https://schaffa.dev/p/${created.json().slug}/raw`);
 });
 
 test("keeps anonymous pages visible for one hour and stored for 30 days", async () => {
@@ -329,7 +329,7 @@ test("keeps anonymous pages visible for one hour and stored for 30 days", async 
   const created = await app.inject({
     method: "POST",
     url: "/api/pages",
-    headers: { host: "schaffa.test", "content-type": body.contentType },
+    headers: { host: "schaffa.dev", "content-type": body.contentType },
     payload: body.payload,
   });
   assert.equal(created.statusCode, 202);
@@ -344,7 +344,7 @@ test("keeps anonymous pages visible for one hour and stored for 30 days", async 
   const pending = await app.inject({
     method: "GET",
     url: `/p/${slug}`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(pending.statusCode, 202);
   assert.match(pending.body, /Virus scan in progress/);
@@ -354,7 +354,7 @@ test("keeps anonymous pages visible for one hour and stored for 30 days", async 
   const pendingStatus = await app.inject({
     method: "GET",
     url: `/p/${slug}/status`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(pendingStatus.statusCode, 202);
   assert.equal(pendingStatus.json().scanStatus, "pending");
@@ -365,7 +365,7 @@ test("keeps anonymous pages visible for one hour and stored for 30 days", async 
   const visible = await app.inject({
     method: "GET",
     url: `/p/${slug}`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(visible.statusCode, 200);
   assert.equal(visible.headers["cache-control"], "no-store");
@@ -373,7 +373,7 @@ test("keeps anonymous pages visible for one hour and stored for 30 days", async 
   const visibleVersion = await app.inject({
     method: "GET",
     url: `/p/${slug}/1`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(visibleVersion.headers["cache-control"], "no-store");
 
@@ -383,7 +383,7 @@ test("keeps anonymous pages visible for one hour and stored for 30 days", async 
   const hidden = await app.inject({
     method: "GET",
     url: `/p/${slug}`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(hidden.statusCode, 404);
 
@@ -392,7 +392,7 @@ test("keeps anonymous pages visible for one hour and stored for 30 days", async 
   const admin = await app.inject({
     method: "GET",
     url: "/admin",
-    headers: { host: "schaffa.test", cookie: `__Secure-schaffa_admin=${bootstrapToken}` },
+    headers: { host: "schaffa.dev", cookie: `__Secure-schaffa_admin=${bootstrapToken}` },
   });
   assert.equal(admin.statusCode, 200);
   assert.doesNotMatch(admin.body, new RegExp(slug));
@@ -409,7 +409,7 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -422,14 +422,14 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
   const pending = await app.inject({
     method: "GET",
     url: publicUrl.pathname,
-    headers: { host: "schaffa.test", range: "bytes=0-5" },
+    headers: { host: "schaffa.dev", range: "bytes=0-5" },
   });
   assert.equal(pending.statusCode, 202);
   assert.doesNotMatch(pending.body, /abcdef/);
   const pendingStatus = await app.inject({
     method: "GET",
     url: `${publicUrl.pathname}/status`,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(pendingStatus.statusCode, 202);
   assert.equal(pendingStatus.json().scanStatus, "pending");
@@ -438,7 +438,7 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
   const ranged = await app.inject({
     method: "GET",
     url: publicUrl.pathname,
-    headers: { host: "schaffa.test", range: "bytes=1-3" },
+    headers: { host: "schaffa.dev", range: "bytes=1-3" },
   });
   assert.equal(ranged.statusCode, 206);
   assert.equal(ranged.body, "bcd");
@@ -449,7 +449,7 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
   const suffix = await app.inject({
     method: "GET",
     url: publicUrl.pathname,
-    headers: { host: "schaffa.test", range: "bytes=-3" },
+    headers: { host: "schaffa.dev", range: "bytes=-3" },
   });
   assert.equal(suffix.statusCode, 206);
   assert.equal(suffix.body, "def");
@@ -458,7 +458,7 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
   const oversizedEnd = await app.inject({
     method: "GET",
     url: publicUrl.pathname,
-    headers: { host: "schaffa.test", range: "bytes=4-99" },
+    headers: { host: "schaffa.dev", range: "bytes=4-99" },
   });
   assert.equal(oversizedEnd.statusCode, 206);
   assert.equal(oversizedEnd.body, "ef");
@@ -467,7 +467,7 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
   const hugeEnd = await app.inject({
     method: "GET",
     url: publicUrl.pathname,
-    headers: { host: "schaffa.test", range: `bytes=4-${"9".repeat(30)}` },
+    headers: { host: "schaffa.dev", range: `bytes=4-${"9".repeat(30)}` },
   });
   assert.equal(hugeEnd.statusCode, 206);
   assert.equal(hugeEnd.body, "ef");
@@ -475,7 +475,7 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
   const hugeSuffix = await app.inject({
     method: "GET",
     url: publicUrl.pathname,
-    headers: { host: "schaffa.test", range: `bytes=-${"9".repeat(30)}` },
+    headers: { host: "schaffa.dev", range: `bytes=-${"9".repeat(30)}` },
   });
   assert.equal(hugeSuffix.statusCode, 206);
   assert.equal(hugeSuffix.body, "abcdef");
@@ -483,7 +483,7 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
   const multiple = await app.inject({
     method: "GET",
     url: publicUrl.pathname,
-    headers: { host: "schaffa.test", range: "bytes=0-1,4-5" },
+    headers: { host: "schaffa.dev", range: "bytes=0-1,4-5" },
   });
   assert.equal(multiple.statusCode, 200);
   assert.equal(multiple.body, "abcdef");
@@ -491,7 +491,7 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
   const invalid = await app.inject({
     method: "GET",
     url: publicUrl.pathname,
-    headers: { host: "schaffa.test", range: "bytes=99-" },
+    headers: { host: "schaffa.dev", range: "bytes=99-" },
   });
   assert.equal(invalid.statusCode, 416);
   assert.equal(invalid.headers["content-range"], "bytes */6");
@@ -503,7 +503,7 @@ test("uploads files under neutral 128-bit IDs and supports byte ranges", async (
   const missing = await app.inject({
     method: "GET",
     url: publicUrl.pathname,
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(missing.statusCode, 404);
   assert.equal(missing.json().error, "not_found");
@@ -524,7 +524,7 @@ test("enforces page ownership and prunes versions beyond the configured cap", as
   const pruned = await app.inject({
     method: "GET",
     url: "/p/owned-page/1",
-    headers: { host: "schaffa.test" },
+    headers: { host: "schaffa.dev" },
   });
   assert.equal(pruned.statusCode, 404);
   const versions = db()
@@ -541,7 +541,7 @@ test("supports emergency page, version, and file takedown", async () => {
   const versionDelete = await app.inject({
     method: "POST",
     url: "/admin/pages/takedown-page/versions/1/delete",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(versionDelete.statusCode, 302);
   assert.equal(
@@ -549,7 +549,7 @@ test("supports emergency page, version, and file takedown", async () => {
       await app.inject({
         method: "GET",
         url: "/p/takedown-page/1",
-        headers: { host: "schaffa.test" },
+        headers: { host: "schaffa.dev" },
       })
     ).statusCode,
     404,
@@ -558,7 +558,7 @@ test("supports emergency page, version, and file takedown", async () => {
   const pageDelete = await app.inject({
     method: "POST",
     url: "/admin/pages/takedown-page/delete",
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(pageDelete.statusCode, 302);
   assert.equal(db().prepare("SELECT 1 FROM pages WHERE slug = 'takedown-page'").get(), undefined);
@@ -568,7 +568,7 @@ test("supports emergency page, version, and file takedown", async () => {
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${bootstrapToken}`,
       "content-type": body.contentType,
     },
@@ -577,7 +577,7 @@ test("supports emergency page, version, and file takedown", async () => {
   const fileDelete = await app.inject({
     method: "POST",
     url: `/admin/files/${upload.json().id}/delete`,
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
   assert.equal(fileDelete.statusCode, 302);
   assert.equal(
@@ -585,7 +585,7 @@ test("supports emergency page, version, and file takedown", async () => {
       await app.inject({
         method: "GET",
         url: new URL(upload.json().publicUrl).pathname,
-        headers: { host: "schaffa.test" },
+        headers: { host: "schaffa.dev" },
       })
     ).statusCode,
     404,
@@ -600,12 +600,12 @@ test("deletes pages, files, and guides through the API only for the owning or ad
       method: "DELETE",
       url,
       headers: {
-        host: "schaffa.test",
+        host: "schaffa.dev",
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
     });
   const read = async (url: string) =>
-    (await app.inject({ method: "GET", url, headers: { host: "schaffa.test" } })).statusCode;
+    (await app.inject({ method: "GET", url, headers: { host: "schaffa.dev" } })).statusCode;
 
   const page = await publishHtmlWithToken("api-delete-page", "<h1>Delete me</h1>", owner.token);
   const pageSlug = String(page.json().slug);
@@ -625,7 +625,7 @@ test("deletes pages, files, and guides through the API only for the owning or ad
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${owner.token}`,
       "content-type": body.contentType,
     },
@@ -644,7 +644,7 @@ test("deletes pages, files, and guides through the API only for the owning or ad
     method: "POST",
     url: "/api/guides",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${owner.token}`,
       "content-type": "application/json",
     },
@@ -684,7 +684,7 @@ test("enforces the global storage quota and removes rejected uploads", async () 
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${quotaToken.token}`,
       "content-type": firstBody.contentType,
     },
@@ -702,7 +702,7 @@ test("enforces the global storage quota and removes rejected uploads", async () 
     method: "POST",
     url: "/api/files",
     headers: {
-      host: "schaffa.test",
+      host: "schaffa.dev",
       authorization: `Bearer ${quotaToken.token}`,
       "content-type": secondBody.contentType,
     },
@@ -721,6 +721,6 @@ test("enforces the global storage quota and removes rejected uploads", async () 
   await app.inject({
     method: "POST",
     url: `/admin/files/${first.json().id}/delete`,
-    headers: { host: "schaffa.test", cookie: adminCookie(bootstrapToken) },
+    headers: { host: "schaffa.dev", cookie: adminCookie(bootstrapToken) },
   });
 });
