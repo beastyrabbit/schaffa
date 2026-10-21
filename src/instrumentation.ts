@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import { scrubTelemetry, shouldReportServerError } from "./telemetry-scrub.js";
 
 if (config.telemetry.glitchtipDsn) {
+  const origin = new URL(config.baseUrl).origin.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
   Sentry.init({
     dsn: config.telemetry.glitchtipDsn,
     environment: config.telemetry.environment,
@@ -22,11 +23,7 @@ if (config.telemetry.glitchtipDsn) {
       graphQL: { document: false, variables: false },
     },
     includeServerName: false,
-    tracePropagationTargets: [
-      new RegExp(
-        `^${new URL(config.baseUrl).origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:/|$)`,
-      ),
-    ],
+    tracePropagationTargets: [new RegExp(`^${origin}(?:/|$)`)],
     tracesSampleRate: config.telemetry.tracesSampleRate,
     traceLifecycle: "static",
     integrations: [

@@ -321,7 +321,7 @@ test("account client shows server rejection without reporting it and reports net
   }
 });
 
-test("server and browser scrubbers remove private values, request data, users and URL secrets", () => {
+function browserScrubber() {
   const window: Record<string, unknown> = { addEventListener() {} };
   const context = {
     window,
@@ -335,7 +335,11 @@ test("server and browser scrubbers remove private values, request data, users an
     readFileSync(new URL("../public/scripts/telemetry.js", import.meta.url), "utf8"),
     context,
   );
-  const browser = window.schaffaTelemetry as { scrub(value: unknown): unknown };
+  return window.schaffaTelemetry as { scrub(value: unknown): unknown };
+}
+
+test("server and browser scrubbers remove private values, request data, users and URL secrets", () => {
+  const browser = browserScrubber();
   const input = {
     user: { id: "private" },
     request: {
@@ -352,6 +356,26 @@ test("server and browser scrubbers remove private values, request data, users an
   assert.equal(JSON.stringify(server).includes("person@example.com"), false);
   assert.equal("user" in server, false);
   assert.equal(scrubText("https://schaffa.dev/a?private=1#fragment"), "https://schaffa.dev/a");
+});
+
+test("scrubbers preserve email and path redaction and handle long adversarial inputs quickly", () => {
+  const browser = browserScrubber();
+  for (const [value, expected] of [
+    ["first.last+tag@sub.example.co.uk", "[email]"],
+    ["a@b.com1c@d.com", "[email][email]"],
+    ["a@b.c+cc@d.ee", "a@[email]"],
+    ["a@.com a@b.c a@@b.com", "a@.com a@b.c a@@b.com"],
+    ["a@example.com123! next@example.org", "[email]123! [email]"],
+    ["/path/no-query /a/b?private=yes#fragment /c/d#private", "/path/no-query /a/b /c/d"],
+  ]) {
+    assert.equal(scrubText(value || ""), expected);
+    assert.equal(browser.scrub(value), expected);
+  }
+  const adversarial = `${"a".repeat(100_000)} ${"/".repeat(100_000)} a@${"a.".repeat(50_000)}`;
+  const started = performance.now();
+  assert.equal(scrubText(adversarial), adversarial);
+  assert.equal(browser.scrub(adversarial), adversarial);
+  assert.ok(performance.now() - started < 1000, "both scrubbers finish within one second");
 });
 
 test("own UI gets configured CSP hosts, admin excludes analytics, privacy renders, and content stays byte-identical", async () => {

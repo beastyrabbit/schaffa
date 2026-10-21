@@ -5,15 +5,45 @@
   const config = JSON.parse(meta.getAttribute("content") || "{}");
   if (location.hostname !== config.baseHost) return;
   const admin = /^\/admin(?:\/|$)/.test(location.pathname);
+  /** @param {string} value @param {number} at */
+  function emailMatchEnd(value, at) {
+    const domain = /[\w.-]*/y;
+    domain.lastIndex = at + 1;
+    const text = domain.exec(value)?.[0] || "";
+    let end = 0;
+    for (const suffix of text.matchAll(/\.[a-z]{2,}/gi)) {
+      if (suffix.index > 0) end = at + 1 + suffix.index + suffix[0].length;
+    }
+    return end;
+  }
+  // Scan each side of an @ once rather than retrying an email regex at every character.
+  /** @param {string} value */
+  function scrubEmails(value) {
+    const parts = [];
+    let cursor = 0;
+    for (const match of value.matchAll(/@/g)) {
+      let start = match.index;
+      while (start > cursor && /[\w.+-]/.test(value[start - 1] || "")) start--;
+      if (start === match.index) continue;
+      const end = emailMatchEnd(value, match.index);
+      if (!end) continue;
+      parts.push(value.slice(cursor, start), "[email]");
+      cursor = end;
+    }
+    parts.push(value.slice(cursor));
+    return parts.join("");
+  }
   /** @param {string} value */
   const scrubText = (value) =>
-    value
-      .replace(/\bBearer\s+[^\s"'<>]+/gi, "Bearer [redacted]")
-      .replace(/\b(?:sfa|sus)_[\w-]+/g, "[redacted]")
-      .replace(/\beyJ[\w-]*\.[\w-]+\.[\w-]+/g, "[redacted]")
-      .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, "[email]")
+    scrubEmails(
+      value
+        .replace(/\bBearer\s+[^\s"'<>]+/gi, "Bearer [redacted]")
+        .replace(/\b(?:sfa|sus)_[\w-]+/g, "[redacted]")
+        .replace(/\beyJ[\w-]*\.[\w-]+\.[\w-]+/g, "[redacted]"),
+    )
       .replace(/https?:\/\/[^\s"'<>]+/gi, (url) => url.split(/[?#]/, 1)[0] || "")
-      .replace(/(\/[\w/%.:@-]+)[?#][^\s"'<>]*/g, "$1");
+      // Matching paths without a query too avoids retrying every slash on failure.
+      .replace(/\/[\w/%.:@-]+(?:[?#][^\s"'<>]*)?/g, (url) => url.split(/[?#]/, 1)[0] || "");
   /** @param {unknown} value @param {number} [depth] @returns {unknown} */
   const scrub = (value, depth = 0) => {
     if (depth > 12) return "[truncated]";
@@ -58,9 +88,10 @@
     console.error = (...args) => {
       report(
         args
-          .map((arg) =>
-            arg instanceof Error ? arg.message : typeof arg === "string" ? arg : "[object]",
-          )
+          .map((arg) => {
+            if (arg instanceof Error) return arg.message;
+            return typeof arg === "string" ? arg : "[object]";
+          })
           .join(" "),
       );
       original.apply(console, args);
@@ -84,6 +115,7 @@
       .then(() => {
         const sdk = window.Sentry;
         if (!sdk) return;
+        const origin = location.origin.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
         sdk.init({
           dsn: config.glitchtipDsn,
           environment: config.environment,
@@ -117,10 +149,7 @@
           ],
           tracesSampleRate: config.tracesSampleRate,
           traceLifecycle: "static",
-          tracePropagationTargets: [
-            /^\/(?!\/)/,
-            new RegExp(`^${location.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`),
-          ],
+          tracePropagationTargets: [/^\/(?!\/)/, new RegExp(`^${origin}/`)],
           beforeSend: (event) => /** @type {typeof event} */ (scrub(event)),
           beforeSendTransaction: (event) => /** @type {typeof event} */ (scrub(event)),
           beforeBreadcrumb: (crumb) => /** @type {typeof crumb} */ (scrub(crumb)),
@@ -270,16 +299,15 @@
     document.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : null;
       if (!target) return;
-      const button = target.closest("[data-copy], #shoo-sign-in, .nav-action, .primary-link");
-      if (button)
-        track(
-          button.id === "shoo-sign-in"
-            ? "sign-in-start"
-            : button.hasAttribute("data-copy")
-              ? "token-copied"
-              : "cta-click",
-          { area: location.pathname },
-        );
+      const button = /** @type {HTMLElement | null} */ (
+        target.closest("[data-copy], #shoo-sign-in, .nav-action, .primary-link")
+      );
+      if (button) {
+        let name = "cta-click";
+        if (button.id === "shoo-sign-in") name = "sign-in-start";
+        else if ("copy" in button.dataset) name = "token-copied";
+        track(name, { area: location.pathname });
+      }
       const link = target.closest("a[href]");
       if (
         link instanceof HTMLAnchorElement &&
@@ -290,10 +318,9 @@
     });
     document.addEventListener("copy", (event) => {
       const anchor = window.getSelection()?.anchorNode;
-      const target =
-        anchor instanceof Element
-          ? anchor
-          : anchor?.parentElement || (event.target instanceof Element ? event.target : null);
+      let target = event.target instanceof Element ? event.target : null;
+      if (anchor instanceof Element) target = anchor;
+      else if (anchor?.parentElement) target = anchor.parentElement;
       if (target?.closest(".quickstart")) track("quickstart-copy");
       if (target?.closest(".skill-install, .skill-example")) track("skill-install-copy");
     });

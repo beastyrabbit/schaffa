@@ -1,13 +1,45 @@
 import { AppError } from "./errors.js";
 
+// Scan each side of an @ once rather than retrying an email regex at every character.
+function emailMatchEnd(value: string, at: number): number {
+  const domain = /[\w.-]*/y;
+  domain.lastIndex = at + 1;
+  const text = domain.exec(value)?.[0] || "";
+  let end = 0;
+  for (const suffix of text.matchAll(/\.[a-z]{2,}/gi)) {
+    if (suffix.index > 0) end = at + 1 + suffix.index + suffix[0].length;
+  }
+  return end;
+}
+
+function scrubEmails(value: string): string {
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const match of value.matchAll(/@/g)) {
+    let start = match.index;
+    while (start > cursor && /[\w.+-]/.test(value[start - 1] || "")) start--;
+    if (start === match.index) continue;
+    const end = emailMatchEnd(value, match.index);
+    if (!end) continue;
+    parts.push(value.slice(cursor, start), "[email]");
+    cursor = end;
+  }
+  parts.push(value.slice(cursor));
+  return parts.join("");
+}
+
 export function scrubText(value: string): string {
-  return value
-    .replace(/\bBearer\s+[^\s"'<>]+/gi, "Bearer [redacted]")
-    .replace(/\b(?:sfa|sus)_[\w-]+/g, "[redacted]")
-    .replace(/\beyJ[\w-]*\.[\w-]+\.[\w-]+/g, "[redacted]")
-    .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, "[email]")
-    .replace(/https?:\/\/[^\s"'<>]+/gi, (url) => url.split(/[?#]/, 1)[0] || "")
-    .replace(/(\/[\w/%.:@-]+)[?#][^\s"'<>]*/g, "$1");
+  return (
+    scrubEmails(
+      value
+        .replace(/\bBearer\s+[^\s"'<>]+/gi, "Bearer [redacted]")
+        .replace(/\b(?:sfa|sus)_[\w-]+/g, "[redacted]")
+        .replace(/\beyJ[\w-]*\.[\w-]+\.[\w-]+/g, "[redacted]"),
+    )
+      .replace(/https?:\/\/[^\s"'<>]+/gi, (url) => url.split(/[?#]/, 1)[0] || "")
+      // Matching paths without a query too avoids retrying every slash on failure.
+      .replace(/\/[\w/%.:@-]+(?:[?#][^\s"'<>]*)?/g, (url) => url.split(/[?#]/, 1)[0] || "")
+  );
 }
 
 export function scrubTelemetry<T>(value: T): T {

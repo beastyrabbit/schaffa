@@ -259,6 +259,11 @@ test("built app gates Umami, stops recorder on withdrawal, sends scrubbed Glitch
   await page.waitForFunction(() => Boolean(window.CookieConsent));
   await page.click('[data-cc="show-preferencesModal"]');
   await page.waitForSelector("#cc-main .pm", { visible: true });
+  // Let CookieConsent finish its opening animation and delayed focus callback.
+  await page.waitForFunction(() => {
+    const modal = document.querySelector("#cc-main .pm");
+    return modal && getComputedStyle(modal).opacity === "1";
+  });
   assert.equal(
     await page.$eval("#cc-main .pm__title", (el) => el.textContent),
     "Cookie-Einstellungen",
@@ -269,6 +274,7 @@ test("built app gates Umami, stops recorder on withdrawal, sends scrubbed Glitch
   );
   await page.evaluate(() => window.CookieConsent.acceptCategory("all"));
   await page.evaluate(() => window.CookieConsent.hidePreferences());
+  await page.waitForSelector("#cc-main .pm", { hidden: true });
   await page.waitForFunction(() => Boolean(window.umami));
   assert.equal(umamiRequests.filter((url) => url === "/recorder.js").length, recorderRequests);
   await page.type(

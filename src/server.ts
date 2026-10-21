@@ -77,7 +77,7 @@ import {
 import { getInstanceSettings, updateInstanceSettings } from "./settings.js";
 import { type ShooTokenVerifier, verifyShooToken } from "./shoo-auth.js";
 import { openStoredFile, sha256 } from "./storage.js";
-import { publishedHtmlKind, serverTelemetry } from "./telemetry.js";
+import { publishedHtmlKind, recordErrorTelemetry, recordResponseTelemetry } from "./telemetry.js";
 import { telemetryAssets, telemetryHead } from "./telemetry-assets.js";
 import { ownUiCsp } from "./telemetry-csp.js";
 import {
@@ -300,50 +300,12 @@ export function buildServer(
   });
 
   app.addHook("onResponse", async (request, reply) => {
-    const pathname = request.url.split("?", 1)[0] || "/";
-    const route = request.routeOptions.url || "";
-    const status = reply.statusCode;
-    if (request.method === "GET" && status === 200) {
-      const match = /^\/(p|f|g)\/([^/]+)(?:\/(?:\d+(?:\/(?:raw|run))?|raw|run))?$/.exec(pathname);
-      if (
-        match &&
-        !(match[1] === "g" && /\.(?:json|md)$/.test(match[2] || "")) &&
-        !interactiveInterstitials.has(reply)
-      )
-        serverTelemetry.send(
-          "content-view",
-          pathname,
-          {
-            kind:
-              match[1] === "g"
-                ? "guide"
-                : match[1] === "f"
-                  ? "file"
-                  : responseKinds.get(request) || "page",
-          },
-          request.headers["user-agent"],
-        );
-    }
-    if (status >= 400 || !["POST", "PUT", "DELETE"].includes(request.method)) return;
-    if (route === "/auth/shoo") serverTelemetry.send("login-success", "/auth/shoo");
-    if (/\/(?:account|admin)\/tokens(?:\/:id\/revoke)?$/.test(route))
-      serverTelemetry.send(
-        route.endsWith("revoke") ? "token-revoked" : "token-created",
-        "/account",
-      );
-    const deleted =
-      (request.method === "DELETE" && /^\/api\/(pages|files|guides)\/:\w+$/.test(route)) ||
-      /\/(pages|files|guides)\/:\w+(?:\/versions\/:version)?\/delete$/.test(route);
-    if (deleted)
-      serverTelemetry.send("content-deleted", "/api", {
-        kind: route.includes("guides") ? "guide" : route.includes("files") ? "file" : "page",
-      });
-    if (route === "/api/guides/:slug/finish")
-      serverTelemetry.send("content-published", "/api/guides", {
-        kind: "guide",
-        anonymous: false,
-        interactive: false,
-      });
+    recordResponseTelemetry(
+      request,
+      reply,
+      responseKinds.get(request) || "page",
+      interactiveInterstitials.has(reply),
+    );
   });
 
   for (const asset of Object.values(telemetryAssets)) {
@@ -1078,32 +1040,7 @@ export function buildServer(
       publicSiteHeaders(reply);
       return reply.code(404).type("text/html; charset=utf-8").send(renderPublicNotFound());
     }
-    const code =
-      error instanceof AppError
-        ? error.code
-        : error && typeof error === "object" && "code" in error
-          ? String(error.code)
-          : "internal_error";
-    if (request.routeOptions.url === "/auth/shoo")
-      serverTelemetry.send("login-failure", "/auth/shoo", { reason: code });
-    if (code === "signups_disabled")
-      serverTelemetry.send("signup-failure", "/auth/shoo", { reason: code });
-    if (
-      /rate_limit|locked|too_large|limit_exceeded|malware|scan_rejected|scanner_unavailable/i.test(
-        code,
-      )
-    )
-      serverTelemetry.send(
-        /malware|scan_rejected/.test(code)
-          ? "scan-rejected"
-          : /scanner/.test(code)
-            ? "scan-failed"
-            : "upload-rejected",
-        "/api",
-        {
-          reason: code,
-        },
-      );
+    recordErrorTelemetry(error, request.routeOptions.url);
     if (error instanceof AppError) {
       if (
         request.headers.accept?.includes("text/html") &&
