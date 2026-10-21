@@ -28,12 +28,14 @@ export const telemetryAssets = Object.fromEntries(
   }),
 ) as Record<keyof typeof files, { url: string; type: string; body: Buffer }>;
 
-export function telemetryHead(): string {
+export function telemetryHead(route: string | undefined, statusCode: number): string {
   if (!configEnabled()) return "";
   const client = {
     ...config.telemetry,
     baseHost: config.baseHost,
     legalPages: legalPagesEnabled(),
+    // Fastify's registered template contains parameter names, never visitor-supplied IDs.
+    pagePath: statusCode >= 400 ? "/404" : route || "/404",
     consentJs: telemetryAssets.consentJs.url,
     sentryJs: telemetryAssets.sentry.url,
   };

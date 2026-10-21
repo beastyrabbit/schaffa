@@ -5,16 +5,27 @@
   const config = JSON.parse(meta.getAttribute("content") || "{}");
   if (location.hostname !== config.baseHost) return;
   const admin = /^\/admin(?:\/|$)/.test(location.pathname);
+  const pagePath = config.pagePath || "/404";
   /** @param {string} value @param {number} at */
   function emailMatchEnd(value, at) {
-    const domain = /[\w.-]*/y;
+    const domain = /[\p{L}\p{N}.+_-]*/uy;
     domain.lastIndex = at + 1;
     const text = domain.exec(value)?.[0] || "";
     let end = 0;
-    for (const suffix of text.matchAll(/\.[a-z]{2,}/gi)) {
+    for (const suffix of text.matchAll(/\.\p{L}{2,}/gu)) {
       if (suffix.index > 0) end = at + 1 + suffix.index + suffix[0].length;
     }
     return end;
+  }
+  /** @param {string} value @param {number} at @param {number} cursor */
+  function emailLocalStart(value, at, cursor) {
+    let start = at;
+    while (start > cursor) {
+      const width = (value.codePointAt(start - 2) || 0) > 0xffff ? 2 : 1;
+      if (!/[\p{L}\p{N}.+_-]/u.test(value.slice(start - width, start))) break;
+      start -= width;
+    }
+    return start;
   }
   // Scan each side of an @ once rather than retrying an email regex at every character.
   /** @param {string} value */
@@ -22,8 +33,7 @@
     const parts = [];
     let cursor = 0;
     for (const match of value.matchAll(/@/g)) {
-      let start = match.index;
-      while (start > cursor && /[\w.+-]/.test(value[start - 1] || "")) start--;
+      const start = emailLocalStart(value, match.index, cursor);
       if (start === match.index) continue;
       const end = emailMatchEnd(value, match.index);
       if (!end) continue;
@@ -169,7 +179,7 @@
     window.schaffaUmamiBeforeSend = (_type, payload) => {
       if (!analytics) return null;
       // Referrers, document titles and arbitrary element properties can contain private data.
-      return { ...payload, title: "Schaffa", referrer: "", url: location.pathname };
+      return { ...payload, title: "Schaffa", referrer: "", url: pagePath };
     };
     void load(`${config.umamiUrl}/script.js`, {
       "data-website-id": config.umamiWebsiteId,
@@ -185,6 +195,8 @@
         // Recorder metadata includes full URLs. Never record a secret-bearing URL.
         if (
           analytics &&
+          pagePath !== "/404" &&
+          pagePath === location.pathname &&
           !location.search &&
           !location.hash &&
           !/^\/account(?:\/|$)/.test(location.pathname) &&
@@ -299,14 +311,11 @@
     document.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : null;
       if (!target) return;
-      const button = /** @type {HTMLElement | null} */ (
-        target.closest("[data-copy], #shoo-sign-in, .nav-action, .primary-link")
-      );
+      const button = target.closest("#shoo-sign-in, .nav-action, .primary-link");
       if (button) {
         let name = "cta-click";
         if (button.id === "shoo-sign-in") name = "sign-in-start";
-        else if ("copy" in button.dataset) name = "token-copied";
-        track(name, { area: location.pathname });
+        track(name, { area: pagePath });
       }
       const link = target.closest("a[href]");
       if (

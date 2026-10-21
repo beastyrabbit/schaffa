@@ -227,13 +227,6 @@ async function handleFailure(
   error: unknown,
   type: "page" | "file",
 ): Promise<ScanRunResult> {
-  serverTelemetry.send(
-    error instanceof AppError && /malware_detected|scan_rejected/.test(error.code)
-      ? "scan-rejected"
-      : "scan-failed",
-    "/api",
-    { kind: type },
-  );
   if (error instanceof AppError && error.code === "scanner_unavailable") {
     db()
       .prepare(
@@ -250,11 +243,13 @@ async function handleFailure(
   ) {
     await removeStoredFile(storagePath);
     rejectScan(table, id, error.message);
+    serverTelemetry.send("scan-rejected", "/api", { kind: type });
     return { processed: true, status: "rejected", type };
   }
   if (type === "file" && error instanceof AppError) {
     await removeStoredFile(storagePath);
     rejectScan(table, id, error.message);
+    serverTelemetry.send("scan-failed", "/api", { kind: type });
     return { processed: true, status: "rejected", type };
   }
   db()

@@ -12,13 +12,15 @@ import {
   createToken,
   db,
   finishPendingScans,
+  processNextPendingScan,
   publishHtml,
+  queueHtmlWithToken,
+  scannerState,
   test,
 } from "./server-fixture.js";
 
-const { collectorUserAgent, createTelemetryTransport, serverTelemetry } = await import(
-  "../src/telemetry.js"
-);
+const { collectorUserAgent, createTelemetryTransport, recordErrorTelemetry, serverTelemetry } =
+  await import("../src/telemetry.js");
 
 test("telemetry configuration is opt-in, validated, and release-aware", () => {
   const empty = parseTelemetryConfig({}, "1.2.3");
@@ -147,6 +149,71 @@ test("server reporting skips known operational errors and keeps unexpected failu
   assert.equal(shouldReportServerError(new Error("Unexpected")), true);
 });
 
+test("only publishing routes emit upload rejection events, including storage quota", {}, (t) => {
+  const events: Array<{ name: string; data: unknown }> = [];
+  t.mock.method(serverTelemetry, "send", (name: string, _url: string, data: unknown) => {
+    events.push({ name, data });
+  });
+  recordErrorTelemetry(new AppError("Limited", 429, "rate_limited"), "/auth/shoo");
+  assert.deepEqual(events, [{ name: "login-failure", data: { reason: "rate_limited" } }]);
+  for (const route of [
+    "/api/pages",
+    "/api/files",
+    "/api/guides/:slug/steps",
+    "/api/presentations",
+  ]) {
+    for (const code of ["rate_limited", "storage_quota"]) {
+      events.length = 0;
+      recordErrorTelemetry(new AppError("Expected", 507, code), route);
+      assert.deepEqual(events, [{ name: "upload-rejected", data: { reason: code } }]);
+    }
+  }
+  events.length = 0;
+  recordErrorTelemetry(new AppError("Limited", 429, "rate_limited"), "/admin/tokens");
+  assert.deepEqual(events, []);
+});
+
+test("background cleanup and worker exceptions reach Sentry while expected states are skipped", {}, async (t) => {
+  const { Sentry } = await import("../src/instrumentation.js");
+  const { captureBackgroundError } = await import("../src/telemetry.js");
+  const { buildServer } = await import("../src/server.js");
+  const captured: unknown[] = [];
+  t.mock.method(Sentry.getCurrentScope(), "captureException", (error: unknown) => {
+    captured.push(error);
+    return "fixture-event";
+  });
+  for (const code of ["scanner_unavailable", "storage_quota"])
+    captureBackgroundError(new AppError("Expected", 503, code));
+  assert.deepEqual(captured, []);
+  const cleanupError = new Error("Fixture cleanup failed");
+  const scanError = new Error("Fixture scan worker failed");
+  const database = db();
+  const prepare = database.prepare;
+  t.mock.method(database, "prepare", (sql: string) => {
+    if (sql.includes("purge_at IS NOT NULL")) throw cleanupError;
+    if (sql.includes("SELECT type FROM")) throw scanError;
+    return prepare.call(database, sql);
+  });
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const hour = 60 * 60 * 1000;
+  const background = buildServer({ scanIntervalMs: hour });
+  t.after(() => background.close());
+  await delay(0);
+  assert.deepEqual(captured, [cleanupError], "initial cleanup is reported");
+  t.mock.timers.tick(hour);
+  await delay(0);
+  assert.equal(
+    captured.filter((error) => error === cleanupError).length,
+    2,
+    "interval cleanup is reported",
+  );
+  assert.equal(
+    captured.filter((error) => error === scanError).length,
+    1,
+    "worker catch is reported",
+  );
+});
+
 test("client consent uses safe GET navigation and excludes account and secret pages from replay", async () => {
   for (const [pathname, secret, replay, destination] of [
     ["/account/tokens", true, false, "/account"],
@@ -194,6 +261,7 @@ test("client consent uses safe GET navigation and excludes account and secret pa
                   getAttribute: () =>
                     JSON.stringify({
                       baseHost: "schaffa.dev",
+                      pagePath: pathname,
                       umamiUrl: "https://metrics.invalid",
                       consentJs: "/consent.js",
                     }),
@@ -217,6 +285,141 @@ test("client consent uses safe GET navigation and excludes account and secret pa
     accepted = false;
     sync();
     assert.equal(navigation, destination);
+  }
+});
+
+test("browser analytics uses server route templates and a fixed path for unknown and error pages", async () => {
+  const { telemetryHead } = await import("../src/telemetry-assets.js");
+  config.telemetry = {
+    ...config.telemetry,
+    umamiUrl: "https://metrics.invalid",
+    umamiWebsiteId: "fixture",
+  };
+  for (const [pathname, route, status, expected] of [
+    ["/", "/", 200, "/"],
+    ["/skills", "/skills", 200, "/skills"],
+    ["/privacy", "/privacy", 200, "/privacy"],
+    [
+      "/account/tokens/private-id/revoke",
+      "/account/tokens/:id/revoke",
+      200,
+      "/account/tokens/:id/revoke",
+    ],
+    [
+      "/account/pages/private-slug/versions/2/delete",
+      "/account/pages/:slug/versions/:version/delete",
+      200,
+      "/account/pages/:slug/versions/:version/delete",
+    ],
+    [
+      "/account/files/private-id/delete",
+      "/account/files/:id/delete",
+      200,
+      "/account/files/:id/delete",
+    ],
+    ["/unknown-private-path", undefined, 404, "/404"],
+    ["/unknown-private-path", undefined, 200, "/404"],
+    ["/account/tokens/private-id/revoke", "/account/tokens/:id/revoke", 403, "/404"],
+    ["/privacy", "/privacy", 500, "/404"],
+  ] as const) {
+    const head = telemetryHead(route, status);
+    const encoded = /name="schaffa-telemetry" content="([^"]*)"/.exec(head)?.[1] || "";
+    const content = encoded.replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+    const window = {
+      addEventListener() {},
+      CookieConsent: {
+        acceptedCategory: () => true,
+        run: async (options: { onConsent(): void }) => options.onConsent(),
+      },
+    };
+    vm.runInNewContext(
+      readFileSync(new URL("../public/scripts/telemetry.js", import.meta.url), "utf8"),
+      {
+        window,
+        setTimeout,
+        location: { hostname: "schaffa.dev", pathname, search: "", hash: "" },
+        document: {
+          readyState: "complete",
+          addEventListener() {},
+          querySelector: (selector: string) =>
+            selector.startsWith("meta") ? { getAttribute: () => content } : null,
+          createElement: () => ({ setAttribute() {} }),
+          head: { append: (script: { onload(): void }) => script.onload() },
+        },
+      },
+    );
+    await delay(0);
+    const beforeSend = (
+      window as typeof window & {
+        schaffaUmamiBeforeSend(type: string, payload: object): { url: string };
+      }
+    ).schaffaUmamiBeforeSend;
+    assert.equal(beforeSend("event", { url: pathname }).url, expected);
+  }
+});
+
+test("token copy events wait for successful clipboard completion and skip denied writes", async () => {
+  for (const succeeds of [true, false]) {
+    const events: string[] = [];
+    let click = async () => {};
+    let complete = () => {};
+    class Select {
+      value = "macos";
+      addEventListener() {}
+      replaceChildren() {}
+    }
+    const os = new Select();
+    const target = new Select();
+    const source = { textContent: "fixture-token" };
+    const button = {
+      textContent: "Copy",
+      getAttribute: () => "[data-token-value]",
+      addEventListener: (_name: string, handler: typeof click) => {
+        click = handler;
+      },
+    };
+    const reveal = {
+      querySelector: (selector: string) => {
+        if (selector === "select[data-token-os]") return os;
+        if (selector === "select[data-token-target]") return target;
+        if (selector === "[data-token-value]") return source;
+        return { textContent: "" };
+      },
+      querySelectorAll: () => [button],
+    };
+    vm.runInNewContext(
+      readFileSync(new URL("../public/scripts/token-setup.js", import.meta.url), "utf8"),
+      {
+        HTMLSelectElement: Select,
+        DOMException,
+        navigator: {
+          platform: "Linux",
+          clipboard: {
+            writeText: () =>
+              new Promise<void>((resolve, reject) => {
+                complete = () =>
+                  succeeds ? resolve() : reject(new DOMException("Denied", "NotAllowedError"));
+              }),
+          },
+        },
+        window: {
+          setTimeout() {},
+          getSelection: () => null,
+          schaffaTelemetry: { track: (name: string) => events.push(name) },
+        },
+        document: {
+          querySelector: () => reveal,
+          createElement: () => ({}),
+          createRange: () => ({ selectNodeContents() {} }),
+        },
+      },
+    );
+    const pending = click();
+    assert.deepEqual(events, [], "a pending write is not a successful copy");
+    complete();
+    await pending;
+    assert.deepEqual(events, succeeds ? ["token-copied"] : []);
+    assert.equal(button.textContent, succeeds ? "Kopiert" : "Markiert");
   }
 });
 
@@ -362,6 +565,8 @@ test("scrubbers preserve email and path redaction and handle long adversarial in
   const browser = browserScrubber();
   for (const [value, expected] of [
     ["first.last+tag@sub.example.co.uk", "[email]"],
+    ["jörg@example.com 用户@example.com", "[email] [email]"],
+    ["用户@例子.公司 𐐀name@例子.公司", "[email] [email]"],
     ["a@b.com1c@d.com", "[email][email]"],
     ["a@b.c+cc@d.ee", "a@[email]"],
     ["a@.com a@b.c a@@b.com", "a@.com a@b.c a@@b.com"],
@@ -545,4 +750,27 @@ test("page scan publication skips telemetry work when Umami is disabled", {}, as
   });
   await publishHtml("telemetry-disabled-publication", "<!doctype html><title>Disabled</title>");
   assert.deepEqual(events, []);
+});
+
+test("scanner retries emit no failures while terminal policy rejection is counted once", {}, async (t) => {
+  const events: string[] = [];
+  t.mock.method(serverTelemetry, "send", (name: string) => events.push(name));
+  const queued = await queueHtmlWithToken(
+    "telemetry-scan-retry",
+    "<!doctype html><title>Retry</title>",
+    bootstrapToken,
+  );
+  assert.equal(queued.statusCode, 202);
+  scannerState.mode = "unavailable";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    db().exec("UPDATE page_versions SET scan_attempted_at = NULL WHERE scan_status = 'pending'");
+    assert.equal((await processNextPendingScan()).status, "pending");
+  }
+  assert.deepEqual(events, []);
+  scannerState.mode = "infected";
+  db().exec("UPDATE page_versions SET scan_attempted_at = NULL WHERE scan_status = 'pending'");
+  assert.equal((await processNextPendingScan()).status, "rejected");
+  assert.deepEqual(events, ["scan-rejected"]);
+  await processNextPendingScan();
+  assert.deepEqual(events, ["scan-rejected"]);
 });

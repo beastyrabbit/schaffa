@@ -2,22 +2,31 @@ import { AppError } from "./errors.js";
 
 // Scan each side of an @ once rather than retrying an email regex at every character.
 function emailMatchEnd(value: string, at: number): number {
-  const domain = /[\w.-]*/y;
+  const domain = /[\p{L}\p{N}.+_-]*/uy;
   domain.lastIndex = at + 1;
   const text = domain.exec(value)?.[0] || "";
   let end = 0;
-  for (const suffix of text.matchAll(/\.[a-z]{2,}/gi)) {
+  for (const suffix of text.matchAll(/\.\p{L}{2,}/gu)) {
     if (suffix.index > 0) end = at + 1 + suffix.index + suffix[0].length;
   }
   return end;
+}
+
+function emailLocalStart(value: string, at: number, cursor: number): number {
+  let start = at;
+  while (start > cursor) {
+    const width = (value.codePointAt(start - 2) || 0) > 0xffff ? 2 : 1;
+    if (!/[\p{L}\p{N}.+_-]/u.test(value.slice(start - width, start))) break;
+    start -= width;
+  }
+  return start;
 }
 
 function scrubEmails(value: string): string {
   const parts: string[] = [];
   let cursor = 0;
   for (const match of value.matchAll(/@/g)) {
-    let start = match.index;
-    while (start > cursor && /[\w.+-]/.test(value[start - 1] || "")) start--;
+    const start = emailLocalStart(value, match.index, cursor);
     if (start === match.index) continue;
     const end = emailMatchEnd(value, match.index);
     if (!end) continue;
@@ -62,8 +71,9 @@ export function scrubTelemetry<T>(value: T): T {
   };
   return visit(value, 0) as T;
 }
-export function shouldReportServerError(error: Error): boolean {
-  if ("statusCode" in error && Number(error.statusCode) < 500) return false;
+export function shouldReportServerError(error: unknown): boolean {
+  if (error && typeof error === "object" && "statusCode" in error && Number(error.statusCode) < 500)
+    return false;
   return !(
     error instanceof AppError &&
     ["interactive_disabled", "storage_quota", "scanner_unavailable", "writes_locked"].includes(

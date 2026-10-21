@@ -77,7 +77,12 @@ import {
 import { getInstanceSettings, updateInstanceSettings } from "./settings.js";
 import { type ShooTokenVerifier, verifyShooToken } from "./shoo-auth.js";
 import { openStoredFile, sha256 } from "./storage.js";
-import { publishedHtmlKind, recordErrorTelemetry, recordResponseTelemetry } from "./telemetry.js";
+import {
+  captureBackgroundError,
+  publishedHtmlKind,
+  recordErrorTelemetry,
+  recordResponseTelemetry,
+} from "./telemetry.js";
 import { telemetryAssets, telemetryHead } from "./telemetry-assets.js";
 import { ownUiCsp } from "./telemetry-csp.js";
 import {
@@ -197,12 +202,14 @@ export function buildServer(
   const cleanupTimer = setInterval(
     () =>
       void purgeRetainedAnonymousPages().catch((error: unknown) => {
+        captureBackgroundError(error);
         app.log.error({ err: error }, "anonymous page retention cleanup failed");
       }),
     60 * 60 * 1000,
   );
   cleanupTimer.unref();
   void purgeRetainedAnonymousPages().catch((error: unknown) => {
+    captureBackgroundError(error);
     app.log.error({ err: error }, "initial anonymous page retention cleanup failed");
   });
 
@@ -218,6 +225,7 @@ export function buildServer(
       }
     })()
       .catch((error: unknown) => {
+        captureBackgroundError(error);
         app.log.error({ err: error }, "pending virus scan failed");
       })
       .finally(() => {
@@ -290,7 +298,10 @@ export function buildServer(
             pathname.startsWith("/admin"),
           ),
         );
-        html = html.replace("</head>", `${telemetryHead()}</head>`);
+        html = html.replace(
+          "</head>",
+          `${telemetryHead(request.routeOptions.url, reply.statusCode)}</head>`,
+        );
       }
       if (pathname.startsWith("/admin"))
         html = html.replace(/<a href="[^"]*" data-cc="show-preferencesModal">[^<]*<\/a>/, "");

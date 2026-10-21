@@ -112,6 +112,7 @@
       const originalLabel = button.textContent;
       try {
         await navigator.clipboard.writeText(source.textContent);
+        window.schaffaTelemetry?.track("token-copied");
         button.textContent = "Kopiert";
       } catch (cause) {
         if (

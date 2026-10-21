@@ -28,6 +28,7 @@ test("built app gates Umami, stops recorder on withdrawal, sends scrubbed Glitch
   }
   const envelopes: string[] = [];
   const umamiRequests: string[] = [];
+  const analyticsPayloads: string[] = [];
   // Snapshot of the deployed 3.x tracker, fetched read-only on 2026-10-21.
   const tracker = await readFile(new URL("./fixtures/umami-script.txt", import.meta.url), "utf8");
   const stub = createServer(async (request, response) => {
@@ -55,6 +56,7 @@ test("built app gates Umami, stops recorder on withdrawal, sends scrubbed Glitch
     }
     let body = "";
     for await (const chunk of request) body += chunk;
+    if (url === "/api/send") analyticsPayloads.push(body);
     if (url.startsWith("/api/1/envelope/")) envelopes.push(body);
     response.setHeader("Content-Type", "application/json");
     response.end(JSON.stringify({ cache: "local-test-session" }));
@@ -210,6 +212,20 @@ test("built app gates Umami, stops recorder on withdrawal, sends scrubbed Glitch
   assert.ok(umamiRequests.includes("/api/send"));
   assert.ok(!umamiRequests.includes("/recorder.js"), "recorder skips query and fragment URLs");
   assert.deepEqual(await storage(), { local: [], session: [], cookies: ["cc_cookie"] });
+  const previousPayloads = analyticsPayloads.length;
+  const previousRecorders = umamiRequests.filter((url) => url === "/recorder.js").length;
+  const missing = await page.goto(`${origin}/unknown-private-id`);
+  assert.equal(missing?.status(), 404);
+  await page.waitForFunction(() => Boolean(window.umami));
+  const trackedMissingPage = () =>
+    analyticsPayloads
+      .slice(previousPayloads)
+      .some((body) => (JSON.parse(body) as { payload: { url: string } }).payload.url === "/404");
+  for (let attempt = 0; attempt < 100 && !trackedMissingPage(); attempt++) await delay(25);
+  assert.ok(trackedMissingPage());
+  for (const payload of analyticsPayloads.slice(previousPayloads))
+    assert.doesNotMatch(payload, /unknown-private-id/);
+  assert.equal(umamiRequests.filter((url) => url === "/recorder.js").length, previousRecorders);
   await page.goto(origin);
   await page.waitForFunction(() => Boolean(window.umami));
   for (let attempt = 0; attempt < 100 && !umamiRequests.includes("/api/record"); attempt++)

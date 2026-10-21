@@ -1,6 +1,12 @@
 import { debuglog } from "node:util";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { config } from "./config.js";
+import { Sentry } from "./instrumentation.js";
+import { shouldReportServerError } from "./telemetry-scrub.js";
+
+export function captureBackgroundError(error: unknown): void {
+  if (shouldReportServerError(error)) Sentry.captureException(error);
+}
 
 // Marp's bare output uses this marker; no user-controlled metadata is sent.
 export function publishedHtmlKind(html: string | Buffer): "page" | "presentation" {
@@ -138,7 +144,8 @@ export function recordErrorTelemetry(error: unknown, route: string | undefined) 
   if (code === "signups_disabled")
     serverTelemetry.send("signup-failure", "/auth/shoo", { reason: code });
   if (
-    /rate_limit|locked|too_large|limit_exceeded|malware|scan_rejected|scanner_unavailable/i.test(
+    /^\/api\/(?:pages|files|guides|presentations)(?:\/|$)/.test(route || "") &&
+    /rate_limit|locked|too_large|limit_exceeded|storage_quota|malware|scan_rejected|scanner_unavailable/i.test(
       code,
     )
   )
