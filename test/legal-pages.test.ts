@@ -135,18 +135,24 @@ function assertPrivacyPolicy(html: string, german: boolean): void {
   const cookies = /<section id="privacy-11"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
   for (const text of german
     ? [
-        "Ohne Anmeldung und ohne Auswahl im Cookie-Banner",
+        "Ohne Anmeldung und ohne Auswahl im Cookie-Banner setzt Schaffa keine Cookies; lediglich die API-Dokumentation unter /api speichert die gewählte Beispielsprache als Anzeigeeinstellung im lokalen Speicher Ihres Browsers.",
+        "die angeforderte Anzeige der API-Dokumentation nach § 25 Abs. 2 Nr. 2 TDDDG erforderlich",
         "cc_cookie",
         "sechs Monate",
         "Umami setzt keine Cookies",
       ]
     : [
-        "Without sign-in and without a choice in the cookie banner",
+        "Without sign-in and without a choice in the cookie banner, Schaffa does not set cookies; only the API documentation at /api stores the selected code-example language as a display setting in your browser's local storage.",
+        "API documentation display under Section 25(2) no. 2 TDDDG",
         "cc_cookie",
         "six months",
         "Umami sets no cookies",
       ])
     assert.ok(cookies.includes(text), `Cookie disclosure must include ${text}`);
+  assert.doesNotMatch(
+    cookies,
+    /setzt Schaffa keine Cookies und speichert keine Daten im Browser|Schaffa does not set cookies or store data in your browser/,
+  );
   assert.doesNotMatch(
     html,
     /geprüft|verifiziert|beobachtet|steht aus|verified|observed|checked|outstanding/i,
