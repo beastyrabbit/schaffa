@@ -113,7 +113,11 @@
       try {
         await navigator.clipboard.writeText(source.textContent);
         button.textContent = "Kopiert";
-      } catch {
+      } catch (cause) {
+        if (
+          !(cause instanceof DOMException && /^(NotAllowedError|SecurityError)$/.test(cause.name))
+        )
+          window.schaffaTelemetry?.report(cause);
         const range = document.createRange();
         range.selectNodeContents(source);
         const selection = window.getSelection();

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
 import path from "node:path";
 import type { ClamGateOptions } from "./clamgate.js";
+import { parseTelemetryConfig } from "./telemetry-config.js";
 
 function readApplicationVersion(): string {
   const packageJson = JSON.parse(
@@ -109,6 +110,7 @@ function scannerConfiguration(): ClamGateOptions {
 }
 
 export const config = {
+  telemetry: parseTelemetryConfig(process.env, readApplicationVersion()),
   version: readApplicationVersion(),
   host: process.env.HOST || "0.0.0.0",
   port: positiveInteger("PORT", 3000),

@@ -5,6 +5,7 @@
   const error = document.getElementById("auth-error");
   /** @param {string} message */
   const showError = (message) => {
+    window.schaffaTelemetry?.track("error-shown", { area: "sign-in" });
     if (!error) return;
     error.hidden = false;
     error.textContent = message;
@@ -24,7 +25,8 @@
     });
     if (!response.ok) {
       const result = await response.json().catch(() => ({}));
-      throw new Error(result.message || "Anmeldung fehlgeschlagen.");
+      showError(result.message || "Anmeldung fehlgeschlagen.");
+      return false;
     }
     location.replace("/account");
     return true;
@@ -34,7 +36,8 @@
     event.preventDefault();
     shoo.startSignIn({ returnTo: "/account", requestPii: true });
   });
-  establishSession().catch((cause) =>
-    showError(cause instanceof Error ? cause.message : "Anmeldung fehlgeschlagen."),
-  );
+  establishSession().catch((cause) => {
+    window.schaffaTelemetry?.report(cause);
+    showError(cause instanceof Error ? cause.message : "Anmeldung fehlgeschlagen.");
+  });
 })();

@@ -174,16 +174,27 @@ const privacySections: LegalSection[] = [
   {
     id: "privacy-10",
     de: {
-      title: "Cookies und lokale Speicherung",
-      body: "<p>Ohne Anmeldung setzt Schaffa keine Cookies und speichert keine Daten im Browser. Bei der Anmeldung werden technisch notwendige Sitzungs-Cookies für das Schaffa-Konto und die Verwaltung sowie Pangolin-Cookies für den Verwaltungszugang verwendet. Hinzu kommen die Shoo-Anmeldeeinträge im Browserspeicher. Diese Speicherung ist für den ausdrücklich gewünschten Zugang nach § 25 Abs. 2 Nr. 2 TDDDG erforderlich. Rechtsgrundlage für die Verarbeitung zur Zugangssicherung ist Art. 6 Abs. 1 lit. f DSGVO.</p>",
+      title: "Reichweitenmessung und Fehlerüberwachung",
+      body: "<p>Umami wird vom Betreiber in Deutschland selbst gehostet. Erst nach Ihrer Einwilligung im Cookie-Banner erfasst Umami Besuche, Interaktionen und Leistung sowie maskierte Sitzungsaufzeichnungen und Heatmaps auf Schaffas eigenen Seiten, nicht auf veröffentlichten Inhalten. Rechtsgrundlage sind Art. 6 Abs. 1 lit. a DSGVO und § 25 Abs. 1 TDDDG. Sie können Ihre Einwilligung jederzeit über „Cookie-Einstellungen“ widerrufen.</p>\n<p>Auf dem Server werden Aufrufe veröffentlichter Inhalte und API-Aktionen zusammengefasst gezählt, ohne Cookies, IP-Adressen oder andere personenbezogene Daten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO; das berechtigte Interesse liegt darin, die Nutzung des Angebots zu verstehen.</p>\n<p>GlitchTip wird in Deutschland selbst gehostet und verarbeitet technische Fehlerberichte aus Browser und Server ohne Cookies oder Browserspeicher. Tokens, E-Mail-Adressen und URL-Parameter werden entfernt. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO; das berechtigte Interesse liegt in der Betriebssicherheit.</p>\n<p>Umami-Daten werden bis zu 10 Jahre aufbewahrt. Eine automatische Löschung ist nicht eingerichtet. GlitchTip-Fehlerberichte werden nach 90 Tagen gelöscht.</p>",
     },
     en: {
-      title: "Cookies and local storage",
-      body: "<p>Without sign-in, Schaffa does not set cookies or store data in your browser. Signing in uses technically necessary session cookies for the Schaffa account and administration, and Pangolin cookies for administrative access. Shoo sign-in entries are also stored in browser storage. This storage is necessary for the expressly requested access under Section 25(2) no. 2 TDDDG. The legal basis for access security processing is Art. 6(1)(f) GDPR.</p>",
+      title: "Analytics and error monitoring",
+      body: '<p>Umami is self-hosted by the operator in Germany. Only after you consent in the cookie banner does Umami collect visits, interactions and performance, as well as masked session recordings and heatmaps on Schaffa\'s own pages, not on published content. The legal basis is Art. 6(1)(a) GDPR and Section 25(1) TDDDG. You can withdraw consent at any time through "Cookie settings".</p>\n<p>Views of published content and API actions are counted in aggregate on the server, without cookies, IP addresses or other personal data. The legal basis is Art. 6(1)(f) GDPR; the legitimate interest is understanding how the service is used.</p>\n<p>GlitchTip is self-hosted in Germany and processes technical error reports from the browser and server without cookies or browser storage. Tokens, e-mail addresses and URL parameters are removed. The legal basis is Art. 6(1)(f) GDPR; the legitimate interest is operational security.</p>\n<p>Umami data is retained for up to 10 years. Automatic deletion is not configured. GlitchTip error reports are deleted after 90 days.</p>',
     },
   },
   {
     id: "privacy-11",
+    de: {
+      title: "Cookies und lokale Speicherung",
+      body: "<p>Ohne Anmeldung und ohne Auswahl im Cookie-Banner setzt Schaffa keine Cookies und speichert keine Daten im Browser. Nach Ihrer Auswahl speichert das technisch notwendige Cookie cc_cookie Ihre Banner-Entscheidung für sechs Monate. Umami setzt keine Cookies und liest lediglich eine optionale Opt-out-Einstellung. Bei der Anmeldung werden technisch notwendige Sitzungs-Cookies für das Schaffa-Konto und die Verwaltung sowie Pangolin-Cookies für den Verwaltungszugang verwendet. Hinzu kommen die Shoo-Anmeldeeinträge im Browserspeicher. Diese Speicherung ist für den ausdrücklich gewünschten Zugang und die gewählte Cookie-Einstellung nach § 25 Abs. 2 Nr. 2 TDDDG erforderlich. Rechtsgrundlage für die Verarbeitung zur Zugangssicherung ist Art. 6 Abs. 1 lit. f DSGVO.</p>",
+    },
+    en: {
+      title: "Cookies and local storage",
+      body: "<p>Without sign-in and without a choice in the cookie banner, Schaffa does not set cookies or store data in your browser. After your choice, the technically necessary cc_cookie cookie stores your banner decision for six months. Umami sets no cookies and only reads an optional opt-out flag. Signing in uses technically necessary session cookies for the Schaffa account and administration, and Pangolin cookies for administrative access. Shoo sign-in entries are also stored in browser storage. This storage is necessary for the expressly requested access and cookie preference under Section 25(2) no. 2 TDDDG. The legal basis for access security processing is Art. 6(1)(f) GDPR.</p>",
+    },
+  },
+  {
+    id: "privacy-12",
     de: {
       title: "Ihre Rechte",
       body: '<p>Sie haben gegenüber dem Verantwortlichen folgende Rechte hinsichtlich Ihrer personenbezogenen Daten:</p>\n<ul><li>Auskunft (Art. 15 DSGVO)</li><li>Berichtigung (Art. 16 DSGVO)</li><li>Löschung (Art. 17 DSGVO)</li><li>Einschränkung der Verarbeitung (Art. 18 DSGVO)</li><li>Datenübertragbarkeit (Art. 20 DSGVO)</li><li>Widerruf einer erteilten Einwilligung (Art. 7 Abs. 3 DSGVO): Sie können eine erteilte Einwilligung jederzeit widerrufen. Die Rechtmäßigkeit der Verarbeitung vor dem Widerruf bleibt unberührt.</li></ul>\n<p><strong>Widerspruchsrecht (Art. 21 DSGVO):</strong> Soweit eine Verarbeitung auf Art. 6 Abs. 1 lit. f DSGVO beruht, können Sie aus Gründen, die sich aus Ihrer besonderen Situation ergeben, jederzeit widersprechen.</p>\n<p>Zur Ausübung Ihrer Rechte genügt eine Nachricht an <a href="mailto:datenschutz-schaffa@heerlab.com">datenschutz-schaffa@heerlab.com</a>.</p>\n<p>Sie haben außerdem das Recht, sich bei einer Datenschutz-Aufsichtsbehörde zu beschweren, insbesondere in dem Mitgliedstaat Ihres gewöhnlichen Aufenthalts, Ihres Arbeitsplatzes oder des Orts des mutmaßlichen Verstoßes (Art. 77 DSGVO).</p>',
@@ -194,7 +205,7 @@ const privacySections: LegalSection[] = [
     },
   },
   {
-    id: "privacy-12",
+    id: "privacy-13",
     de: {
       title: "Pflicht zur Bereitstellung",
       body: "<p>Sie sind nicht verpflichtet, personenbezogene Daten bereitzustellen. Ohne die technisch notwendigen Verbindungsdaten kann die Website jedoch nicht ausgeliefert werden, und ohne Anmeldung sind die geschützten Bereiche nicht nutzbar.</p>",
@@ -205,7 +216,7 @@ const privacySections: LegalSection[] = [
     },
   },
   {
-    id: "privacy-13",
+    id: "privacy-14",
     de: {
       title: "Änderungen",
       body: "<p>Diese Datenschutzerklärung wird angepasst, wenn sich die Website oder die Rechtslage ändert. Es gilt die jeweils hier veröffentlichte Fassung.</p>",

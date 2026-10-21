@@ -14,6 +14,55 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  sourcemaps:
+    needs: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build and inject deterministic debug IDs
+        run: pnpm build:server && pnpm exec sentry-cli sourcemaps inject dist
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Verify debug IDs against the published image
+        env:
+          RELEASE_IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          image_dist="$(mktemp -d)"
+          container=""
+          trap 'if [ -n "$container" ]; then docker rm -v "$container"; fi; rm -rf "$image_dist"' EXIT
+          docker pull "$RELEASE_IMAGE"
+          container="$(docker create "$RELEASE_IMAGE")"
+          docker cp "$container:/app/dist/." "$image_dist/"
+          bash scripts/ci-check-debug-ids.sh dist "$image_dist"
+      - name: Upload server maps and finalize release
+        env:
+          SENTRY_URL: https://glitchtip.heerlab.com
+          SENTRY_ORG: beasty-rabbit
+          SENTRY_PROJECT: schaffa
+          SENTRY_AUTH_TOKEN: ${{ secrets.GLITCHTIP_AUTH_TOKEN }}
+        run: |
+          export SENTRY_RELEASE="schaffa@$(node -p 'require("./package.json").version')"
+          pnpm exec sentry-cli releases new "$SENTRY_RELEASE"
+          pnpm exec sentry-cli sourcemaps upload --release "$SENTRY_RELEASE" dist
+          pnpm exec sentry-cli releases finalize "$SENTRY_RELEASE"
+
   arc-smoke:
     if: github.event_name == 'workflow_dispatch'
     runs-on: arc-schaffa

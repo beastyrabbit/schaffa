@@ -6,3 +6,5 @@ data/
 .DS_Store
 *.log
 coverage/
+public/vendor/
+.test-dist/

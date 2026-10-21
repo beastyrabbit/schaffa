@@ -93,7 +93,56 @@ function assertPrivacyPolicy(html: string, german: boolean): void {
   assert.equal(html.split(backupSentence).length - 1, 1);
   const hosting = /<section id="privacy-3"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
   assert.ok(hosting.includes(backupSentence));
-  assert.doesNotMatch(html, /Longhorn|Velero|Umami|GlitchTip/);
+  assert.doesNotMatch(html, /Longhorn|Velero/);
+  const analytics = /<section id="privacy-10"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+  for (const text of german
+    ? [
+        "Reichweitenmessung und Fehlerüberwachung",
+        "Umami",
+        "GlitchTip",
+        "Deutschland",
+        "Cookie-Einstellungen",
+        "Art. 6 Abs. 1 lit. a DSGVO",
+        "§ 25 Abs. 1 TDDDG",
+        "Art. 6 Abs. 1 lit. f DSGVO",
+        "bis zu 10 Jahre",
+        "90 Tagen",
+        "nicht auf veröffentlichten Inhalten",
+        "ohne Cookies, IP-Adressen oder andere personenbezogene Daten",
+        "Tokens, E-Mail-Adressen und URL-Parameter werden entfernt",
+      ]
+    : [
+        "Analytics and error monitoring",
+        "Umami",
+        "GlitchTip",
+        "Germany",
+        "Cookie settings",
+        "Art. 6(1)(a) GDPR",
+        "Section 25(1) TDDDG",
+        "Art. 6(1)(f) GDPR",
+        "up to 10 years",
+        "90 days",
+        "not on published content",
+        "without cookies, IP addresses or other personal data",
+        "Tokens, e-mail addresses and URL parameters are removed",
+      ])
+    assert.ok(analytics.includes(text), `Analytics disclosure must include ${text}`);
+  assert.equal(html.match(/id="privacy-10"/g)?.length, 1);
+  const cookies = /<section id="privacy-11"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+  for (const text of german
+    ? [
+        "Ohne Anmeldung und ohne Auswahl im Cookie-Banner",
+        "cc_cookie",
+        "sechs Monate",
+        "Umami setzt keine Cookies",
+      ]
+    : [
+        "Without sign-in and without a choice in the cookie banner",
+        "cc_cookie",
+        "six months",
+        "Umami sets no cookies",
+      ])
+    assert.ok(cookies.includes(text), `Cookie disclosure must include ${text}`);
   assert.doesNotMatch(
     html,
     /geprüft|verifiziert|beobachtet|steht aus|verified|observed|checked|outstanding/i,
@@ -140,6 +189,32 @@ void test("legal links cover landing, sign-in, admin, skills, API reference and 
   assert.equal(admin.statusCode, 200);
   assert.match(admin.body, /Publikationen/);
   assertFooter(admin.body, true);
+});
+
+void test("telemetry uses the existing legal footer and head on every legal route, excluding admin analytics", async () => {
+  config.telemetry = {
+    ...config.telemetry,
+    umamiUrl: "https://metrics.invalid",
+    umamiWebsiteId: "4180ec33-490a-4f7b-a628-97ccf816f874",
+    glitchtipDsn: "https://public@errors.invalid/1",
+  };
+  for (const url of [...legalRoutes, "/", "/skills", "/account", "/admin"]) {
+    const response = await app.inject({ url, headers: host });
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /name="schaffa-telemetry"/);
+    assert.equal(response.body.match(/data-schaffa-legal/g)?.length, 1);
+    assert.doesNotMatch(response.body, /telemetry-footer/);
+    if (url === "/admin") {
+      assert.doesNotMatch(response.body, /data-cc=/);
+      assert.doesNotMatch(String(response.headers["content-security-policy"]), /metrics.invalid/);
+    } else {
+      assert.match(response.body, /data-cc="show-preferencesModal"/);
+      assert.match(String(response.headers["content-security-policy"]), /metrics.invalid/);
+    }
+  }
+  config.telemetry = { ...config.telemetry, umamiUrl: "", umamiWebsiteId: "" };
+  const errorOnly = await app.inject({ url: "/privacy", headers: host });
+  assert.doesNotMatch(errorOnly.body, /data-cc=/);
 });
 
 void test("static page and raw responses stay byte-identical without injected legal chrome", async () => {

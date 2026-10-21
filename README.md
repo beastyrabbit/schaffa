@@ -14,6 +14,12 @@ npx schaffa upload file.html
 
 The command prints a public URL. Deployment, recording, and API details live in `docs/`.
 
+Optional self-hosted Umami analytics, replay and heatmaps require consent on
+Schaffa's own public UI. GlitchTip reports scrubbed application errors. Published
+HTML stays byte-identical and receives no tracking scripts. Configuration and
+retention requirements are in [deployment](docs/deployment.md); `/privacy`
+explains processing and provides Cookie settings.
+
 - Source: [github.com/beastyrabbit/schaffa](https://github.com/beastyrabbit/schaffa)
 - Image: `ghcr.io/beastyrabbit/schaffa:<version>` (`linux/amd64`)
 - License: MIT

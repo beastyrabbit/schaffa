@@ -57,6 +57,10 @@ legacyDb.close();
 const bootstrapToken = `sfa_${"a".repeat(43)}`;
 const restoreScanner = await installClamGateFixture(dataDir);
 process.env.SCHAFFA_DATA_DIR = dataDir;
+// Tests must never inherit a real collection endpoint from the developer shell.
+delete process.env.UMAMI_URL;
+delete process.env.UMAMI_WEBSITE_ID;
+delete process.env.GLITCHTIP_DSN;
 process.env.SCHAFFA_TOKEN_PEPPER = "test-only-pepper-with-enough-entropy";
 process.env.SCHAFFA_BOOTSTRAP_TOKEN = bootstrapToken;
 process.env.SCHAFFA_BASE_URL = "https://schaffa.dev";

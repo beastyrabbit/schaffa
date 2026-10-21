@@ -205,8 +205,8 @@ export function renderAccount(input: {
     .join("");
   return layout(
     "Konto",
-    `<header class="topbar"><a class="wordmark" href="/account">Schaffa</a><div class="identity"><span>${escapeHtml(input.user.displayName)}</span><form method="post" action="/account/logout"><button class="quiet" type="submit">Abmelden</button></form></div></header>
-    <main class="workspace account-workspace">
+    `<header class="topbar"><a class="wordmark" href="/account">Schaffa</a><div class="identity rr-block"><span>${escapeHtml(input.user.displayName)}</span><form method="post" action="/account/logout"><button class="quiet" type="submit">Abmelden</button></form></div></header>
+    <main class="workspace account-workspace rr-block">
       <div class="page-heading"><div><h1>Dein Konto</h1><p>Publikationen ansehen, löschen und ihre Zugänge verwalten.</p></div></div>
       ${input.newToken ? renderTokenSetup(input.newToken) : ""}
       <nav class="tabs" aria-label="Kontobereiche"><a href="#pages">Seiten <span>${input.pages.length}</span></a><a href="#files">Dateien <span>${input.files.length}</span></a><a href="#tokens">Tokens <span>${input.tokens.length}</span></a></nav>
@@ -219,7 +219,7 @@ export function renderAccount(input: {
 }
 
 function renderTokenSetup(token: string, title = "Token jetzt einrichten"): string {
-  return `<aside class="token-reveal" data-token-reveal>
+  return `<aside class="token-reveal rr-block" data-token-reveal>
     <div class="token-reveal-heading"><div><strong>${escapeHtml(title)}</strong><p>Dieser Wert wird nur einmal angezeigt.</p></div><button class="copy-button" type="button" data-copy="[data-token-value]">Token kopieren</button></div>
     <code class="token-value" data-token-value>${escapeHtml(token)}</code>
     <div class="token-setup">
@@ -380,7 +380,8 @@ function layout(
   <meta name="theme-color" content="#20211e">
   ${extraHead}
   <title>${escapeHtml(title)} · Schaffa</title>
-  <style>${styles}${extraStyles}${legalFooterStyles}</style>
+  <style>${styles}${extraStyles}${legalFooterStyles}
+  </style>
 </head>
 <body>${content}${legalFooter(language)}${scripts}</body>
 </html>`;
