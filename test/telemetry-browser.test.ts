@@ -152,6 +152,19 @@ test("built app gates Umami, stops recorder on withdrawal, sends scrubbed Glitch
   await page.setViewport({ width: 1280, height: 900 });
   await page.goto(`${origin}/?secret=private#fragment`);
   await page.waitForSelector("#cc-main .cm", { visible: true });
+  assert.equal(
+    await page.$eval("#cc-main .cm__title", (el) => el.textContent),
+    "Your privacy choices",
+  );
+  assert.equal(
+    await page.$("#cc-main .cm__desc a"),
+    null,
+    "no privacy link on non-schaffa.dev hosts",
+  );
+  assert.equal(
+    await page.$eval('[data-cc="show-preferencesModal"]', (el) => el.getAttribute("href")),
+    "#cookie-settings",
+  );
   await page.waitForFunction(() => Boolean(window.Sentry));
   for (
     let attempt = 0;
@@ -244,7 +257,18 @@ test("built app gates Umami, stops recorder on withdrawal, sends scrubbed Glitch
   const recorderRequests = umamiRequests.filter((url) => url === "/recorder.js").length;
   await page.goto(`${origin}/account`);
   await page.waitForFunction(() => Boolean(window.CookieConsent));
+  await page.click('[data-cc="show-preferencesModal"]');
+  await page.waitForSelector("#cc-main .pm", { visible: true });
+  assert.equal(
+    await page.$eval("#cc-main .pm__title", (el) => el.textContent),
+    "Cookie-Einstellungen",
+  );
+  assert.equal(
+    await page.$eval('#cc-main .pm [data-role="all"]', (el) => el.textContent),
+    "Analyse akzeptieren",
+  );
   await page.evaluate(() => window.CookieConsent.acceptCategory("all"));
+  await page.evaluate(() => window.CookieConsent.hidePreferences());
   await page.waitForFunction(() => Boolean(window.umami));
   assert.equal(umamiRequests.filter((url) => url === "/recorder.js").length, recorderRequests);
   await page.type(

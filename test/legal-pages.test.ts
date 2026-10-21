@@ -202,6 +202,7 @@ void test("telemetry uses the existing legal footer and head on every legal rout
     const response = await app.inject({ url, headers: host });
     assert.equal(response.statusCode, 200);
     assert.match(response.body, /name="schaffa-telemetry"/);
+    assert.match(response.body, /&quot;legalPages&quot;:true/);
     assert.equal(response.body.match(/data-schaffa-legal/g)?.length, 1);
     assert.doesNotMatch(response.body, /telemetry-footer/);
     if (url === "/admin") {
@@ -291,6 +292,27 @@ void test("self-hosted instances hide legal routes and every generated footer", 
     renderScanStatusPage({ status: "pending", message: null }),
     /data-schaffa-legal/,
   );
+});
+
+void test("self-hosted telemetry exposes no legal pages and keeps cookie settings on the current page", {}, async (t) => {
+  const original = { baseHost: config.baseHost, baseUrl: config.baseUrl };
+  t.after(() => Object.assign(config, original));
+  config.baseHost = "publish.example.com";
+  config.baseUrl = "https://publish.example.com";
+  config.telemetry = {
+    ...config.telemetry,
+    umamiUrl: "https://metrics.invalid",
+    umamiWebsiteId: "4180ec33-490a-4f7b-a628-97ccf816f874",
+  };
+  const headers = { host: config.baseHost };
+  for (const url of ["/", "/account"]) {
+    const response = await app.inject({ url, headers });
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /&quot;legalPages&quot;:false/);
+    assert.match(response.body, /href="#cookie-settings" data-cc="show-preferencesModal"/);
+    assert.doesNotMatch(response.body, /href="\/(?:privacy|datenschutz)/);
+  }
+  for (const url of legalRoutes) assert.equal((await app.inject({ url, headers })).statusCode, 404);
 });
 
 function assertFooter(html: string, german: boolean): void {

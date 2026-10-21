@@ -220,6 +220,79 @@ test("client consent uses safe GET navigation and excludes account and secret pa
   }
 });
 
+test("consent follows the document language and links only to enabled legal pages", async () => {
+  interface Translation {
+    consentModal: { description: string; acceptAllBtn: string; acceptNecessaryBtn: string };
+    preferencesModal: { title: string; savePreferencesBtn: string; closeIconLabel: string };
+  }
+  for (const lang of ["de", "de-DE", "en"]) {
+    for (const legalPages of [true, false]) {
+      let language: { default: string; translations: Record<string, Translation> } | undefined;
+      vm.runInNewContext(
+        readFileSync(new URL("../public/scripts/telemetry.js", import.meta.url), "utf8"),
+        {
+          setTimeout,
+          location: { hostname: "schaffa.dev", pathname: "/", hash: "" },
+          window: {
+            addEventListener() {},
+            CookieConsent: {
+              run: async (options: { language: typeof language }) => {
+                language = options.language;
+              },
+            },
+          },
+          document: {
+            readyState: "complete",
+            documentElement: { lang },
+            addEventListener() {},
+            querySelector: () => ({
+              getAttribute: () =>
+                JSON.stringify({
+                  baseHost: "schaffa.dev",
+                  umamiUrl: "https://metrics.invalid",
+                  consentJs: "/consent.js",
+                  legalPages,
+                }),
+            }),
+            createElement: () => ({ setAttribute() {} }),
+            head: { append: (script: { onload(): void }) => script.onload() },
+          },
+        },
+      );
+      await delay(0);
+      assert.ok(language);
+      const german = lang.startsWith("de");
+      assert.equal(language.default, german ? "de" : "en");
+      const selected = language.translations[language.default];
+      assert.ok(selected);
+      assert.equal(
+        selected.preferencesModal.title,
+        german ? "Cookie-Einstellungen" : "Cookie settings",
+      );
+      assert.equal(
+        selected.consentModal.acceptAllBtn,
+        german ? "Analyse akzeptieren" : "Accept analytics",
+      );
+      assert.equal(
+        selected.consentModal.acceptNecessaryBtn,
+        german ? "Nur notwendige" : "Necessary only",
+      );
+      assert.equal(
+        selected.preferencesModal.savePreferencesBtn,
+        german ? "Auswahl speichern" : "Save preferences",
+      );
+      assert.equal(selected.preferencesModal.closeIconLabel, german ? "Schließen" : "Close");
+      if (legalPages)
+        assert.ok(
+          selected.consentModal.description.includes(
+            `href="/${german ? "datenschutz" : "privacy"}#privacy-10"`,
+          ),
+        );
+      else assert.doesNotMatch(selected.consentModal.description, /<a|href=|privacy-10/);
+    }
+  }
+});
+
 test("account client shows server rejection without reporting it and reports network exceptions", async () => {
   for (const networkFailure of [false, true]) {
     const reports: unknown[] = [];

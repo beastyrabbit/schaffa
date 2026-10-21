@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { legalPagesEnabled } from "./legal-footer.js";
 
 const require = createRequire(import.meta.url);
 const consentDirectory = path.dirname(require.resolve("vanilla-cookieconsent"));
@@ -32,6 +33,7 @@ export function telemetryHead(): string {
   const client = {
     ...config.telemetry,
     baseHost: config.baseHost,
+    legalPages: legalPagesEnabled(),
     consentJs: telemetryAssets.consentJs.url,
     sentryJs: telemetryAssets.sentry.url,
   };

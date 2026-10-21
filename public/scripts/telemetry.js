@@ -195,12 +195,12 @@
             onConsent: sync,
             onChange: sync,
             language: {
-              default: "en",
+              default: document.documentElement?.lang.toLowerCase().startsWith("de") ? "de" : "en",
               translations: {
                 en: {
                   consentModal: {
                     title: "Your privacy choices",
-                    description: `Necessary services keep sign-in and error reporting working. With your permission, Umami measures usage, performance, session replay and heatmaps. <a href="/${document.documentElement?.lang === "de" ? "datenschutz" : "privacy"}#privacy-10">Privacy policy</a>`,
+                    description: `Necessary services keep sign-in and error reporting working. With your permission, Umami measures usage, performance, session replay and heatmaps.${config.legalPages ? ' <a href="/privacy#privacy-10">Privacy policy</a>' : ""}`,
                     acceptAllBtn: "Accept analytics",
                     acceptNecessaryBtn: "Necessary only",
                     showPreferencesBtn: "Cookie settings",
@@ -222,6 +222,36 @@
                         title: "Analytics, replay and heatmaps",
                         description:
                           "Self-hosted Umami measures visits, actions and performance and records masked sessions and click heatmaps. Umami keeps its session cache in memory; it reads the optional umami.disabled localStorage preference but this site never writes it. No analytics cookie or other persistent analytics storage is created.",
+                        linkedCategory: "analytics",
+                      },
+                    ],
+                  },
+                },
+                de: {
+                  consentModal: {
+                    title: "Ihre Datenschutzeinstellungen",
+                    description: `Notwendige Dienste ermöglichen die Anmeldung und Fehlerüberwachung. Mit Ihrer Einwilligung erfasst Umami Besuche, Interaktionen und Leistung sowie maskierte Sitzungsaufzeichnungen und Heatmaps.${config.legalPages ? ' <a href="/datenschutz#privacy-10">Datenschutzerklärung</a>' : ""}`,
+                    acceptAllBtn: "Analyse akzeptieren",
+                    acceptNecessaryBtn: "Nur notwendige",
+                    showPreferencesBtn: "Cookie-Einstellungen",
+                  },
+                  preferencesModal: {
+                    title: "Cookie-Einstellungen",
+                    acceptAllBtn: "Analyse akzeptieren",
+                    acceptNecessaryBtn: "Nur notwendige",
+                    savePreferencesBtn: "Auswahl speichern",
+                    closeIconLabel: "Schließen",
+                    sections: [
+                      {
+                        title: "Notwendige Dienste",
+                        description:
+                          "Die Shoo-Anmeldung und das Schaffa-Sitzungscookie authentifizieren Ihr Konto. cc_cookie speichert Ihre Auswahl im Cookie-Banner für sechs Monate (182 Tage). Die Fehlerüberwachung mit GlitchTip verwendet keine Cookies, localStorage oder sessionStorage.",
+                        linkedCategory: "necessary",
+                      },
+                      {
+                        title: "Reichweitenmessung, Sitzungsaufzeichnungen und Heatmaps",
+                        description:
+                          "Das selbst gehostete Umami erfasst Besuche, Interaktionen und Leistung sowie maskierte Sitzungsaufzeichnungen und Klick-Heatmaps. Umami hält seinen Sitzungscache im Arbeitsspeicher und liest die optionale Einstellung umami.disabled aus localStorage. Schaffa schreibt diese Einstellung nicht. Es werden keine Analyse-Cookies oder anderen dauerhaften Analysedaten im Browser gespeichert.",
                         linkedCategory: "analytics",
                       },
                     ],
