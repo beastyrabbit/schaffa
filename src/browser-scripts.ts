@@ -5,6 +5,19 @@ declare global {
     userAgentData?: { platform?: string };
   }
   interface Window {
+    CookieConsent: typeof import("vanilla-cookieconsent");
+    Sentry?: typeof import("@sentry/browser");
+    SchaffaScrub?: typeof import("./telemetry-scrub-core.js");
+    umami?: { track(name: string, data?: Record<string, string | boolean>): void };
+    schaffaTelemetry?: {
+      track(name: string, data?: Record<string, string | boolean>): void;
+      report(cause: unknown): void;
+      scrub(value: unknown): unknown;
+    };
+    schaffaUmamiBeforeSend?: (
+      type: string,
+      payload: Record<string, unknown>,
+    ) => Record<string, unknown> | null;
     Shoo?: {
       clearIdentity(): void;
       getIdentity(): { token?: string } | null;

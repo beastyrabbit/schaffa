@@ -9,7 +9,14 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!!**/dist", "!!data", "!!node_modules", "!!coverage"]
+    "includes": [
+      "**",
+      "!!**/dist",
+      "!!data",
+      "!!node_modules",
+      "!!coverage",
+      "!!.claude/settings.json"
+    ]
   },
   "formatter": {
     "enabled": true,

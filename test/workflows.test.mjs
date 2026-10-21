@@ -14,6 +14,28 @@ async function fixture(t) {
   return directory;
 }
 
+test("source-map upload guard accepts equal debug ID sets and rejects mismatches or missing IDs", {}, async (t) => {
+  const directory = await fixture(t);
+  const rebuilt = path.join(directory, "rebuilt");
+  const image = path.join(directory, "image");
+  await mkdir(rebuilt);
+  await mkdir(image);
+  const first = "//# debugId=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\n";
+  const second = "//# debugId=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\n";
+  await writeFile(path.join(rebuilt, "server.js"), first + second);
+  await writeFile(path.join(image, "server.js"), second + first + first);
+  const guard = new URL("scripts/ci-check-debug-ids.sh", root).pathname;
+  await exec("bash", [guard, rebuilt, image]);
+  await writeFile(path.join(image, "server.js"), first);
+  await assert.rejects(exec("bash", [guard, rebuilt, image]));
+  await writeFile(path.join(image, "server.js"), "// no debug ID\n");
+  // Maps must not satisfy the guard when shipped JavaScript has no debug IDs.
+  await writeFile(path.join(image, "server.js.map"), first + second);
+  await assert.rejects(exec("bash", [guard, rebuilt, image]));
+  await writeFile(path.join(rebuilt, "server.js"), "// no debug ID\n");
+  await assert.rejects(exec("bash", [guard, rebuilt, image]));
+});
+
 test("container tags are promoted only after the exact candidate passes its scan", {}, async (t) => {
   const directory = await fixture(t);
   await writeFile(

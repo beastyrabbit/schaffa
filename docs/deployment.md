@@ -46,6 +46,7 @@ Set `SCHAFFA_BASE_URL=https://schaffa.dev`. Keep Pangolin authentication enabled
 - `auth/*`
 - `shoo/*`
 - `skills`
+- `privacy`
 - `skills/*`
 - `skills/*/*`
 - `llm.txt`
@@ -61,7 +62,7 @@ Set `SCHAFFA_BASE_URL=https://schaffa.dev`. Keep Pangolin authentication enabled
 
 Pangolin matches each path segment separately, so the additional patterns cover the landing page, OpenAPI metadata, page versions, `/raw`, API operations containing an ID or slug, and the Shoo user login flow. Requests to `/admin` therefore continue to Pangolin authentication. API clients, user accounts, public pages, and files remain directly reachable on the same hostname. Pangolin evaluates rules by priority; do not add a broader bypass rule that also matches `/admin`.
 
-The four legal pages are self-contained server-rendered HTML with inline CSS and no JavaScript or asset dependencies. Add only those four exact bypass paths for them, without wildcards. Each sends both a noindex meta tag and an X-Robots-Tag header.
+The four legal pages are self-contained server-rendered HTML with inline CSS. Optional telemetry adds first-party consent and error-reporting assets; the legal text remains readable without JavaScript. Add only those four exact bypass paths for them, without wildcards. Each sends both a noindex meta tag and an X-Robots-Tag header.
 
 The health check should normally stay on the private backend at `/healthz`; it does not need a public Pangolin route.
 
@@ -95,6 +96,83 @@ Keep the pepper and any active bootstrap value in the approved secret manager an
 The admin UI provides immediate page/file takedown, a publishing lockdown, an instance-wide Interactive switch, and per-user Interactive grants. Administrative operations are intentionally unavailable through the public API. Lockdown stops all new uploads and updates but intentionally leaves public reads, content deletion, token revocation, and the setting itself available for recovery. Disabling Interactive globally or removing a user's grant blocks new execution loads of existing interactive pages; removing the grant also revokes that user's interactive tokens. Code already loaded in an open tab continues until that tab is closed or reloaded, so incident response should also remove the page when containment cannot wait. Admin logout only removes the eight-hour browser cookie; revoke the underlying token when it may be compromised.
 
 The user dashboard uses Shoo for Google OAuth/PKCE and stores its own HMAC-hashed, seven-day HttpOnly sessions. The admin can independently disable new local signups, disable all logins (which also clears active sessions), and delete users. User deletion revokes their agent tokens and sessions but deliberately leaves already published content available for a separate, auditable admin takedown. As of this integration Shoo labels itself an early work in progress; keep `SHOO_BASE_URL` and `SHOO_ISSUER` configurable and review Shoo's release/security status before a production rollout.
+
+## Optional analytics and error reporting
+
+Set `UMAMI_URL` to the self-hosted collection origin and `UMAMI_WEBSITE_ID` to
+its website UUID. Set `GLITCHTIP_DSN` to the public project DSN. Leave all three
+unset for local development and preview builds; no collection SDK then starts.
+`SCHAFFA_ENVIRONMENT` defaults to `production` with `NODE_ENV=production`, otherwise
+`development`. `SENTRY_RELEASE` defaults to `schaffa@<package.json version>`;
+the release upload job uses that version, so keep the default in production.
+`GLITCHTIP_TRACES_SAMPLE_RATE` defaults to `0.1` and accepts values from 0 to 1.
+A nightly kub-homelab job deletes Umami analytics data after 25 months, session
+replays and heatmap recordings after 30 days, and GlitchTip error events after
+90 days. The bilingual privacy policy states these periods. The legal pages and
+controller details remain specific to schaffa.dev.
+The privacy text needs human legal review before rollout.
+
+Own public UI loads Umami only after analytics consent. Normal page loads cover
+navigation because Schaffa is a multi-page application. The deployed Umami 3
+tracker supports `data-website-id`, `data-domains`, `data-exclude-search`,
+`data-exclude-hash`, `data-before-send`, `data-performance`, and `data-do-not-track`;
+these were checked against its deployed `script.js`. Outbound links are collected
+by a small first-party handler because that script has no outbound-link attribute.
+The recorder only accepts website and host attributes. It fetches website settings
+from `/api/websites/<website-id>/recorder`, which must be publicly reachable with
+appropriate CORS. Enable replay and heatmaps in those settings and select strict
+masking. All inputs are masked even in moderate mode; rrweb's `rr-block` class
+locally excludes account content, identity and token displays. No recorder loads
+on account pages, token-reveal pages or URLs containing queries or fragments.
+Consent withdrawal clears the in-memory Umami session and navigates with a GET to
+remove recorder observers and suppress its unload flush. The only storage Schaffa's
+telemetry writes is `cc_cookie`, after a banner choice, expiring after six months
+(182 days). Umami reads, but Schaffa
+does not write, the optional `umami.disabled` localStorage preference.
+
+Published HTML, interactive runs, raw versions, files and guide viewers receive
+no telemetry injection. Their existing CSPs are unchanged. Successful GET 200
+responses count as aggregate server views; HEAD, partial responses, 304, scan
+status endpoints and obvious bots do not. Published presentations use the same
+static HTML transport as pages and are classified by Marp's `data-marpit-svg`
+marker. Server events contain public route paths and
+bounded categorical properties only, with no visitor headers or identifiers.
+The fixed User-Agent is `Schaffa/1.0 (aggregate publication metrics)`. Upstream
+Umami's `/api/send` uses `isbot` and accepts this product/version User-Agent;
+the service sees the application's egress IP, never the visitor's. The transport
+allows eight concurrent requests, a 1.5-second timeout, no redirects and no retries.
+Failures and capacity drops are counted. `NODE_DEBUG=schaffa:telemetry` enables
+failure diagnostics without payloads or visitor data. A slow collector cannot block serving.
+
+GlitchTip loads lazily on own UI, including admin, with an early bounded error
+queue. Admin never loads Umami or the banner. Sentry SDK 11 replaced
+`sendDefaultPii` with `dataCollection`; user info, cookies, headers, bodies, queries,
+database values, AI inputs/outputs and local variables are explicitly disabled.
+Browser integrations are an explicit allowlist without BrowserSession, replay,
+feedback or persistent trace linking. `linkPreviousTrace: 'off'` prevents
+sessionStorage writes. Error, breadcrumb and trace payloads are scrubbed again.
+Static transaction envelopes are used for GlitchTip compatibility.
+`POST /admin/api/telemetry-test` requires the existing admin cookie and emits
+`Schaffa GlitchTip test error — safe to ignore` for operator verification.
+
+The official Sentry npm package does not ship its CDN bundles. An esbuild step
+creates a minified SDK asset with tracing and without replay or feedback, plus
+the browser-safe scrubber shared with the server. The UI scripts remain unbundled
+and unminified. Runtime serves these assets and CookieConsent's npm dist JS/CSS
+under content-hashed, immutable first-party URLs. The browser SDK is a build
+dependency; its generated asset stays in the runtime image. No vendor maps are exposed. Docker injects server
+debug IDs offline after tsc, then deletes all `dist/**/*.js.map` files before
+copying `/app/dist` into the runtime image. The SDK uses the retained debug IDs;
+runtime does not need local maps. Do not enable Node's `--enable-source-maps`.
+
+After image publishing, the `ubuntu-latest` tag job rebuilds the server with maps
+and injects debug IDs. It authenticates to GHCR with its job token, extracts
+`/app/dist` from `ghcr.io/<repository>:sha-<commit>`, and fails before upload if
+the image's set of debug IDs differs from the rebuild's or either set is empty.
+It then creates `schaffa@<version>`, uploads the rebuilt maps, and finalizes the
+release through `https://glitchtip.heerlab.com`. Only the required upload and
+release routes bypass SSO; do not run `set-commits`. The upload token is the
+existing `GLITCHTIP_AUTH_TOKEN` repository secret and never enters the image.
 
 ## Docker Compose
 

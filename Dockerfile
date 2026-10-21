@@ -7,7 +7,10 @@ RUN pnpm install --frozen-lockfile
 COPY tsconfig.json tsconfig.build.json biome.json ./
 COPY src ./src
 COPY public ./public
-RUN pnpm build:server && CI=true pnpm prune --prod
+COPY scripts/build-telemetry.mjs ./scripts/build-telemetry.mjs
+RUN pnpm build:server && pnpm exec sentry-cli sourcemaps inject dist \
+    && find dist -type f -name '*.js.map' -delete \
+    && CI=true pnpm prune --prod
 
 FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS production-dependencies
 WORKDIR /app
@@ -35,4 +38,4 @@ RUN apk add --upgrade --no-cache 'libcrypto3>=3.5.8-r0' 'libssl3>=3.5.8-r0' \
 USER node
 EXPOSE 3000
 VOLUME ["/data"]
-CMD ["node", "dist/server.js"]
+CMD ["node", "--import", "./dist/instrumentation.js", "dist/server.js"]

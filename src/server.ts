@@ -1,3 +1,5 @@
+import "./instrumentation.js";
+
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import cookie from "@fastify/cookie";
@@ -5,6 +7,7 @@ import formbody from "@fastify/formbody";
 import type { MultipartFile } from "@fastify/multipart";
 import multipart from "@fastify/multipart";
 import scalarApiReference from "@scalar/fastify-api-reference";
+import { setupFastifyErrorHandler } from "@sentry/node";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { selectAdminPublications } from "./admin-publications.js";
 import {
@@ -75,6 +78,14 @@ import { getInstanceSettings, updateInstanceSettings } from "./settings.js";
 import { type ShooTokenVerifier, verifyShooToken } from "./shoo-auth.js";
 import { openStoredFile, sha256 } from "./storage.js";
 import {
+  captureBackgroundError,
+  publishedHtmlKind,
+  recordErrorTelemetry,
+  recordResponseTelemetry,
+} from "./telemetry.js";
+import { telemetryAssets, telemetryHead } from "./telemetry-assets.js";
+import { ownUiCsp } from "./telemetry-csp.js";
+import {
   type AdminFilters,
   accountClientScript,
   adminFiltersClientScript,
@@ -107,6 +118,7 @@ const adminCookie = config.cookieSecure ? "__Secure-schaffa_admin" : "schaffa_ad
 const userCookie = config.cookieSecure ? "__Secure-schaffa_user" : "schaffa_user";
 const scalarNonce = randomBytes(24).toString("base64");
 const publicFile = (path: string) => new URL(`../public/${path}`, import.meta.url);
+const interactiveInterstitials = new WeakSet<FastifyReply>();
 const pageCsp = [
   "default-src 'none'",
   "img-src 'self' data:",
@@ -146,6 +158,7 @@ export function buildServer(
   options: { verifyShooToken?: ShooTokenVerifier; scanIntervalMs?: number } = {},
 ) {
   const shooVerifier = options.verifyShooToken || verifyShooToken;
+  const responseKinds = new WeakMap<FastifyRequest, string>();
   if (!config.tokenPepper) {
     throw new Error("SCHAFFA_TOKEN_PEPPER is required.");
   }
@@ -168,6 +181,7 @@ export function buildServer(
         : randomUUID();
     },
   });
+  if (config.telemetry.glitchtipDsn) setupFastifyErrorHandler(app);
   if (bootstrap.active) {
     app.log.warn(
       { created: bootstrap.created },
@@ -188,12 +202,14 @@ export function buildServer(
   const cleanupTimer = setInterval(
     () =>
       void purgeRetainedAnonymousPages().catch((error: unknown) => {
+        captureBackgroundError(error);
         app.log.error({ err: error }, "anonymous page retention cleanup failed");
       }),
     60 * 60 * 1000,
   );
   cleanupTimer.unref();
   void purgeRetainedAnonymousPages().catch((error: unknown) => {
+    captureBackgroundError(error);
     app.log.error({ err: error }, "initial anonymous page retention cleanup failed");
   });
 
@@ -209,6 +225,7 @@ export function buildServer(
       }
     })()
       .catch((error: unknown) => {
+        captureBackgroundError(error);
         app.log.error({ err: error }, "pending virus scan failed");
       })
       .finally(() => {
@@ -254,7 +271,65 @@ export function buildServer(
     ) {
       return withLegalFooter(payload);
     }
+    const pathname = request.url.split("?", 1)[0] || "/";
+    if (
+      pathname.startsWith("/p/") &&
+      reply.statusCode === 200 &&
+      (typeof payload === "string" || Buffer.isBuffer(payload))
+    )
+      responseKinds.set(request, publishedHtmlKind(payload));
+    const ownUi =
+      reply.statusCode >= 400 ||
+      /^(?:\/$|\/(?:skills|impressum|datenschutz|legal-notice|privacy)$|\/account(?:\/|$)|\/admin(?:\/|$)|\/shoo\/callback$)/.test(
+        pathname,
+      );
+    if (
+      ownUi &&
+      rawRequestHostname(request.headers.host) === config.baseHost &&
+      typeof payload === "string" &&
+      String(reply.getHeader("content-type")).includes("text/html")
+    ) {
+      let html = payload;
+      if (config.telemetry.umamiUrl || config.telemetry.glitchtipDsn) {
+        reply.header(
+          "Content-Security-Policy",
+          ownUiCsp(
+            String(reply.getHeader("content-security-policy") || "default-src 'none'"),
+            pathname.startsWith("/admin"),
+          ),
+        );
+        html = html.replace(
+          "</head>",
+          `${telemetryHead(request.routeOptions.url, reply.statusCode)}</head>`,
+        );
+      }
+      if (pathname.startsWith("/admin"))
+        html = html.replace(/<a href="[^"]*" data-cc="show-preferencesModal">[^<]*<\/a>/, "");
+      return html;
+    }
     return payload;
+  });
+
+  app.addHook("onResponse", async (request, reply) => {
+    recordResponseTelemetry(
+      request,
+      reply,
+      responseKinds.get(request) || "page",
+      interactiveInterstitials.has(reply),
+    );
+  });
+
+  for (const asset of Object.values(telemetryAssets)) {
+    app.get(asset.url, async (_request, reply) =>
+      reply
+        .header("Cache-Control", "public, max-age=31536000, immutable")
+        .type(asset.type)
+        .send(asset.body),
+    );
+  }
+  app.post("/admin/api/telemetry-test", async (request) => {
+    requireAdminCookie(request);
+    throw new Error("Schaffa GlitchTip test error — safe to ignore");
   });
 
   app.get("/healthz", async () => ({ ok: true }));
@@ -976,6 +1051,7 @@ export function buildServer(
       publicSiteHeaders(reply);
       return reply.code(404).type("text/html; charset=utf-8").send(renderPublicNotFound());
     }
+    recordErrorTelemetry(error, request.routeOptions.url);
     if (error instanceof AppError) {
       if (
         request.headers.accept?.includes("text/html") &&
@@ -1055,6 +1131,7 @@ async function sendPage(
   }
   if (!result.html) throw new Error("Clean page content is missing.");
   if (result.page.kind === "interactive" && mode === "public") {
+    interactiveInterstitials.add(reply);
     const executionAllowed = canRunInteractivePage(result.page.id);
     publicSiteHeaders(reply);
     reply.headers({

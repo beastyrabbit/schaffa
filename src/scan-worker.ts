@@ -1,4 +1,6 @@
 import { Readable } from "node:stream";
+import { anonymousActorId } from "./auth.js";
+import { config } from "./config.js";
 import { db, type FileRow, type PageVersionRow } from "./db.js";
 import { AppError } from "./errors.js";
 import { cleanImage, withImageProcessingPermit } from "./image-cleaner.js";
@@ -10,10 +12,12 @@ import {
   removeStoredFile,
   storeUpload,
 } from "./storage.js";
+import { publishedHtmlKind, serverTelemetry } from "./telemetry.js";
 import { scanStoredUpload, scanUpload, synchronousScanDemandCount } from "./virus-scanner.js";
 
 interface PendingPage extends PageVersionRow {
   slug: string;
+  kind: string;
 }
 
 export interface ScanRunResult {
@@ -72,7 +76,7 @@ function claimPage(): PendingPage | null {
   try {
     const row = db()
       .prepare(
-        `SELECT pv.*, p.slug
+        `SELECT pv.*, p.slug, p.kind
          FROM page_versions pv
          JOIN pages p ON p.id = pv.page_id
          WHERE pv.scan_status = 'pending'
@@ -149,6 +153,14 @@ async function processPage(page: PendingPage): Promise<ScanRunResult> {
       .run(publicPath, page.id);
     await removeStoredFile(page.storage_path);
     if (updated.changes === 0) await removeStoredFile(publicPath);
+    if (!config.telemetry.umamiUrl) return { processed: true, status: "clean", type: "page" };
+    if (updated.changes > 0) {
+      serverTelemetry.send("content-published", "/api/pages", {
+        kind: publishedHtmlKind(await readStoredFile(publicPath).catch(() => Buffer.alloc(0))),
+        anonymous: page.created_by_token_id === anonymousActorId,
+        interactive: page.kind === "interactive",
+      });
+    }
     return { processed: true, status: "clean", type: "page" };
   } catch (error) {
     return handleFailure("page_versions", page.id, page.storage_path, error, "page");
@@ -194,6 +206,12 @@ async function processFile(file: FileRow): Promise<ScanRunResult> {
     committed = updated.changes > 0;
     await removeStoredFile(file.storage_path);
     if (updated.changes === 0) await removeStoredFile(publicPath);
+    if (updated.changes > 0)
+      serverTelemetry.send("content-published", "/api/files", {
+        kind: "file",
+        anonymous: false,
+        interactive: false,
+      });
     return { processed: true, status: "clean", type: "file" };
   } catch (error) {
     if (committed) throw error;
@@ -225,11 +243,13 @@ async function handleFailure(
   ) {
     await removeStoredFile(storagePath);
     rejectScan(table, id, error.message);
+    serverTelemetry.send("scan-rejected", "/api", { kind: type });
     return { processed: true, status: "rejected", type };
   }
   if (type === "file" && error instanceof AppError) {
     await removeStoredFile(storagePath);
     rejectScan(table, id, error.message);
+    serverTelemetry.send("scan-failed", "/api", { kind: type });
     return { processed: true, status: "rejected", type };
   }
   db()

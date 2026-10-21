@@ -5,6 +5,7 @@ import { db, type TokenRow, type UserRow } from "./db.js";
 import { AppError } from "./errors.js";
 import { getInstanceSettings } from "./settings.js";
 import type { ShooIdentity } from "./shoo-auth.js";
+import { serverTelemetry } from "./telemetry.js";
 
 export interface UserSummary extends UserRow {
   token_count: number;
@@ -63,6 +64,7 @@ export function createUserSession(identity: ShooIdentity): { user: UserSession; 
       )
       .run(sessionId, userId, hashSessionToken(token), `+${config.userSessionTtlHours} hours`);
     db().exec("COMMIT");
+    if (!existing) serverTelemetry.send("signup-success", "/auth/shoo");
     return {
       user: {
         id: userId,

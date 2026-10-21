@@ -12,8 +12,16 @@ export function legalLinks(language = "en"): string {
 }
 
 export function legalFooter(language = "en"): string {
-  if (!legalPagesEnabled()) return "";
-  return `<footer class="schaffa-legal-footer" data-schaffa-legal><nav aria-label="${language.startsWith("de") ? "Rechtliche Informationen" : "Legal information"}">${legalLinks(language)}</nav></footer>`;
+  const german = language.startsWith("de");
+  let settingsPath = "";
+  if (legalPagesEnabled()) settingsPath = german ? "/datenschutz" : "/privacy";
+  const settingsLabel = german ? "Cookie-Einstellungen" : "Cookie settings";
+  const settings = config.telemetry.umamiUrl
+    ? `<a href="${settingsPath}#cookie-settings" data-cc="show-preferencesModal">${settingsLabel}</a>`
+    : "";
+  if (!legalPagesEnabled() && !settings) return "";
+  const navigationLabel = german ? "Rechtliche Informationen" : "Legal information";
+  return `<footer class="schaffa-legal-footer" data-schaffa-legal><nav aria-label="${navigationLabel}">${legalLinks(language)}${settings}</nav></footer>`;
 }
 
 export const legalFooterStyles = `.schaffa-legal-footer{padding:24px;text-align:center;border-top:1px solid #cbc5b8;background:#f3f0e8;color:#20211e;font:14px/1.6 system-ui,sans-serif}.schaffa-legal-footer nav{display:flex;flex-wrap:wrap;justify-content:center;gap:12px 24px}.schaffa-legal-footer a{color:inherit;text-underline-offset:4px}.schaffa-legal-footer a:focus-visible{outline:3px solid #a43f24;outline-offset:5px}@media print{.schaffa-legal-footer{display:none}}`;
