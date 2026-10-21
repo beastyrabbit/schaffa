@@ -13,12 +13,20 @@ function emailMatchEnd(value: string, at: number): number {
 }
 
 function emailLocalStart(value: string, at: number, cursor: number): number {
-  if (value[at - 1] === '"') {
-    for (let opening = at - 2; opening >= cursor; opening--)
-      if (value[opening] === '"') return opening;
-  }
   let start = at;
-  while (start > cursor && !/[\s<(,;:]/.test(value[start - 1] || "")) start--;
+  let quoted = false;
+  while (start > cursor) {
+    const character = value[start - 1] || "";
+    if (!quoted && /[\s<(,;:]/.test(character)) break;
+    start--;
+    if (character !== '"') continue;
+    let backslashes = 0;
+    while (start > cursor && value[start - 1] === "\\") {
+      start--;
+      backslashes++;
+    }
+    if (backslashes % 2 === 0) quoted = !quoted;
+  }
   return start;
 }
 

@@ -288,6 +288,114 @@ test("client consent uses safe GET navigation and excludes account and secret pa
   }
 });
 
+test("analytics queues at most 20 events until ready and discards them on withdrawal or load failure", async () => {
+  for (const outcome of ["ready", "withdrawn", "failed", "missing"]) {
+    interface Script {
+      src: string;
+      onload(): void;
+      onerror(): void;
+    }
+    const scripts: Script[] = [];
+    const events: Array<{ name: string; data: Record<string, string | boolean> }> = [];
+    const tracker = {
+      track: (name: string, data: Record<string, string | boolean>) => {
+        events.push({ name, data: JSON.parse(JSON.stringify(data)) });
+      },
+    };
+    let accepted = false;
+    let sync = () => {};
+    const window = {
+      addEventListener() {},
+      umami: undefined as typeof tracker | undefined,
+      schaffaTelemetry: undefined as { track: typeof tracker.track } | undefined,
+      CookieConsent: {
+        acceptedCategory: () => accepted,
+        run: async (options: { onConsent(): void; onChange(): void }) => {
+          sync = options.onChange;
+          options.onConsent();
+        },
+      },
+    };
+    vm.runInNewContext(
+      readFileSync(new URL("../public/scripts/telemetry.js", import.meta.url), "utf8"),
+      {
+        window,
+        setTimeout,
+        location: { hostname: "schaffa.dev", pathname: "/account", replace() {} },
+        document: {
+          readyState: "complete",
+          addEventListener() {},
+          querySelector: (selector: string) =>
+            selector.startsWith("meta")
+              ? {
+                  getAttribute: () =>
+                    JSON.stringify({
+                      baseHost: "schaffa.dev",
+                      umamiUrl: "https://metrics.invalid",
+                      consentJs: "/consent.js",
+                    }),
+                }
+              : null,
+          createElement: () => ({ setAttribute() {} }),
+          head: {
+            append: (script: Script) => {
+              if (script.src.endsWith("/script.js")) scripts.push(script);
+              else script.onload();
+            },
+          },
+        },
+      },
+    );
+    await delay(0);
+    const telemetry = window.schaffaTelemetry;
+    assert.ok(telemetry);
+    telemetry.track("before-consent", {});
+    accepted = true;
+    sync();
+    for (let index = 0; index < 25; index++) telemetry.track(`event-${index}`, { pending: true });
+    assert.deepEqual([...events], [], "no delivery before the script loads");
+    const script = scripts[0];
+    assert.ok(script);
+    if (outcome === "ready") {
+      window.umami = tracker;
+      script.onload();
+      await delay(0);
+      assert.deepEqual(
+        events,
+        Array.from({ length: 20 }, (_, index) => ({
+          name: `event-${index}`,
+          data: { pending: true },
+        })),
+      );
+      telemetry.track("after-ready", {});
+      assert.equal(events.at(-1)?.name, "after-ready");
+      continue;
+    }
+    if (outcome === "failed") script.onerror();
+    else if (outcome === "missing") script.onload();
+    else {
+      accepted = false;
+      sync();
+      window.umami = tracker;
+      script.onload();
+    }
+    await delay(0);
+    telemetry.track("after-stop", {});
+    assert.deepEqual([...events], []);
+    accepted = false;
+    sync();
+    window.umami = undefined;
+    accepted = true;
+    sync();
+    window.umami = tracker;
+    scripts.at(-1)?.onload();
+    await delay(0);
+    assert.deepEqual([...events], [], "discarded events never return on a subsequent load");
+    telemetry.track("fresh", {});
+    assert.equal(events.at(-1)?.name, "fresh");
+  }
+});
+
 test("browser analytics uses server route templates and a fixed path for unknown and error pages", async () => {
   const { telemetryHead } = await import("../src/telemetry-assets.js");
   config.telemetry = {
@@ -658,6 +766,11 @@ test("scrubbers preserve email and path redaction and handle long adversarial in
   for (const [value, expected] of [
     ["first.last+tag@sub.example.co.uk", "[email]"],
     ['"john doe"@example.com', "[email]"],
+    [String.raw`"john\"doe"@example.com`, "[email]"],
+    [String.raw`"john\" doe"@example.com`, "[email]"],
+    [String.raw`"john\\"@example.com`, "[email]"],
+    [String.raw`prefix "john\" doe"@example.com suffix`, "prefix [email] suffix"],
+    ['john doe"@example.com', "[email]"],
     ['"first name"@example.com "second name"@example.org', "[email] [email]"],
     ["e\u0301@example.com", "[email]"],
     ["o'connor@example.com", "[email]"],
@@ -690,6 +803,9 @@ test("scrubbers preserve email and path redaction and handle long adversarial in
     assert.equal(scrubText(adversarial), adversarial);
     assert.equal(browser.scrub(adversarial), adversarial);
   }
+  const quotedAdversarial = ['"', String.raw`\" `.repeat(25_000), 'end"@example.com'].join("");
+  assert.equal(scrubText(quotedAdversarial), "[email]");
+  assert.equal(browser.scrub(quotedAdversarial), "[email]");
   assert.ok(performance.now() - started < 1000, "both scrubbers finish within one second");
 });
 

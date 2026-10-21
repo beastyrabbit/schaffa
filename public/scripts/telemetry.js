@@ -19,12 +19,20 @@
   }
   /** @param {string} value @param {number} at @param {number} cursor */
   function emailLocalStart(value, at, cursor) {
-    if (value[at - 1] === '"') {
-      for (let opening = at - 2; opening >= cursor; opening--)
-        if (value[opening] === '"') return opening;
-    }
     let start = at;
-    while (start > cursor && !/[\s<(,;:]/.test(value[start - 1] || "")) start--;
+    let quoted = false;
+    while (start > cursor) {
+      const character = value[start - 1] || "";
+      if (!quoted && /[\s<(,;:]/.test(character)) break;
+      start--;
+      if (character !== '"') continue;
+      let backslashes = 0;
+      while (start > cursor && value[start - 1] === "\\") {
+        start--;
+        backslashes++;
+      }
+      if (backslashes % 2 === 0) quoted = !quoted;
+    }
     return start;
   }
   // Scan each side of an @ once rather than retrying an email regex at every character.
@@ -98,11 +106,17 @@
   };
   /** @type {Error[]} */
   const queue = [];
+  /** @type {Array<[string, Record<string, string | boolean>]>} */
+  const analyticsQueue = [];
   let ready = false;
   let analytics = false;
+  let analyticsLoading = false;
   /** @param {string} name @param {Record<string, string | boolean>} [data] */
   const track = (name, data = {}) => {
-    if (analytics && !admin) window.umami?.track(name, data);
+    if (!analytics || admin) return;
+    if (window.umami) window.umami.track(name, data);
+    else if (analyticsLoading && analyticsQueue.length < 20)
+      analyticsQueue.push([name, { ...data }]);
   };
   /** @param {unknown} cause */
   const report = (cause) => {
@@ -201,6 +215,7 @@
   const startAnalytics = () => {
     if (analytics || admin || !config.umamiUrl) return;
     analytics = true;
+    analyticsLoading = true;
     window.schaffaUmamiBeforeSend = (_type, payload) => {
       if (!analytics) return null;
       // Referrers, document titles and arbitrary element properties can contain private data.
@@ -216,6 +231,14 @@
       "data-do-not-track": "true",
     })
       .then(() => {
+        analyticsLoading = false;
+        if (!analytics || !window.umami) {
+          analyticsQueue.length = 0;
+          return;
+        }
+        analyticsQueue.splice(0).forEach(([name, data]) => {
+          track(name, data);
+        });
         if (document.querySelector(".error:not([hidden])")) track("error-shown");
         // Recorder metadata includes full URLs. Never record a secret-bearing URL.
         if (
@@ -231,7 +254,10 @@
             "data-website-id": config.umamiWebsiteId,
           });
       })
-      .catch(() => {});
+      .catch(() => {
+        analyticsLoading = false;
+        analyticsQueue.length = 0;
+      });
   };
   const consent = () => {
     if (admin || !config.umamiUrl) return;
@@ -243,6 +269,8 @@
           if (cc.acceptedCategory("analytics")) startAnalytics();
           else if (analytics) {
             analytics = false;
+            analyticsLoading = false;
+            analyticsQueue.length = 0;
             // A full document teardown removes recorder observers, timers and history hooks.
             // Suppress its unload flush before tearing down the document.
             delete window.umami;
