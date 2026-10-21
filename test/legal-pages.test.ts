@@ -39,7 +39,7 @@ void test("all legal routes render complete bilingual HTML without authenticatio
     const counterpart = counterparts[route];
     assert.ok(response.body.includes(`href="${counterpart}" lang="${german ? "en" : "de"}"`));
     if (route === "/privacy" || route === "/datenschutz") {
-      assertPrivacyDraft(response.body, german);
+      assertPrivacyPolicy(response.body, german);
     }
   }
   const wrongHost = await app.inject({
@@ -50,57 +50,53 @@ void test("all legal routes render complete bilingual HTML without authenticatio
   assert.equal(wrongHost.statusCode, 404);
 });
 
-function assertPrivacyDraft(html: string, german: boolean): void {
-  assert.deepEqual(html.match(/TODO\(legal-[^)]+\)/g), ["TODO(legal-shoo)"]);
+function assertPrivacyPolicy(html: string, german: boolean): void {
+  assert.doesNotMatch(html, /TODO|Hetzner|Storage Box|offsite/i);
   for (const text of [
-    german ? "nach sieben Tagen" : "after seven days",
-    german ? "5.000" : "5,000",
-    "10 MiB",
-    "https://shoo.dev/shoo.js",
     "support@ping.gg",
-    "shoo_session",
-    "shoo_identity",
-    "shoo_pkce",
-    "shoo_return_to",
+    'href="https://shoo.dev/privacy"',
+    'href="https://policies.google.com/privacy?hl=',
     "Google Ireland Limited",
+    "ClamGate",
     german ? "Art. 28 DSGVO" : "Art. 28 GDPR",
-    german ? "spätestens etwa drei Monaten" : "at most about three months",
-    german ? "24 Stunden nach Abschluss" : "24 hours after completion",
-    german ? "nach 30 Tagen bereinigt" : "pruned after 30 days",
-    german ? "keine automatische Löschfrist" : "no automatic deletion period",
-    german ? "aktiven Sperre" : "active block",
-    german ? "unter /account, 7 Tage" : "at /account, 7 days",
-    german ? "siehe Abschnitt 6" : "see section 6",
-    german ? "Der Eintrag bleibt gespeichert" : "The entry remains stored",
-    german ? "Die Speicherdauer legt Shoo fest" : "Shoo determines the retention period",
+    german ? "in der Regel sieben Tage" : "generally for seven days",
+    german ? "Netzwerkprotokolle für 30 Tage" : "network logs for 30 days",
+    german ? "Anmeldeprotokolle für 90 Tage" : "authentication logs for 90 days",
+    german ? "Kurzlebige Anwendungs-Containerlogs" : "Short-lived application container logs",
+    german ? "Größenrotation" : "size-based rotation",
+    german
+      ? "bis zur Löschung, längstens bis zu 10 Jahre"
+      : "until deleted, at most up to 10 years",
+    german ? "Links sind kein Zugriffsschutz" : "links are not access protection",
+    german ? "§ 25 Abs. 2 Nr. 2 TDDDG" : "Section 25(2) no. 2 TDDDG",
     ...(german
       ? [
-          "Seiten und Dateien können im Konto, mit dem zugehörigen Token über CLI/API oder durch den Administrator gelöscht werden.",
-          "Einzelne Seitenversionen können im Konto oder durch den Administrator gelöscht werden.",
-          "Die Löschung im Konto ist auf Seiten und Dateien beschränkt, die einem Token dieses Kontos gehören.",
-          "Guides können mit dem zugehörigen Token über CLI/API oder durch den Administrator gelöscht werden.",
+          "Einzelne Seitenversionen können nur im Konto oder durch den Administrator gelöscht werden.",
+          "Guides mit dem zugehörigen Token über CLI/API.",
+          "löscht aber keine veröffentlichten Inhalte.",
+          "Anonyme Seiten laufen nach kurzer Zeit automatisch ab",
+          "Das Benutzerkonto in Pocket-ID und Pangolin besteht, solange der Zugang eingeräumt ist, und wird auf Anfrage oder nach Entzug des Zugangs gelöscht. Anmeldeprotokolle werden nach 90 Tagen gelöscht.",
         ]
       : [
-          "Pages and files can be deleted through the account, by the owning token through the CLI/API, or by the administrator.",
-          "Individual page versions can be deleted through the account or by the administrator.",
-          "Deletion through the account is limited to pages and files owned by one of that account's tokens.",
-          "Guides can be deleted by their owning token through the CLI/API or by the administrator.",
+          "Individual page versions can only be deleted through the account or by the administrator.",
+          "guides with the owning token through the CLI/API.",
+          "but does not delete published content.",
+          "Anonymous pages expire automatically after a short time",
+          "The user account in Pocket-ID and Pangolin exists for as long as access is granted and is deleted on request or after access is revoked. Authentication logs are deleted after 90 days.",
         ]),
   ]) {
     assert.ok(html.includes(text), `Privacy disclosure must include ${text}`);
   }
-  if (german) {
-    assert.ok(
-      html.includes(
-        "Das Benutzerkonto in Pocket-ID und Pangolin besteht, solange der Zugang eingeräumt ist, und wird auf Anfrage oder nach Entzug des Zugangs gelöscht. Anmeldeprotokolle werden nach 90 Tagen gelöscht. Sicherungskopien werden nach spätestens drei Monaten überschrieben.",
-      ),
-    );
-  }
-  assert.doesNotMatch(html, /Umami|GlitchTip/);
-  const withoutTodo = html.replace(/<p>TODO\(legal-shoo\):[\s\S]*?<\/p>/, "");
+  const backupSentence = german
+    ? "Zur Datensicherung werden regelmäßig Sicherungskopien innerhalb der eigenen Infrastruktur erstellt; sie werden nach Ablauf ihrer Aufbewahrungszeit überschrieben."
+    : "To back up data, backups are regularly created within the controller's own infrastructure; they are overwritten after their retention period has elapsed.";
+  assert.equal(html.split(backupSentence).length - 1, 1);
+  const hosting = /<section id="privacy-3"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+  assert.ok(hosting.includes(backupSentence));
+  assert.doesNotMatch(html, /Longhorn|Velero|Umami|GlitchTip/);
   assert.doesNotMatch(
-    withoutTodo,
-    /geprüft|verifiziert|beobachtet|steht aus|verified|observed|checked|outstanding/,
+    html,
+    /geprüft|verifiziert|beobachtet|steht aus|verified|observed|checked|outstanding/i,
   );
   const headings = [...html.matchAll(/<h2[^>]*>(\d+)\./g)].map((match) => Number(match[1]));
   assert.deepEqual(
@@ -220,79 +216,6 @@ void test("self-hosted instances hide legal routes and every generated footer", 
     renderScanStatusPage({ status: "pending", message: null }),
     /data-schaffa-legal/,
   );
-});
-
-void test("privacy disclosures follow runtime configuration in both languages", async () => {
-  const original = {
-    userSessionTtlHours: config.userSessionTtlHours,
-    anonymousPageTtlSeconds: config.anonymousPageTtlSeconds,
-    anonymousPageRetentionDays: config.anonymousPageRetentionDays,
-    maxPageVersions: config.maxPageVersions,
-  };
-  try {
-    for (const [values, de, en] of [
-      [
-        [168, 3600, 30, 25],
-        ["7 Tage", "1 Stunde", "30 Tagen", "25 Versionen"],
-        ["7 days", "1 hour", "30 days", "25 versions"],
-      ],
-      [
-        [1, 300, 1, 1],
-        ["1 Stunde", "5 Minuten", "einem Tag", "1 Version"],
-        ["1 hour", "5 minutes", "1 day", "1 version"],
-      ],
-      [
-        [25, 7200, 2, 2],
-        ["25 Stunden", "2 Stunden", "2 Tagen", "2 Versionen"],
-        ["25 hours", "2 hours", "2 days", "2 versions"],
-      ],
-      [
-        [48, 86400, 365, 1000],
-        ["2 Tage", "1 Tag", "365 Tagen", "1.000 Versionen"],
-        ["2 days", "1 day", "365 days", "1,000 versions"],
-      ],
-      [
-        [720, 301, 1, 1],
-        ["30 Tage", "301 Sekunden", "einem Tag", "1 Version"],
-        ["30 days", "301 seconds", "1 day", "1 version"],
-      ],
-    ] as const) {
-      [
-        config.userSessionTtlHours,
-        config.anonymousPageTtlSeconds,
-        config.anonymousPageRetentionDays,
-        config.maxPageVersions,
-      ] = values;
-      for (const [route, expected] of [
-        ["/datenschutz", de],
-        ["/privacy", en],
-      ] as const) {
-        const response = await app.inject({ method: "GET", url: route, headers: host });
-        assert.equal(response.statusCode, 200);
-        const [session, availability, retention, versions] = expected;
-        const snippets =
-          route === "/datenschutz"
-            ? [
-                `Eine Kontositzung ist ${session} gültig;`,
-                `unter /account, ${session}.</li>`,
-                `Anonyme HTML-Seiten sind ${availability} öffentlich erreichbar.`,
-                `nach ${retention} beim nächsten`,
-                `HTML-Seiten behalten bis zu ${versions},`,
-              ]
-            : [
-                `An account session is valid for ${session};`,
-                `at /account, ${session}.</li>`,
-                `Anonymous HTML pages are publicly available for ${availability}.`,
-                `after ${retention} at the next`,
-                `HTML pages retain up to ${versions},`,
-              ];
-        for (const snippet of snippets)
-          assert.ok(response.body.includes(snippet), `${route}: ${snippet}`);
-      }
-    }
-  } finally {
-    Object.assign(config, original);
-  }
 });
 
 function assertFooter(html: string, german: boolean): void {
