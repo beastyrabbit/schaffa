@@ -105,8 +105,6 @@ function assertPrivacyPolicy(html: string, german: boolean): void {
         "Art. 6 Abs. 1 lit. a DSGVO",
         "§ 25 Abs. 1 TDDDG",
         "Art. 6 Abs. 1 lit. f DSGVO",
-        "bis zu 10 Jahre",
-        "90 Tagen",
         "nicht auf veröffentlichten Inhalten",
         "ohne Cookies, IP-Adressen oder andere personenbezogene Daten",
         "Tokens, E-Mail-Adressen und URL-Parameter werden entfernt",
@@ -120,13 +118,19 @@ function assertPrivacyPolicy(html: string, german: boolean): void {
         "Art. 6(1)(a) GDPR",
         "Section 25(1) TDDDG",
         "Art. 6(1)(f) GDPR",
-        "up to 10 years",
-        "90 days",
         "not on published content",
         "without cookies, IP addresses or other personal data",
         "Tokens, e-mail addresses and URL parameters are removed",
       ])
     assert.ok(analytics.includes(text), `Analytics disclosure must include ${text}`);
+  const retention = german
+    ? "Umami-Analysedaten werden nach 25 Monaten gelöscht, Sitzungsaufzeichnungen und Heatmaps nach 30 Tagen. GlitchTip-Fehlerberichte werden nach 90 Tagen gelöscht."
+    : "Umami analytics data is deleted after 25 months, session recordings and heatmaps after 30 days. GlitchTip error reports are deleted after 90 days.";
+  assert.ok(analytics.includes(`<p>${retention}</p>`));
+  assert.doesNotMatch(
+    analytics,
+    /10 Jahre|10 years|Löschung ist nicht eingerichtet|Automatic deletion is not configured/,
+  );
   assert.equal(html.match(/id="privacy-10"/g)?.length, 1);
   const cookies = /<section id="privacy-11"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
   for (const text of german

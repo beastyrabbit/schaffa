@@ -106,9 +106,10 @@ unset for local development and preview builds; no collection SDK then starts.
 `development`. `SENTRY_RELEASE` defaults to `schaffa@<package.json version>`;
 the release upload job uses that version, so keep the default in production.
 `GLITCHTIP_TRACES_SAMPLE_RATE` defaults to `0.1` and accepts values from 0 to 1.
-The existing bilingual privacy policy describes Umami retention as up to 10 years;
-automatic deletion is not configured. Keep GlitchTip's default event retention at
-90 days. The legal pages and controller details remain specific to schaffa.dev.
+A nightly kub-homelab job deletes Umami analytics data after 25 months, session
+replays and heatmap recordings after 30 days, and GlitchTip error events after
+90 days. The bilingual privacy policy states these periods. The legal pages and
+controller details remain specific to schaffa.dev.
 The privacy text needs human legal review before rollout.
 
 Own public UI loads Umami only after analytics consent. Normal page loads cover
