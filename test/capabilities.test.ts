@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import {
   app,
   assert,
@@ -7,6 +8,8 @@ import {
   test,
   updateSettings,
 } from "./server-fixture.js";
+
+const packageJson = createRequire(import.meta.url)("../package.json") as { version: string };
 
 test("capabilities validate tokens and reflect publishing policy without creating content", async () => {
   const check = (token?: string) =>
@@ -24,6 +27,10 @@ test("capabilities validate tokens and reflect publishing policy without creatin
   assert.equal(anonymous.statusCode, 200);
   assert.equal(anonymous.headers["cache-control"], "no-store");
   assert.equal(anonymous.json().authenticated, false);
+  // Post-deploy checks read the release from this public response; the schema version stays 1.
+  const publicResponse = anonymous.json<{ version: number; serverVersion: string }>();
+  assert.equal(publicResponse.version, 1);
+  assert.equal(publicResponse.serverVersion, packageJson.version);
   assert.deepEqual(anonymous.json().capabilities.staticHtml, { allowed: true, reason: null });
   assert.deepEqual(anonymous.json().capabilities.interactiveHtml, {
     allowed: false,

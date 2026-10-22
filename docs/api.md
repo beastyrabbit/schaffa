@@ -23,7 +23,7 @@ A first login creates a local user when signups are enabled. Users can create an
 
 `GET /api/capabilities` checks the supplied bearer token without publishing content. Invalid or revoked tokens return `401`; omitting authorization reports anonymous permissions. Authentication updates the token's last-used timestamp.
 
-The JSON response includes `version: 1`, `authenticated`, and `capabilities`. Each capability, `staticHtml`, `interactiveHtml`, `fileUploads`, and `guides`, contains `allowed` and `reason`. Allowed operations have a `null` reason. Denials use `token_required`, `upload_scope_required`, `interactive_scope_required`, `interactive_disabled`, `interactive_not_allowed`, or `writes_locked`. The response uses `Cache-Control: no-store`.
+The JSON response includes `version: 1`, `serverVersion`, `authenticated`, and `capabilities`. `version` is the response schema version; `serverVersion` is the running Schaffa release, such as `0.15.0`. Each capability, `staticHtml`, `interactiveHtml`, `fileUploads`, and `guides`, contains `allowed` and `reason`. Allowed operations have a `null` reason. Denials use `token_required`, `upload_scope_required`, `interactive_scope_required`, `interactive_disabled`, `interactive_not_allowed`, or `writes_locked`. The response uses `Cache-Control: no-store`.
 
 The CLI exposes this through `npx schaffa doctor --json`. Add `--interactive` to require interactive publishing permission. Uploads still enforce content validation, quotas, and scanning.
 

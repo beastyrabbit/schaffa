@@ -31,9 +31,10 @@ export function openApiDocument() {
                 "application/json": {
                   schema: {
                     type: "object",
-                    required: ["version", "authenticated", "capabilities"],
+                    required: ["version", "serverVersion", "authenticated", "capabilities"],
                     properties: {
                       version: { const: 1 },
+                      serverVersion: { type: "string", minLength: 1 },
                       authenticated: { type: "boolean" },
                       capabilities: {
                         type: "object",

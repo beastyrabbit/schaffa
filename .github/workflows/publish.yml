@@ -63,6 +63,28 @@ jobs:
           pnpm exec sentry-cli sourcemaps upload --release "$SENTRY_RELEASE" dist
           pnpm exec sentry-cli releases finalize "$SENTRY_RELEASE"
 
+  deploy-smoke:
+    needs: publish
+    # Flux image automation only rolls out stable releases.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Wait for the release on schaffa.dev and check public endpoints
+        env:
+          RELEASE_REF_NAME: ${{ github.ref_name }}
+          SMOKE_BASE_URL: https://schaffa.dev
+        run: node scripts/ci-smoke-deploy.mjs
+
   arc-smoke:
     if: github.event_name == 'workflow_dispatch'
     runs-on: arc-schaffa
@@ -94,6 +116,7 @@ jobs:
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
+      actions: read
       contents: write
       packages: write
       id-token: write
@@ -113,6 +136,11 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+
+      - name: Require passing main CI for the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci-require-green-main.mjs
 
       - name: Validate release version
         run: RELEASE_REF_NAME="$GITHUB_REF_NAME" RELEASE_ENV_FILE="$GITHUB_ENV" node scripts/ci-validate-release.mjs
@@ -145,15 +173,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Install video test encoder
-        run: |
-          if ! command -v ffmpeg >/dev/null; then
-            sudo apt-get update && sudo apt-get install -y ffmpeg
-          fi
-
-      - name: Run type, lint, and test checks
-        run: pnpm typecheck && pnpm lint && pnpm test
 
       - name: Scan committed content for secrets
         run: bash scripts/ci-gitleaks.sh
