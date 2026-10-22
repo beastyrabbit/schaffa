@@ -61,6 +61,7 @@ export async function requireGreenMainCi({
 
 async function newestRun({ apiUrl, repository, sha, token, fetch }) {
   const runs = [];
+  let totalCount;
   for (let page = 1; ; page += 1) {
     if (page > MAX_PAGES) throw new Error(`GitHub returned more than ${MAX_PAGES} pages of runs.`);
     const url = new URL(`${apiUrl}/repos/${repository}/actions/workflows/${WORKFLOW}/runs`);
@@ -89,8 +90,17 @@ async function newestRun({ apiUrl, repository, sha, token, fetch }) {
     ) {
       throw new Error(`GitHub returned an unexpected workflow runs response for ${url}.`);
     }
+    totalCount ??= body.total_count;
+    if (body.total_count !== totalCount) {
+      throw new Error(`GitHub returned an incomplete workflow runs response for ${url}.`);
+    }
     runs.push(...body.workflow_runs);
     if (body.workflow_runs.length < PER_PAGE) break;
+  }
+  if (runs.length !== totalCount) {
+    throw new Error(
+      `GitHub returned an incomplete workflow runs response: expected ${totalCount}, got ${runs.length}.`,
+    );
   }
   for (const run of runs) {
     if (

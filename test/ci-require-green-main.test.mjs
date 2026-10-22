@@ -30,8 +30,8 @@ function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status });
 }
 
-function page(runs) {
-  return json({ total_count: runs.length, workflow_runs: runs });
+function page(runs, total = runs.length) {
+  return json({ total_count: total, workflow_runs: runs });
 }
 
 // Replays one queued response per request and drives a fake clock.
@@ -125,6 +125,7 @@ test("API errors and unexpected responses fail closed", async () => {
     [() => json({ message: "boom" }, 500), /HTTP 500/],
     [() => new Response("<html>", { status: 200 }), /JSON/],
     [() => json({ total_count: 1 }), /unexpected workflow runs response/],
+    [() => page([run()], 2), /incomplete/],
     [() => page([null, run()]), /malformed workflow run/],
     [() => page([run({ path: undefined }), run()]), /malformed workflow run/],
     [() => page([run({ created_at: "not a date" })]), /malformed workflow run/],
@@ -150,10 +151,19 @@ test("API errors and unexpected responses fail closed", async () => {
   await assert.rejects(gate([], { sha: "abc123" }).promise, /not a full SHA/);
 });
 
+test("incomplete pages and inconsistent total counts fail closed", async () => {
+  const older = Array.from({ length: 100 }, () => run({ created_at: "2026-10-20T00:00:00Z" }));
+  for (const lastPage of [page([], 101), page([run()], 102)]) {
+    const { promise, requests } = gate([page(older, 101), lastPage]);
+    await assert.rejects(promise, /incomplete/);
+    assert.equal(requests.length, 2);
+  }
+});
+
 test("every page is read and the newest matching run decides", async () => {
   const older = Array.from({ length: 100 }, () => run({ created_at: "2026-10-20T00:00:00Z" }));
   const newerFailure = run({ conclusion: "failure", created_at: "2026-10-21T00:00:00Z" });
-  const { promise, requests } = gate([page(older), page([newerFailure])]);
+  const { promise, requests } = gate([page(older, 101), page([newerFailure], 101)]);
   await assert.rejects(promise, new RegExp(`concluded failure .*run ${newerFailure.id}`));
   assert.deepEqual(
     requests.map(({ url }) => url.searchParams.get("page")),
@@ -176,7 +186,10 @@ test("run IDs break creation-time ties and pagination fails closed after ten pag
   const failure = run({ conclusion: "failure" });
   await assert.rejects(gate([page([success, failure])]).promise, /concluded failure/);
   const responses = Array.from({ length: 10 }, () =>
-    page(Array.from({ length: 100 }, () => run())),
+    page(
+      Array.from({ length: 100 }, () => run()),
+      1001,
+    ),
   );
   const { promise, requests } = gate(responses);
   await assert.rejects(promise, /more than 10 pages/);
