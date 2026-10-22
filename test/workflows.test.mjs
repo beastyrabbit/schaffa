@@ -81,6 +81,11 @@ test("container tags are promoted only after the exact candidate passes its scan
     assert.ok(source.indexOf("bash scripts/ci-gitleaks.sh") < publish);
   }
   const githubRelease = await readFile(new URL(".github/workflows/publish.yml", root), "utf8");
+  // Nothing may be pushed until main CI has passed for the tagged commit.
+  const ciGate = githubRelease.indexOf("node scripts/ci-require-green-main.mjs");
+  assert.ok(ciGate > githubRelease.indexOf("git merge-base --is-ancestor"));
+  assert.ok(ciGate < githubRelease.indexOf("docker/build-push-action"));
+  assert.match(githubRelease, /actions: read/);
   assert.ok(
     githubRelease.indexOf("bash scripts/ci-promote-image.sh") <
       githubRelease.indexOf("pnpm publish"),

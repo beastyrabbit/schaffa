@@ -12,6 +12,13 @@ versions, including overrides. npm publishes the resulting tarball after
 a clean install, dependency audit, and entry-point/import smoke test. Plain
 `pnpm --filter schaffa pack` does not produce the supported release artifact.
 
+A version tag publishes nothing until the `Verify supported runtimes` workflow
+has passed on a push to `main` for the tagged commit; the release job waits up to
+10 minutes for that run and stops on any other result. After publishing, stable
+tags wait up to 20 minutes for `https://schaffa.dev` to report the release as
+`serverVersion` from `/api/capabilities`, then check the landing page and
+capability API.
+
 Version tags publish a Linux AMD64 image and record its immutable digest in the
 matching GitHub release:
 

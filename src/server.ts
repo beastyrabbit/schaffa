@@ -365,6 +365,7 @@ export function buildServer(
               : null;
     return {
       version: 1,
+      serverVersion: config.version,
       authenticated: Boolean(auth),
       capabilities: {
         staticHtml: permission(!auth && !settings.writesLocked ? null : uploadReason),
