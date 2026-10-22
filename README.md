@@ -169,8 +169,10 @@ Trusted users can create a separate Interactive token in their account and publi
 
 Pushes and pull requests run CI without publishing. A semantic version tag such
 as `v0.10.0` publishes the matching CLI package to npmjs.org and an immutable
-GHCR container image. Create the GitHub release with reviewed notes; the tag job
-attaches the CLI tarball, checksum, and image digest:
+GHCR container image, but only after CI on `main` has passed for the tagged
+commit. Create the GitHub release with reviewed notes; the tag job
+attaches the CLI tarball, checksum, and image digest, and stable releases then
+wait for `https://schaffa.dev` to report the new version:
 
 ```sh
 docker pull ghcr.io/beastyrabbit/schaffa:0.10.0
