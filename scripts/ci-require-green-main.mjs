@@ -103,23 +103,7 @@ async function newestRun({ apiUrl, repository, sha, token, fetch }) {
     );
   }
   for (const run of runs) {
-    if (
-      !run ||
-      typeof run.path !== "string" ||
-      typeof run.event !== "string" ||
-      typeof run.head_branch !== "string" ||
-      typeof run.head_sha !== "string" ||
-      !Number.isSafeInteger(run.id) ||
-      run.id < 1 ||
-      typeof run.created_at !== "string" ||
-      Number.isNaN(Date.parse(run.created_at)) ||
-      !Number.isSafeInteger(run.run_attempt) ||
-      run.run_attempt < 1 ||
-      typeof run.html_url !== "string" ||
-      !URL.canParse(run.html_url) ||
-      typeof run.status !== "string" ||
-      (run.status === "completed" && typeof run.conclusion !== "string")
-    ) {
+    if (!isWellFormedRun(run)) {
       throw new Error(`GitHub returned a malformed workflow run: ${JSON.stringify(run?.id)}.`);
     }
   }
@@ -132,9 +116,29 @@ async function newestRun({ apiUrl, repository, sha, token, fetch }) {
       run.head_sha === sha,
   );
   // Never filter on success: a newer failing run must win over an older pass.
-  return matching.sort(
+  return matching.toSorted(
     (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id,
   )[0];
+}
+
+function isWellFormedRun(run) {
+  return Boolean(
+    run &&
+      typeof run.path === "string" &&
+      typeof run.event === "string" &&
+      typeof run.head_branch === "string" &&
+      typeof run.head_sha === "string" &&
+      Number.isSafeInteger(run.id) &&
+      run.id >= 1 &&
+      typeof run.created_at === "string" &&
+      !Number.isNaN(Date.parse(run.created_at)) &&
+      Number.isSafeInteger(run.run_attempt) &&
+      run.run_attempt >= 1 &&
+      typeof run.html_url === "string" &&
+      URL.canParse(run.html_url) &&
+      typeof run.status === "string" &&
+      (run.status !== "completed" || typeof run.conclusion === "string"),
+  );
 }
 
 function describe(run) {
@@ -142,8 +146,10 @@ function describe(run) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
-  main().catch((error) => {
+  try {
+    await main();
+  } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
-  });
+  }
 }

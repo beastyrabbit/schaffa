@@ -3,7 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 const VERSION =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;
 
 async function main() {
   const tag = process.env.RELEASE_REF_NAME;
@@ -52,7 +52,11 @@ export async function smokeDeploy({
     await sleep(Math.min(intervalMs, deadline - now()));
   }
   log(`${baseUrl} runs ${expectedVersion}; checking public endpoints.`);
+  await checkPublicEndpoints({ baseUrl, expectedVersion, fetch });
+  log(`Release ${expectedVersion} is live and healthy on ${baseUrl}.`);
+}
 
+async function checkPublicEndpoints({ baseUrl, expectedVersion, fetch }) {
   const landing = await get(fetch, new URL("/", baseUrl));
   if (landing.status !== 200) throw new Error(`Landing page returned HTTP ${landing.status}.`);
   if (!/<a class="wordmark" href="\/">Schaffa<\/a>/.test(await landing.text())) {
@@ -69,7 +73,6 @@ export async function smokeDeploy({
   ) {
     throw new Error(`Capabilities returned an unexpected body: ${JSON.stringify(capabilities)}.`);
   }
-  log(`Release ${expectedVersion} is live and healthy on ${baseUrl}.`);
 }
 
 // Rollouts briefly return gateway errors, so only a well-formed 200 that
@@ -112,7 +115,16 @@ function get(fetch, url) {
 function parseVersion(value) {
   const match = VERSION.exec(value);
   if (!match || match[0] !== value) return null;
+  if (match[4]?.split(".").every(isValidPrereleaseIdentifier) === false) return null;
+  if (match[5]?.split(".").some((identifier) => !identifier)) return null;
   return { core: match.slice(1, 4).map(BigInt), prerelease: Boolean(match[4]) };
+}
+
+function isValidPrereleaseIdentifier(identifier) {
+  return (
+    identifier.length > 0 &&
+    (!/^\d+$/.test(identifier) || identifier.length === 1 || !identifier.startsWith("0"))
+  );
 }
 
 // The expected side is always stable, so a prerelease of the same core is older.
@@ -124,8 +136,10 @@ function compareVersions(a, b) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
-  main().catch((error) => {
+  try {
+    await main();
+  } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
-  });
+  }
 }

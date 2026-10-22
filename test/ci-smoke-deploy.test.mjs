@@ -157,3 +157,35 @@ test("only stable release tags can be smoke tested", async () => {
     /RELEASE_REF_NAME must be a v\* release tag/,
   );
 });
+
+test("version parsing rejects empty prerelease and build identifiers", async () => {
+  for (const version of [
+    "0.16.0-",
+    "0.16.0-.rc",
+    "0.16.0-rc.",
+    "0.16.0+",
+    "0.16.0+.build",
+    "0.16.0+build.",
+    "0.16.0+build..1",
+    "0.16.0-rc.1+build..1",
+  ]) {
+    const { run, requests } = site([() => json(capabilities(version))]);
+    await assert.rejects(run(), /malformed serverVersion/);
+    assert.equal(requests.length, 1);
+    await assert.rejects(
+      site([]).run({ expectedVersion: version }),
+      /not a stable release version/,
+    );
+  }
+});
+
+test("version parsing accepts zero and alphanumeric prereleases and numeric build identifiers", async () => {
+  const version = "0.16.0+01.build-1";
+  const { run } = site([
+    () => json(capabilities("0.16.0-0")),
+    () => json(capabilities("0.16.0-01a")),
+    () => json(capabilities("0.16.0-rc-1.0+01.build")),
+    () => json(capabilities(version)),
+  ]);
+  await run({ expectedVersion: version });
+});
