@@ -12,7 +12,12 @@ import {
   removeStoredFile,
   storeUpload,
 } from "./storage.js";
-import { publishedHtmlKind, serverTelemetry } from "./telemetry.js";
+import {
+  publishedFileFormat,
+  publishedHtmlKind,
+  publisherOwner,
+  serverTelemetry,
+} from "./telemetry.js";
 import { scanStoredUpload, scanUpload, synchronousScanDemandCount } from "./virus-scanner.js";
 
 interface PendingPage extends PageVersionRow {
@@ -159,6 +164,7 @@ async function processPage(page: PendingPage): Promise<ScanRunResult> {
         kind: publishedHtmlKind(await readStoredFile(publicPath).catch(() => Buffer.alloc(0))),
         anonymous: page.created_by_token_id === anonymousActorId,
         interactive: page.kind === "interactive",
+        owner: publisherOwner(page.created_by_token_id),
       });
     }
     return { processed: true, status: "clean", type: "page" };
@@ -211,6 +217,8 @@ async function processFile(file: FileRow): Promise<ScanRunResult> {
         kind: "file",
         anonymous: false,
         interactive: false,
+        format: publishedFileFormat(file.media_type),
+        owner: publisherOwner(file.created_by_token_id),
       });
     return { processed: true, status: "clean", type: "file" };
   } catch (error) {

@@ -12,6 +12,7 @@ import {
   createToken,
   db,
   finishPendingScans,
+  multipart,
   processNextPendingScan,
   publishHtml,
   queueHtmlWithToken,
@@ -963,7 +964,10 @@ test("content events classify presentations, skip HEAD/status/errors, and never 
   );
   assert.ok(
     events.some(
-      (event) => event.name === "content-published" && event.data.kind === "presentation",
+      (event) =>
+        event.name === "content-published" &&
+        event.data.kind === "presentation" &&
+        event.data.owner === "operator",
     ),
   );
   events.length = 0;
@@ -1034,6 +1038,51 @@ test("content views exclude guide exports and interactive warnings, counting the
     200,
   );
   assert.deepEqual(events, ["/p/telemetry-interactive/run"]);
+});
+
+test("file publications report a bounded format and owner category without identifiers", {}, async (t) => {
+  const { createUserSession } = await import("../src/users.js");
+  const { publishedFileFormat } = await import("../src/telemetry.js");
+  assert.deepEqual(
+    [
+      "image/png",
+      "video/mp4",
+      "application/pdf",
+      "text/plain; charset=utf-8",
+      "application/json",
+      "application/zip",
+      "application/octet-stream",
+    ].map(publishedFileFormat),
+    ["image", "video", "pdf", "text", "text", "archive", "other"],
+  );
+  config.telemetry = {
+    ...config.telemetry,
+    umamiUrl: "https://metrics.invalid",
+    umamiWebsiteId: "fixture",
+  };
+  const events: Array<{ name: string; data: Record<string, string | boolean> }> = [];
+  t.mock.method(serverTelemetry, "send", (name: string, _url: string, data = {}) =>
+    events.push({ name, data }),
+  );
+  const owner = createUserSession({ subject: "telemetry-file-owner" }).user;
+  const token = createToken("telemetry file owner", ["upload"], owner.id);
+  const body = multipart("file", "notes.txt", "text/plain", "plain notes");
+  const upload = await app.inject({
+    method: "POST",
+    url: "/api/files",
+    headers: {
+      host: "schaffa.dev",
+      authorization: `Bearer ${token.token}`,
+      "content-type": body.contentType,
+    },
+    payload: body.payload,
+  });
+  assert.equal(upload.statusCode, 202);
+  await finishPendingScans();
+  assert.deepEqual(
+    events.filter((event) => event.name === "content-published").map((event) => event.data),
+    [{ kind: "file", anonymous: false, interactive: false, format: "text", owner: "user" }],
+  );
 });
 
 test("page scan publication skips telemetry work when Umami is disabled", {}, async (t) => {
