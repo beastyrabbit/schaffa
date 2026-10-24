@@ -1,6 +1,8 @@
 import { debuglog } from "node:util";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { anonymousActorId } from "./auth.js";
 import { config } from "./config.js";
+import { db } from "./db.js";
 import { Sentry } from "./instrumentation.js";
 import { shouldReportServerError } from "./telemetry-scrub.js";
 
@@ -11,6 +13,24 @@ export function captureBackgroundError(error: unknown): void {
 // Marp's bare output uses this marker; no user-controlled metadata is sent.
 export function publishedHtmlKind(html: string | Buffer): "page" | "presentation" {
   return html.includes("data-marpit-svg") ? "presentation" : "page";
+}
+
+// A bounded category, never an identifier: admin-issued tokens have no account.
+export function publisherOwner(tokenId: string): "anonymous" | "operator" | "user" {
+  if (tokenId === anonymousActorId) return "anonymous";
+  const token = db().prepare("SELECT user_id FROM tokens WHERE id = ?").get(tokenId) as
+    | { user_id: string | null }
+    | undefined;
+  return token?.user_id ? "user" : "operator";
+}
+
+export function publishedFileFormat(mediaType: string): string {
+  const [type = "", subtype = ""] = mediaType.toLowerCase().replace(/;.*/, "").trim().split("/");
+  if (["image", "video", "audio"].includes(type)) return type;
+  if (subtype === "pdf") return "pdf";
+  if (type === "text" || subtype === "json") return "text";
+  if (/zip|tar|7z|bzip|xz|rar/.test(subtype)) return "archive";
+  return "other";
 }
 
 // Honest application attribution, with a product/version prefix accepted by isbot.
@@ -111,12 +131,18 @@ function recordApiAction(request: FastifyRequest) {
     (request.method === "DELETE" && /^\/api\/(pages|files|guides)\/:\w+$/.test(route)) ||
     /\/(pages|files|guides)\/:\w+(?:\/versions\/:version)?\/delete$/.test(route);
   if (deleted) serverTelemetry.send("content-deleted", "/api", { kind: deletedContentKind(route) });
-  if (route === "/api/guides/:slug/finish")
+  if (route === "/api/guides/:slug/finish" && config.telemetry.umamiUrl) {
+    const { slug } = request.params as { slug: string };
+    const guide = db().prepare("SELECT owner_token_id FROM guides WHERE slug = ?").get(slug) as
+      | { owner_token_id: string }
+      | undefined;
     serverTelemetry.send("content-published", "/api/guides", {
       kind: "guide",
       anonymous: false,
       interactive: false,
+      owner: guide ? publisherOwner(guide.owner_token_id) : "operator",
     });
+  }
 }
 
 export function recordResponseTelemetry(

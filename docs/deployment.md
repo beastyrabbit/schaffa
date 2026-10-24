@@ -144,6 +144,9 @@ status endpoints and obvious bots do not. Published presentations use the same
 static HTML transport as pages and are classified by Marp's `data-marpit-svg`
 marker. Server events contain public route paths and
 bounded categorical properties only, with no visitor headers or identifiers.
+`content-published` adds `owner` (`operator` for admin-issued tokens without an
+account, `user` for account tokens, `anonymous`) and, for files, `format`
+(`image`, `video`, `audio`, `pdf`, `text`, `archive` or `other`).
 The fixed User-Agent is `Schaffa/1.0 (aggregate publication metrics)`. Upstream
 Umami's `/api/send` uses `isbot` and accepts this product/version User-Agent;
 the service sees the application's egress IP, never the visitor's. The transport

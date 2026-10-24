@@ -12,6 +12,7 @@ import {
   createToken,
   db,
   finishPendingScans,
+  multipart,
   processNextPendingScan,
   publishHtml,
   queueHtmlWithToken,
@@ -963,7 +964,10 @@ test("content events classify presentations, skip HEAD/status/errors, and never 
   );
   assert.ok(
     events.some(
-      (event) => event.name === "content-published" && event.data.kind === "presentation",
+      (event) =>
+        event.name === "content-published" &&
+        event.data.kind === "presentation" &&
+        event.data.owner === "operator",
     ),
   );
   events.length = 0;
@@ -1036,7 +1040,53 @@ test("content views exclude guide exports and interactive warnings, counting the
   assert.deepEqual(events, ["/p/telemetry-interactive/run"]);
 });
 
-test("page scan publication skips telemetry work when Umami is disabled", {}, async (t) => {
+test("file publications report a bounded format and owner category without identifiers", {}, async (t) => {
+  const { createUserSession } = await import("../src/users.js");
+  const { publishedFileFormat } = await import("../src/telemetry.js");
+  assert.deepEqual(
+    [
+      "image/png",
+      "video/mp4",
+      "application/pdf",
+      "text/plain; charset=utf-8",
+      "application/json",
+      "application/zip",
+      "application/octet-stream",
+    ].map(publishedFileFormat),
+    ["image", "video", "pdf", "text", "text", "archive", "other"],
+  );
+  config.telemetry = {
+    ...config.telemetry,
+    umamiUrl: "https://metrics.invalid",
+    umamiWebsiteId: "fixture",
+  };
+  const events: Array<{ name: string; data: Record<string, string | boolean> }> = [];
+  t.mock.method(serverTelemetry, "send", (name: string, _url: string, data = {}) =>
+    events.push({ name, data }),
+  );
+  const owner = createUserSession({ subject: "telemetry-file-owner" }).user;
+  const token = createToken("telemetry file owner", ["upload"], owner.id);
+  const body = multipart("file", "notes.txt", "text/plain", "plain notes");
+  const upload = await app.inject({
+    method: "POST",
+    url: "/api/files",
+    headers: {
+      host: "schaffa.dev",
+      authorization: `Bearer ${token.token}`,
+      "content-type": body.contentType,
+    },
+    payload: body.payload,
+  });
+  assert.equal(upload.statusCode, 202);
+  await finishPendingScans();
+  assert.deepEqual(
+    events.filter((event) => event.name === "content-published").map((event) => event.data),
+    [{ kind: "file", anonymous: false, interactive: false, format: "text", owner: "user" }],
+  );
+});
+
+test("publications skip telemetry work when Umami is disabled", {}, async (t) => {
+  const { createGuide, addGuideStep } = await import("../src/guides.js");
   const events: string[] = [];
   const original = serverTelemetry.send;
   serverTelemetry.send = (name) => {
@@ -1046,6 +1096,36 @@ test("page scan publication skips telemetry work when Umami is disabled", {}, as
     serverTelemetry.send = original;
   });
   await publishHtml("telemetry-disabled-publication", "<!doctype html><title>Disabled</title>");
+  const auth = { host: "schaffa.dev", authorization: `Bearer ${bootstrapToken}` };
+  const body = multipart("file", "disabled.txt", "text/plain", "disabled");
+  const file = await app.inject({
+    method: "POST",
+    url: "/api/files",
+    headers: { ...auth, "content-type": body.contentType },
+    payload: body.payload,
+  });
+  assert.equal(file.statusCode, 202);
+  await finishPendingScans();
+  const tokenId = db()
+    .prepare("SELECT id FROM tokens WHERE scopes LIKE '%admin%' LIMIT 1")
+    .get() as {
+    id: string;
+  };
+  const guide = createGuide({ title: "Disabled telemetry guide" }, tokenId.id);
+  const edited = await addGuideStep(
+    guide.slug,
+    { title: "Step", description: "Text step", capture: false },
+    undefined,
+    tokenId.id,
+    false,
+    guide.editRevision,
+  );
+  const finished = await app.inject({
+    method: "POST",
+    url: `/api/guides/${guide.slug}/finish`,
+    headers: { ...auth, "if-match": `"${edited.editRevision}"` },
+  });
+  assert.equal(finished.statusCode, 201);
   assert.deepEqual(events, []);
 });
 
