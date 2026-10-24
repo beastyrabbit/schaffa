@@ -212,7 +212,7 @@ async function processFile(file: FileRow): Promise<ScanRunResult> {
     committed = updated.changes > 0;
     await removeStoredFile(file.storage_path);
     if (updated.changes === 0) await removeStoredFile(publicPath);
-    if (updated.changes > 0)
+    if (updated.changes > 0 && config.telemetry.umamiUrl)
       serverTelemetry.send("content-published", "/api/files", {
         kind: "file",
         anonymous: false,

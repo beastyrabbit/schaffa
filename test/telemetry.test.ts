@@ -1085,7 +1085,8 @@ test("file publications report a bounded format and owner category without ident
   );
 });
 
-test("page scan publication skips telemetry work when Umami is disabled", {}, async (t) => {
+test("publications skip telemetry work when Umami is disabled", {}, async (t) => {
+  const { createGuide, addGuideStep } = await import("../src/guides.js");
   const events: string[] = [];
   const original = serverTelemetry.send;
   serverTelemetry.send = (name) => {
@@ -1095,6 +1096,36 @@ test("page scan publication skips telemetry work when Umami is disabled", {}, as
     serverTelemetry.send = original;
   });
   await publishHtml("telemetry-disabled-publication", "<!doctype html><title>Disabled</title>");
+  const auth = { host: "schaffa.dev", authorization: `Bearer ${bootstrapToken}` };
+  const body = multipart("file", "disabled.txt", "text/plain", "disabled");
+  const file = await app.inject({
+    method: "POST",
+    url: "/api/files",
+    headers: { ...auth, "content-type": body.contentType },
+    payload: body.payload,
+  });
+  assert.equal(file.statusCode, 202);
+  await finishPendingScans();
+  const tokenId = db()
+    .prepare("SELECT id FROM tokens WHERE scopes LIKE '%admin%' LIMIT 1")
+    .get() as {
+    id: string;
+  };
+  const guide = createGuide({ title: "Disabled telemetry guide" }, tokenId.id);
+  const edited = await addGuideStep(
+    guide.slug,
+    { title: "Step", description: "Text step", capture: false },
+    undefined,
+    tokenId.id,
+    false,
+    guide.editRevision,
+  );
+  const finished = await app.inject({
+    method: "POST",
+    url: `/api/guides/${guide.slug}/finish`,
+    headers: { ...auth, "if-match": `"${edited.editRevision}"` },
+  });
+  assert.equal(finished.statusCode, 201);
   assert.deepEqual(events, []);
 });
 

@@ -131,7 +131,7 @@ function recordApiAction(request: FastifyRequest) {
     (request.method === "DELETE" && /^\/api\/(pages|files|guides)\/:\w+$/.test(route)) ||
     /\/(pages|files|guides)\/:\w+(?:\/versions\/:version)?\/delete$/.test(route);
   if (deleted) serverTelemetry.send("content-deleted", "/api", { kind: deletedContentKind(route) });
-  if (route === "/api/guides/:slug/finish") {
+  if (route === "/api/guides/:slug/finish" && config.telemetry.umamiUrl) {
     const { slug } = request.params as { slug: string };
     const guide = db().prepare("SELECT owner_token_id FROM guides WHERE slug = ?").get(slug) as
       | { owner_token_id: string }
