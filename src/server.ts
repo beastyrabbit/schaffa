@@ -119,6 +119,32 @@ const userCookie = config.cookieSecure ? "__Secure-schaffa_user" : "schaffa_user
 const scalarNonce = randomBytes(24).toString("base64");
 const publicFile = (path: string) => new URL(`../public/${path}`, import.meta.url);
 const interactiveInterstitials = new WeakSet<FastifyReply>();
+// Search engines stay allowed on publications: a robots.txt block would hide the
+// X-Robots-Tag noindex from them, and Google can then list the bare URL anyway.
+// AI-training and dataset crawlers do not reliably honor noindex, so they are blocked.
+const aiCrawlers = [
+  "GPTBot",
+  "ClaudeBot",
+  "anthropic-ai",
+  "CCBot",
+  "Google-Extended",
+  "Applebot-Extended",
+  "PerplexityBot",
+  "Bytespider",
+  "meta-externalagent",
+];
+const robotsText = `User-agent: *
+Disallow: /admin
+Disallow: /account
+
+${aiCrawlers.map((agent) => `User-agent: ${agent}`).join("\n")}
+Disallow: /p/
+Disallow: /f/
+Disallow: /g/
+Disallow: /admin
+Disallow: /account
+`;
+
 const pageCsp = [
   "default-src 'none'",
   "img-src 'self' data:",
@@ -263,6 +289,11 @@ export function buildServer(
       request.url.startsWith("/shoo/callback")
     ) {
       reply.header("Cache-Control", "no-store");
+    }
+    // Publication URLs are bearer links: anyone holding one can read it, so a search
+    // listing would leak it. The header also covers files, which cannot carry a meta tag.
+    if (/^\/(?:p|f|g|account|admin)(?:\/|$)/.test(request.url.split("?", 1)[0] || "")) {
+      reply.header("X-Robots-Tag", "noindex, nofollow, noarchive");
     }
     if (
       request.url.split("?", 1)[0] === "/api/" &&
@@ -416,6 +447,10 @@ export function buildServer(
     if (!skill) throw new AppError("Example skill not found.", 404, "not_found");
     publicTextHeaders(reply);
     return reply.type("text/markdown; charset=utf-8").send(`${skill.markdown}\n`);
+  });
+  app.get("/robots.txt", async (_request, reply) => {
+    publicTextHeaders(reply);
+    return reply.type("text/plain; charset=utf-8").send(robotsText);
   });
   for (const path of ["/llm.txt", "/llms.txt"]) {
     app.get(path, async (_request, reply) => {
