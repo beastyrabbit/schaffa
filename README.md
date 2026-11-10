@@ -44,11 +44,11 @@ Everything is served from one origin and one container on port `3000`:
 | --- | --- |
 | `https://schaffa.dev/admin` | Pangolin login, then a Schaffa admin token |
 | `https://schaffa.dev/api/*` | Direct access; writes and management require bearer tokens |
-| `https://schaffa.dev/skills`, `/skills/*/SKILL.md`, `/llm.txt`, and `/llms.txt` | Direct public access for agent examples and discovery |
+| `https://schaffa.dev/skills`, `/skills/*/SKILL.md`, `/llm.txt`, `/llms.txt`, and `/robots.txt` | Direct public access for agent examples, discovery, and crawler rules |
 | `https://schaffa.dev/p/*` and `/f/*` | Direct public access |
 | `https://schaffa.dev/impressum`, `/datenschutz`, `/legal-notice`, and `/privacy` | Direct public access on schaffa.dev only |
 
-Configure Pangolin path rules to bypass its login for the supported `/api/*`, `/skills`, `/skills/*/*`, `/llm.txt`, `/llms.txt`, `/p/*`, and `/f/*` routes, plus the exact `/impressum`, `/datenschutz`, `/legal-notice`, and `/privacy` paths on schaffa.dev only. All paths use the same hostname; Schaffa rejects application traffic sent with a different host.
+Configure Pangolin path rules to bypass its login for the supported `/api/*`, `/skills`, `/skills/*/*`, `/llm.txt`, `/llms.txt`, `/robots.txt`, `/p/*`, and `/f/*` routes, plus the exact `/impressum`, `/datenschutz`, `/legal-notice`, and `/privacy` paths on schaffa.dev only. All paths use the same hostname; Schaffa rejects application traffic sent with a different host.
 
 The built-in legal pages and footer are enabled only on schaffa.dev; self-hosters must provide their own legal notice and privacy policy.
 

@@ -205,6 +205,36 @@ test("serves one general read skill and focused writing skills", async () => {
   assert.match(llm.body, /https:\/\/schaffa\.dev\/metadata\/openapi\.json/);
 });
 
+test("keeps publications out of search indexes and AI crawlers", async () => {
+  const host = { host: "schaffa.dev" };
+  const robots = await app.inject({ method: "GET", url: "/robots.txt", headers: host });
+  assert.equal(robots.statusCode, 200);
+  assert.match(robots.headers["content-type"] || "", /^text\/plain/);
+  const [general, ai] = robots.body.split("\n\n");
+  assert.match(general || "", /^User-agent: \*\n/);
+  assert.doesNotMatch(general || "", /Disallow: \/[pfg]\//);
+  for (const agent of ["GPTBot", "ClaudeBot", "CCBot", "Google-Extended"])
+    assert.match(ai || "", new RegExp(`^User-agent: ${agent}$`, "m"));
+  for (const path of ["/p/", "/f/", "/g/"])
+    assert.match(ai || "", new RegExp(`^Disallow: ${path}$`, "m"));
+
+  assert.equal((await publishHtml("robots-page", "<h1>Private-ish</h1>")).statusCode, 202);
+  for (const url of [
+    "/p/robots-page",
+    "/p/robots-page/raw?x=1",
+    "/f/missing.png",
+    "/g/missing",
+    "/account",
+  ]) {
+    const response = await app.inject({ method: "GET", url, headers: host });
+    assert.equal(response.headers["x-robots-tag"], "noindex, nofollow, noarchive", url);
+  }
+  for (const url of ["/", "/skills", "/llms.txt", "/robots.txt"]) {
+    const response = await app.inject({ method: "GET", url, headers: host });
+    assert.equal(response.headers["x-robots-tag"], undefined, url);
+  }
+});
+
 test("keeps legacy readable slugs but rejects new caller-chosen slugs", async () => {
   const created = await publishHtml("legacy-readable-page", "<h1>Existing page</h1>");
   assert.equal(created.statusCode, 202);

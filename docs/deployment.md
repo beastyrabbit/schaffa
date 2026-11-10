@@ -58,6 +58,7 @@ Set `SCHAFFA_BASE_URL=https://schaffa.dev`. Keep Pangolin authentication enabled
 - `skills/*/*`
 - `llm.txt`
 - `llms.txt`
+- `robots.txt`
 - `p/*`
 - `p/*/*`
 - `p/*/*/*`
@@ -78,7 +79,7 @@ The `/admin` path has two deliberate gates:
 1. Pangolin authenticates the user before the admin page is reachable.
 2. Schaffa requires an admin token before it displays data or permits token management.
 
-Schaffa bearer tokens protect permanent pages, updates, files, and management operations even on bypassed API paths. A new static HTML page may be uploaded without a token; it is virus-scanned, visible for one hour, hidden afterward, and physically removed after 30 days. Interactive HTML requires the instance switch, a per-user admin grant, and a separate interactive-only token. Its run response uses an opaque CSP sandbox. CSP blocks fetch requests and external resources; the sandbox restricts storage, forms, and pop-ups. Navigation and WebRTC behavior varies by browser, so this is not complete network isolation. Public page and file URLs are readable by anyone who has the URL. Schaffa also rejects application requests arriving on a hostname other than `SCHAFFA_BASE_URL`.
+Schaffa bearer tokens protect permanent pages, updates, files, and management operations even on bypassed API paths. A new static HTML page may be uploaded without a token; it is virus-scanned, visible for one hour, hidden afterward, and physically removed after 30 days. Interactive HTML requires the instance switch, a per-user admin grant, and a separate interactive-only token. Its run response uses an opaque CSP sandbox. CSP blocks fetch requests and external resources; the sandbox restricts storage, forms, and pop-ups. Navigation and WebRTC behavior varies by browser, so this is not complete network isolation. Public page and file URLs are readable by anyone who has the URL. Pages, files, guides, `/account`, and `/admin` send `X-Robots-Tag: noindex, nofollow, noarchive`, and `/robots.txt` blocks known AI-training and dataset crawlers from publications. Search engines stay allowed to fetch publications so they see the noindex header; blocking them in `robots.txt` would let them list the bare URL. These signals only bind cooperative crawlers and do not replace keeping links private. Schaffa also rejects application requests arriving on a hostname other than `SCHAFFA_BASE_URL`.
 
 When `SCHAFFA_BASE_URL` uses HTTPS, Schaffa sends HSTS with a one-year lifetime and `includeSubDomains`. Confirm that every subdomain is HTTPS-capable before deploying that policy; TLS termination remains the reverse proxy's responsibility.
 

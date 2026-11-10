@@ -201,6 +201,7 @@ The following paths are intentionally public:
 
 - `/` — landing page
 - `/skills`, `/skills/*`, `/llm.txt`, and `/llms.txt` — agent examples and discovery
+- `/robots.txt` — crawler rules; without a bypass, crawlers see the proxy login instead
 - `/metadata/*` — stable OpenAPI metadata
 - `/api`, `/api/*`, and `/api/*/*` — bearer-protected API plus anonymous page creation
 - `/account`, `/account/*`, `/assets/*`, `/auth/*`, `/shoo/*` — user login and token dashboard
